@@ -41,6 +41,8 @@ class SwitchRange;
 
 //------------------------------InlineTree-------------------------------------
 class InlineTree : public ResourceObj {
+  friend class VMStructs;
+
   Compile*    C;                  // cache
   JVMState*   _caller_jvms;       // state of caller
   ciMethod*   _method;            // method being called by the caller_jvms
@@ -50,11 +52,12 @@ class InlineTree : public ResourceObj {
   // Always between 0.0 and 1.0.  Represents the percentage of the method's
   // total execution time used at this call site.
   const float _site_invoke_ratio;
-  const int   _site_depth_adjust;
+  const int   _max_inline_level;  // the maximum inline level for this sub-tree (may be adjusted)
   float compute_callee_frequency( int caller_bci ) const;
 
   GrowableArray<InlineTree*> _subtrees;
-  friend class Compile;
+
+  void print_impl(outputStream* stj, int indent) const PRODUCT_RETURN;
 
 protected:
   InlineTree(Compile* C,
@@ -63,26 +66,28 @@ protected:
              JVMState* caller_jvms,
              int caller_bci,
              float site_invoke_ratio,
-             int site_depth_adjust);
+             int max_inline_level);
   InlineTree *build_inline_tree_for_callee(ciMethod* callee_method,
                                            JVMState* caller_jvms,
                                            int caller_bci);
-  const char* try_to_inline(ciMethod* callee_method, ciMethod* caller_method, int caller_bci, ciCallProfile& profile, WarmCallInfo* wci_result);
+  const char* try_to_inline(ciMethod* callee_method, ciMethod* caller_method, int caller_bci, ciCallProfile& profile, WarmCallInfo* wci_result, bool& should_delay);
   const char* should_inline(ciMethod* callee_method, ciMethod* caller_method, int caller_bci, ciCallProfile& profile, WarmCallInfo* wci_result) const;
   const char* should_not_inline(ciMethod* callee_method, ciMethod* caller_method, WarmCallInfo* wci_result) const;
   void        print_inlining(ciMethod *callee_method, int caller_bci, const char *failure_msg) const;
 
   InlineTree *caller_tree()       const { return _caller_tree;  }
   InlineTree* callee_at(int bci, ciMethod* m) const;
-  int         inline_depth()      const { return stack_depth() + _site_depth_adjust; }
+  int         inline_level()      const { return stack_depth(); }
   int         stack_depth()       const { return _caller_jvms ? _caller_jvms->depth() : 0; }
 
 public:
+  static const char* check_can_parse(ciMethod* callee);
+
   static InlineTree* build_inline_tree_root();
-  static InlineTree* find_subtree_from_root(InlineTree* root, JVMState* jvms, ciMethod* callee, bool create_if_not_found = false);
+  static InlineTree* find_subtree_from_root(InlineTree* root, JVMState* jvms, ciMethod* callee);
 
   // For temporary (stack-allocated, stateless) ilts:
-  InlineTree(Compile* c, ciMethod* callee_method, JVMState* caller_jvms, float site_invoke_ratio, int site_depth_adjust);
+  InlineTree(Compile* c, ciMethod* callee_method, JVMState* caller_jvms, float site_invoke_ratio, int max_inline_level);
 
   // InlineTree enum
   enum InlineStyle {
@@ -102,7 +107,7 @@ public:
   // and may be accessed by find_subtree_from_root.
   // The call_method is the dest_method for a special or static invocation.
   // The call_method is an optimized virtual method candidate otherwise.
-  WarmCallInfo* ok_to_inline(ciMethod *call_method, JVMState* caller_jvms, ciCallProfile& profile, WarmCallInfo* wci);
+  WarmCallInfo* ok_to_inline(ciMethod *call_method, JVMState* caller_jvms, ciCallProfile& profile, WarmCallInfo* wci, bool& should_delay);
 
   // Information about inlined method
   JVMState*   caller_jvms()       const { return _caller_jvms; }
@@ -119,6 +124,8 @@ public:
   uint        count_inlines()     const { return _count_inlines; };
 #endif
   GrowableArray<InlineTree*> subtrees() { return _subtrees; }
+
+  void print_value_on(outputStream* st) const PRODUCT_RETURN;
 };
 
 
@@ -462,10 +469,6 @@ class Parse : public GraphKit {
   // Helper function to uncommon-trap or bailout for non-compilable call-sites
   bool can_not_compile_call_site(ciMethod *dest_method, ciInstanceKlass *klass);
 
-  // Helper function to identify inlining potential at call-site
-  ciMethod* optimize_inlining(ciMethod* caller, int bci, ciInstanceKlass* klass,
-                              ciMethod *dest_method, const TypeOopPtr* receiver_type);
-
   // Helper function to setup for type-profile based inlining
   bool prepare_type_profile_inline(ciInstanceKlass* prof_klass, ciMethod* prof_method);
 
@@ -520,6 +523,9 @@ class Parse : public GraphKit {
   int     repush_if_args();
   void    adjust_map_after_if(BoolTest::mask btest, Node* c, float prob,
                               Block* path, Block* other_path);
+  void    sharpen_type_after_if(BoolTest::mask btest,
+                                Node* con, const Type* tcon,
+                                Node* val, const Type* tval);
   IfNode* jump_if_fork_int(Node* a, Node* b, BoolTest::mask mask);
   Node*   jump_if_join(Node* iffalse, Node* iftrue);
   void    jump_if_true_fork(IfNode *ifNode, int dest_bci_if_true, int prof_table_index);

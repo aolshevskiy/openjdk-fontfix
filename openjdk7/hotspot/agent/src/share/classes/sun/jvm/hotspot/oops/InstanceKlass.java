@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,15 +44,13 @@ public class InstanceKlass extends Klass {
   }
 
   // field offset constants
-  public static int ACCESS_FLAGS_OFFSET;
-  public static int NAME_INDEX_OFFSET;
-  public static int SIGNATURE_INDEX_OFFSET;
-  public static int INITVAL_INDEX_OFFSET;
-  public static int LOW_OFFSET;
-  public static int HIGH_OFFSET;
-  public static int GENERIC_SIGNATURE_INDEX_OFFSET;
-  public static int NEXT_OFFSET;
-  public static int IMPLEMENTORS_LIMIT;
+  private static int ACCESS_FLAGS_OFFSET;
+  private static int NAME_INDEX_OFFSET;
+  private static int SIGNATURE_INDEX_OFFSET;
+  private static int INITVAL_INDEX_OFFSET;
+  private static int LOW_OFFSET;
+  private static int HIGH_OFFSET;
+  private static int FIELD_SLOTS;
 
   // ClassState constants
   private static int CLASS_STATE_UNPARSABLE_BY_GC;
@@ -70,14 +68,8 @@ public class InstanceKlass extends Klass {
     methodOrdering       = new OopField(type.getOopField("_method_ordering"), Oop.getHeaderSize());
     localInterfaces      = new OopField(type.getOopField("_local_interfaces"), Oop.getHeaderSize());
     transitiveInterfaces = new OopField(type.getOopField("_transitive_interfaces"), Oop.getHeaderSize());
-    nofImplementors      = new CIntField(type.getCIntegerField("_nof_implementors"), Oop.getHeaderSize());
-    IMPLEMENTORS_LIMIT   = db.lookupIntConstant("instanceKlass::implementors_limit").intValue();
-    implementors         = new OopField[IMPLEMENTORS_LIMIT];
-    for (int i = 0; i < IMPLEMENTORS_LIMIT; i++) {
-      long arrayOffset = Oop.getHeaderSize() + (i * db.getAddressSize());
-      implementors[i]    = new OopField(type.getOopField("_implementors[0]"), arrayOffset);
-    }
     fields               = new OopField(type.getOopField("_fields"), Oop.getHeaderSize());
+    javaFieldsCount      = new CIntField(type.getCIntegerField("_java_fields_count"), Oop.getHeaderSize());
     constants            = new OopField(type.getOopField("_constants"), Oop.getHeaderSize());
     classLoader          = new OopField(type.getOopField("_class_loader"), Oop.getHeaderSize());
     protectionDomain     = new OopField(type.getOopField("_protection_domain"), Oop.getHeaderSize());
@@ -100,14 +92,13 @@ public class InstanceKlass extends Klass {
     headerSize           = alignObjectOffset(Oop.getHeaderSize() + type.getSize());
 
     // read field offset constants
-    ACCESS_FLAGS_OFFSET = db.lookupIntConstant("instanceKlass::access_flags_offset").intValue();
-    NAME_INDEX_OFFSET = db.lookupIntConstant("instanceKlass::name_index_offset").intValue();
-    SIGNATURE_INDEX_OFFSET = db.lookupIntConstant("instanceKlass::signature_index_offset").intValue();
-    INITVAL_INDEX_OFFSET = db.lookupIntConstant("instanceKlass::initval_index_offset").intValue();
-    LOW_OFFSET = db.lookupIntConstant("instanceKlass::low_offset").intValue();
-    HIGH_OFFSET = db.lookupIntConstant("instanceKlass::high_offset").intValue();
-    GENERIC_SIGNATURE_INDEX_OFFSET = db.lookupIntConstant("instanceKlass::generic_signature_offset").intValue();
-    NEXT_OFFSET = db.lookupIntConstant("instanceKlass::next_offset").intValue();
+    ACCESS_FLAGS_OFFSET            = db.lookupIntConstant("FieldInfo::access_flags_offset").intValue();
+    NAME_INDEX_OFFSET              = db.lookupIntConstant("FieldInfo::name_index_offset").intValue();
+    SIGNATURE_INDEX_OFFSET         = db.lookupIntConstant("FieldInfo::signature_index_offset").intValue();
+    INITVAL_INDEX_OFFSET           = db.lookupIntConstant("FieldInfo::initval_index_offset").intValue();
+    LOW_OFFSET                     = db.lookupIntConstant("FieldInfo::low_offset").intValue();
+    HIGH_OFFSET                    = db.lookupIntConstant("FieldInfo::high_offset").intValue();
+    FIELD_SLOTS                    = db.lookupIntConstant("FieldInfo::field_slots").intValue();
     // read ClassState constants
     CLASS_STATE_UNPARSABLE_BY_GC = db.lookupIntConstant("instanceKlass::unparsable_by_gc").intValue();
     CLASS_STATE_ALLOCATED = db.lookupIntConstant("instanceKlass::allocated").intValue();
@@ -121,6 +112,13 @@ public class InstanceKlass extends Klass {
 
   InstanceKlass(OopHandle handle, ObjectHeap heap) {
     super(handle, heap);
+    if (getJavaFieldsCount() != getAllFieldsCount()) {
+      // Exercise the injected field logic
+      for (int i = getJavaFieldsCount(); i < getAllFieldsCount(); i++) {
+        getFieldName(i);
+        getFieldSignature(i);
+      }
+    }
   }
 
   private static OopField  arrayKlasses;
@@ -128,9 +126,8 @@ public class InstanceKlass extends Klass {
   private static OopField  methodOrdering;
   private static OopField  localInterfaces;
   private static OopField  transitiveInterfaces;
-  private static CIntField nofImplementors;
-  private static OopField[] implementors;
   private static OopField  fields;
+  private static CIntField javaFieldsCount;
   private static OopField  constants;
   private static OopField  classLoader;
   private static OopField  protectionDomain;
@@ -172,7 +169,7 @@ public class InstanceKlass extends Klass {
      private String value;
   }
 
-  private int  getInitStateAsInt() { return (int) initState.getValue(this); }
+  public int  getInitStateAsInt() { return (int) initState.getValue(this); }
   public ClassState getInitState() {
      int state = getInitStateAsInt();
      if (state == CLASS_STATE_UNPARSABLE_BY_GC) {
@@ -247,22 +244,105 @@ public class InstanceKlass extends Klass {
 
   public static long getHeaderSize() { return headerSize; }
 
+  public short getFieldAccessFlags(int index) {
+    return getFields().getShortAt(index * FIELD_SLOTS + ACCESS_FLAGS_OFFSET);
+  }
+
+  public short getFieldNameIndex(int index) {
+    if (index >= getJavaFieldsCount()) throw new IndexOutOfBoundsException("not a Java field;");
+    return getFields().getShortAt(index * FIELD_SLOTS + NAME_INDEX_OFFSET);
+  }
+
+  public Symbol getFieldName(int index) {
+    int nameIndex = getFields().getShortAt(index * FIELD_SLOTS + NAME_INDEX_OFFSET);
+    if (index < getJavaFieldsCount()) {
+      return getConstants().getSymbolAt(nameIndex);
+    } else {
+      return vmSymbols.symbolAt(nameIndex);
+    }
+  }
+
+  public short getFieldSignatureIndex(int index) {
+    if (index >= getJavaFieldsCount()) throw new IndexOutOfBoundsException("not a Java field;");
+    return getFields().getShortAt(index * FIELD_SLOTS + SIGNATURE_INDEX_OFFSET);
+  }
+
+  public Symbol getFieldSignature(int index) {
+    int signatureIndex = getFields().getShortAt(index * FIELD_SLOTS + SIGNATURE_INDEX_OFFSET);
+    if (index < getJavaFieldsCount()) {
+      return getConstants().getSymbolAt(signatureIndex);
+    } else {
+      return vmSymbols.symbolAt(signatureIndex);
+    }
+  }
+
+  public short getFieldGenericSignatureIndex(int index) {
+    int len = (int)getFields().getLength();
+    int allFieldsCount = getAllFieldsCount();
+    int generic_signature_slot = allFieldsCount * FIELD_SLOTS;
+    for (int i = 0; i < allFieldsCount; i++) {
+      short flags = getFieldAccessFlags(i);
+      AccessFlags access = new AccessFlags(flags);
+      if (i == index) {
+        if (access.fieldHasGenericSignature()) {
+          return getFields().getShortAt(generic_signature_slot);
+        } else {
+          return 0;
+        }
+      } else {
+        if (access.fieldHasGenericSignature()) {
+          generic_signature_slot ++;
+        }
+      }
+    }
+    return 0;
+  }
+
+  public Symbol getFieldGenericSignature(int index) {
+    short genericSignatureIndex = getFieldGenericSignatureIndex(index);
+    if (genericSignatureIndex != 0)  {
+      return getConstants().getSymbolAt(genericSignatureIndex);
+    }
+    return null;
+  }
+
+  public short getFieldInitialValueIndex(int index) {
+    if (index >= getJavaFieldsCount()) throw new IndexOutOfBoundsException("not a Java field;");
+    return getFields().getShortAt(index * FIELD_SLOTS + INITVAL_INDEX_OFFSET);
+  }
+
+  public int getFieldOffset(int index) {
+    TypeArray fields = getFields();
+    return VM.getVM().buildIntFromShorts(fields.getShortAt(index * FIELD_SLOTS + LOW_OFFSET),
+                                         fields.getShortAt(index * FIELD_SLOTS + HIGH_OFFSET));
+  }
+
   // Accessors for declared fields
   public Klass     getArrayKlasses()        { return (Klass)        arrayKlasses.getValue(this); }
   public ObjArray  getMethods()             { return (ObjArray)     methods.getValue(this); }
   public TypeArray getMethodOrdering()      { return (TypeArray)    methodOrdering.getValue(this); }
   public ObjArray  getLocalInterfaces()     { return (ObjArray)     localInterfaces.getValue(this); }
   public ObjArray  getTransitiveInterfaces() { return (ObjArray)     transitiveInterfaces.getValue(this); }
-  public long      nofImplementors()        { return                nofImplementors.getValue(this); }
-  public Klass     getImplementor()         { return (Klass)        implementors[0].getValue(this); }
-  public Klass     getImplementor(int i)    { return (Klass)        implementors[i].getValue(this); }
   public TypeArray getFields()              { return (TypeArray)    fields.getValue(this); }
+  public int       getJavaFieldsCount()     { return                (int) javaFieldsCount.getValue(this); }
+  public int       getAllFieldsCount()      {
+    int len = (int)getFields().getLength();
+    int allFieldsCount = 0;
+    for (; allFieldsCount*FIELD_SLOTS < len; allFieldsCount++) {
+      short flags = getFieldAccessFlags(allFieldsCount);
+      AccessFlags access = new AccessFlags(flags);
+      if (access.fieldHasGenericSignature()) {
+        len --;
+      }
+    }
+    return allFieldsCount;
+  }
   public ConstantPool getConstants()        { return (ConstantPool) constants.getValue(this); }
   public Oop       getClassLoader()         { return                classLoader.getValue(this); }
   public Oop       getProtectionDomain()    { return                protectionDomain.getValue(this); }
   public ObjArray  getSigners()             { return (ObjArray)     signers.getValue(this); }
   public Symbol    getSourceFileName()      { return getSymbol(sourceFileName); }
-  public Symbol    getSourceDebugExtension(){ return getSymbol(sourceDebugExtension); }
+  public String    getSourceDebugExtension(){ return                CStringUtilities.getString(sourceDebugExtension.getValue(getHandle())); }
   public TypeArray getInnerClasses()        { return (TypeArray)    innerClasses.getValue(this); }
   public long      getNonstaticFieldSize()  { return                nonstaticFieldSize.getValue(this); }
   public long      getStaticOopFieldCount() { return                staticOopFieldCount.getValue(this); }
@@ -293,6 +373,12 @@ public class InstanceKlass extends Klass {
     public static final int innerClassNextOffset = 4;
   };
 
+  public static interface EnclosingMethodAttributeOffset {
+    public static final int enclosing_method_class_index_offset = 0;
+    public static final int enclosing_method_method_index_offset = 1;
+    public static final int enclosing_method_attribute_size = 2;
+  };
+
   // refer to compute_modifier_flags in VM code.
   public long computeModifierFlags() {
     long access = getAccessFlags();
@@ -301,9 +387,14 @@ public class InstanceKlass extends Klass {
     int length = ( innerClassList == null)? 0 : (int) innerClassList.getLength();
     if (length > 0) {
        if (Assert.ASSERTS_ENABLED) {
-          Assert.that(length % InnerClassAttributeOffset.innerClassNextOffset == 0, "just checking");
+          Assert.that(length % InnerClassAttributeOffset.innerClassNextOffset == 0 ||
+                      length % InnerClassAttributeOffset.innerClassNextOffset == EnclosingMethodAttributeOffset.enclosing_method_attribute_size,
+                      "just checking");
        }
        for (int i = 0; i < length; i += InnerClassAttributeOffset.innerClassNextOffset) {
+          if (i == length - EnclosingMethodAttributeOffset.enclosing_method_attribute_size) {
+              break;
+          }
           int ioff = innerClassList.getShortAt(i +
                          InnerClassAttributeOffset.innerClassInnerClassInfoOffset);
           // 'ioff' can be zero.
@@ -353,9 +444,14 @@ public class InstanceKlass extends Klass {
     int length = ( innerClassList == null)? 0 : (int) innerClassList.getLength();
     if (length > 0) {
        if (Assert.ASSERTS_ENABLED) {
-         Assert.that(length % InnerClassAttributeOffset.innerClassNextOffset == 0, "just checking");
+         Assert.that(length % InnerClassAttributeOffset.innerClassNextOffset == 0 ||
+                     length % InnerClassAttributeOffset.innerClassNextOffset == EnclosingMethodAttributeOffset.enclosing_method_attribute_size,
+                     "just checking");
        }
        for (int i = 0; i < length; i += InnerClassAttributeOffset.innerClassNextOffset) {
+         if (i == length - EnclosingMethodAttributeOffset.enclosing_method_attribute_size) {
+             break;
+         }
          int ioff = innerClassList.getShortAt(i +
                         InnerClassAttributeOffset.innerClassInnerClassInfoOffset);
          // 'ioff' can be zero.
@@ -445,9 +541,6 @@ public class InstanceKlass extends Klass {
       visitor.doOop(methodOrdering, true);
       visitor.doOop(localInterfaces, true);
       visitor.doOop(transitiveInterfaces, true);
-      visitor.doCInt(nofImplementors, true);
-      for (int i = 0; i < IMPLEMENTORS_LIMIT; i++)
-        visitor.doOop(implementors[i], true);
       visitor.doOop(fields, true);
       visitor.doOop(constants, true);
       visitor.doOop(classLoader, true);
@@ -479,12 +572,10 @@ public class InstanceKlass extends Klass {
   }
 
   void iterateStaticFieldsInternal(OopVisitor visitor) {
-    TypeArray fields = getFields();
-    int length = (int) fields.getLength();
-    for (int index = 0; index < length; index += NEXT_OFFSET) {
-      short accessFlags    = fields.getShortAt(index + ACCESS_FLAGS_OFFSET);
-      short signatureIndex = fields.getShortAt(index + SIGNATURE_INDEX_OFFSET);
-      FieldType   type   = new FieldType(getConstants().getSymbolAt(signatureIndex));
+    int length = getJavaFieldsCount();
+    for (int index = 0; index < length; index++) {
+      short accessFlags    = getFieldAccessFlags(index);
+      FieldType   type   = new FieldType(getFieldSignature(index));
       AccessFlags access = new AccessFlags(accessFlags);
       if (access.isStatic()) {
         visitField(visitor, type, index);
@@ -496,18 +587,24 @@ public class InstanceKlass extends Klass {
     return getSuper();
   }
 
+  public static class StaticField {
+    public AccessFlags flags;
+    public Field field;
+
+    StaticField(Field field, AccessFlags flags) {
+      this.field = field;
+      this.flags = flags;
+    }
+  }
+
   public void iterateNonStaticFields(OopVisitor visitor, Oop obj) {
     if (getSuper() != null) {
       ((InstanceKlass) getSuper()).iterateNonStaticFields(visitor, obj);
     }
-    TypeArray fields = getFields();
-
-    int length = (int) fields.getLength();
-    for (int index = 0; index < length; index += NEXT_OFFSET) {
-      short accessFlags    = fields.getShortAt(index + ACCESS_FLAGS_OFFSET);
-      short signatureIndex = fields.getShortAt(index + SIGNATURE_INDEX_OFFSET);
-
-      FieldType   type   = new FieldType(getConstants().getSymbolAt(signatureIndex));
+    int length = getJavaFieldsCount();
+    for (int index = 0; index < length; index++) {
+      short accessFlags    = getFieldAccessFlags(index);
+      FieldType   type   = new FieldType(getFieldSignature(index));
       AccessFlags access = new AccessFlags(accessFlags);
       if (!access.isStatic()) {
         visitField(visitor, type, index);
@@ -517,14 +614,10 @@ public class InstanceKlass extends Klass {
 
   /** Field access by name. */
   public Field findLocalField(Symbol name, Symbol sig) {
-    TypeArray fields = getFields();
-    int n = (int) fields.getLength();
-    ConstantPool cp = getConstants();
-    for (int i = 0; i < n; i += NEXT_OFFSET) {
-      int nameIndex = fields.getShortAt(i + NAME_INDEX_OFFSET);
-      int sigIndex  = fields.getShortAt(i + SIGNATURE_INDEX_OFFSET);
-      Symbol f_name = cp.getSymbolAt(nameIndex);
-      Symbol f_sig  = cp.getSymbolAt(sigIndex);
+    int length = getJavaFieldsCount();
+    for (int i = 0; i < length; i++) {
+      Symbol f_name = getFieldName(i);
+      Symbol f_sig  = getFieldSignature(i);
       if (name.equals(f_name) && sig.equals(f_sig)) {
         return newField(i);
       }
@@ -599,8 +692,8 @@ public class InstanceKlass extends Klass {
 
   /** Get field by its index in the fields array. Only designed for
       use in a debugging system. */
-  public Field getFieldByIndex(int fieldArrayIndex) {
-    return newField(fieldArrayIndex);
+  public Field getFieldByIndex(int fieldIndex) {
+    return newField(fieldIndex);
   }
 
 
@@ -611,11 +704,9 @@ public class InstanceKlass extends Klass {
     public List getImmediateFields() {
         // A list of Fields for each field declared in this class/interface,
         // not including inherited fields.
-        TypeArray fields = getFields();
-
-        int length = (int) fields.getLength();
-        List immediateFields = new ArrayList(length / NEXT_OFFSET);
-        for (int index = 0; index < length; index += NEXT_OFFSET) {
+        int length = getJavaFieldsCount();
+        List immediateFields = new ArrayList(length);
+        for (int index = 0; index < length; index++) {
             immediateFields.add(getFieldByIndex(index));
         }
 
@@ -802,9 +893,7 @@ public class InstanceKlass extends Klass {
 
   // Creates new field from index in fields TypeArray
   private Field newField(int index) {
-    TypeArray fields = getFields();
-    short signatureIndex = fields.getShortAt(index + SIGNATURE_INDEX_OFFSET);
-    FieldType type = new FieldType(getConstants().getSymbolAt(signatureIndex));
+    FieldType type = new FieldType(getFieldSignature(index));
     if (type.isOop()) {
      if (VM.getVM().isCompressedOopsEnabled()) {
         return new NarrowOopField(this, index);

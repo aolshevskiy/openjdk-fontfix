@@ -40,7 +40,7 @@ class MemoryPool;
 class GCMemoryManager;
 class OopClosure;
 
-class MemoryManager : public CHeapObj {
+class MemoryManager : public CHeapObj<mtInternal> {
 private:
   enum {
     max_num_pools = 10
@@ -108,7 +108,7 @@ public:
   const char* name()         { return "CodeCacheManager"; }
 };
 
-class GCStatInfo : public CHeapObj {
+class GCStatInfo : public ResourceObj {
 private:
   size_t _index;
   jlong  _start_time;

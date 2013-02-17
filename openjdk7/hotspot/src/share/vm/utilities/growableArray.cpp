@@ -34,6 +34,9 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
+#endif
 #ifdef ASSERT
 void GenericGrowableArray::set_nesting() {
   if (on_stack()) {
@@ -58,7 +61,7 @@ void* GenericGrowableArray::raw_allocate(int elementSize) {
   if (on_stack()) {
     return (void*)resource_allocate_bytes(byte_size);
   } else if (on_C_heap()) {
-    return (void*)AllocateHeap(byte_size, "GrET in " __FILE__);
+    return (void*)AllocateHeap(byte_size, _memflags);
   } else {
     return _arena->Amalloc(byte_size);
   }

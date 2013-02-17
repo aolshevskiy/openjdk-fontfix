@@ -149,39 +149,68 @@ Address TemplateTable::at_bcp(int offset) {
 }
 
 
-void TemplateTable::patch_bytecode(Bytecodes::Code bc, Register Rbyte_code,
-                                   Register Rscratch,
-                                   bool load_bc_into_scratch /*=true*/) {
+void TemplateTable::patch_bytecode(Bytecodes::Code bc, Register bc_reg,
+                                   Register temp_reg, bool load_bc_into_bc_reg/*=true*/,
+                                   int byte_no) {
   // With sharing on, may need to test methodOop flag.
-  if (!RewriteBytecodes) return;
-  if (load_bc_into_scratch) __ set(bc, Rbyte_code);
-  Label patch_done;
-  if (JvmtiExport::can_post_breakpoint()) {
-    Label fast_patch;
-    __ ldub(at_bcp(0), Rscratch);
-    __ cmp(Rscratch, Bytecodes::_breakpoint);
-    __ br(Assembler::notEqual, false, Assembler::pt, fast_patch);
-    __ delayed()->nop();  // don't bother to hoist the stb here
-    // perform the quickening, slowly, in the bowels of the breakpoint table
-    __ call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::set_original_bytecode_at), Lmethod, Lbcp, Rbyte_code);
-    __ ba(false, patch_done);
-    __ delayed()->nop();
-    __ bind(fast_patch);
+  if (!RewriteBytecodes)  return;
+  Label L_patch_done;
+
+  switch (bc) {
+  case Bytecodes::_fast_aputfield:
+  case Bytecodes::_fast_bputfield:
+  case Bytecodes::_fast_cputfield:
+  case Bytecodes::_fast_dputfield:
+  case Bytecodes::_fast_fputfield:
+  case Bytecodes::_fast_iputfield:
+  case Bytecodes::_fast_lputfield:
+  case Bytecodes::_fast_sputfield:
+    {
+      // We skip bytecode quickening for putfield instructions when
+      // the put_code written to the constant pool cache is zero.
+      // This is required so that every execution of this instruction
+      // calls out to InterpreterRuntime::resolve_get_put to do
+      // additional, required work.
+      assert(byte_no == f1_byte || byte_no == f2_byte, "byte_no out of range");
+      assert(load_bc_into_bc_reg, "we use bc_reg as temp");
+      __ get_cache_and_index_and_bytecode_at_bcp(bc_reg, temp_reg, temp_reg, byte_no, 1);
+      __ set(bc, bc_reg);
+      __ cmp_and_br_short(temp_reg, 0, Assembler::equal, Assembler::pn, L_patch_done);  // don't patch
+    }
+    break;
+  default:
+    assert(byte_no == -1, "sanity");
+    if (load_bc_into_bc_reg) {
+      __ set(bc, bc_reg);
+    }
   }
+
+  if (JvmtiExport::can_post_breakpoint()) {
+    Label L_fast_patch;
+    __ ldub(at_bcp(0), temp_reg);
+    __ cmp_and_br_short(temp_reg, Bytecodes::_breakpoint, Assembler::notEqual, Assembler::pt, L_fast_patch);
+    // perform the quickening, slowly, in the bowels of the breakpoint table
+    __ call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::set_original_bytecode_at), Lmethod, Lbcp, bc_reg);
+    __ ba_short(L_patch_done);
+    __ bind(L_fast_patch);
+  }
+
 #ifdef ASSERT
   Bytecodes::Code orig_bytecode =  Bytecodes::java_code(bc);
-  Label okay;
-  __ ldub(at_bcp(0), Rscratch);
-  __ cmp(Rscratch, orig_bytecode);
-  __ br(Assembler::equal, false, Assembler::pt, okay);
-  __ delayed() ->cmp(Rscratch, Rbyte_code);
-  __ br(Assembler::equal, false, Assembler::pt, okay);
+  Label L_okay;
+  __ ldub(at_bcp(0), temp_reg);
+  __ cmp(temp_reg, orig_bytecode);
+  __ br(Assembler::equal, false, Assembler::pt, L_okay);
+  __ delayed()->cmp(temp_reg, bc_reg);
+  __ br(Assembler::equal, false, Assembler::pt, L_okay);
   __ delayed()->nop();
-  __ stop("Rewriting wrong bytecode location");
-  __ bind(okay);
+  __ stop("patching the wrong bytecode");
+  __ bind(L_okay);
 #endif
-  __ stb(Rbyte_code, at_bcp(0));
-  __ bind(patch_done);
+
+  // patch bytecode
+  __ stb(bc_reg, at_bcp(0));
+  __ bind(L_patch_done);
 }
 
 //----------------------------------------------------------------------------------------------------
@@ -266,7 +295,7 @@ void TemplateTable::sipush() {
 
 void TemplateTable::ldc(bool wide) {
   transition(vtos, vtos);
-  Label call_ldc, notInt, notString, notClass, exit;
+  Label call_ldc, notInt, isString, notString, notClass, exit;
 
   if (wide) {
     __ get_2_byte_integer_at_bcp(1, G3_scratch, O1, InterpreterMacroAssembler::Unsigned);
@@ -281,17 +310,14 @@ void TemplateTable::ldc(bool wide) {
   // get type from tags
   __ add(O2, tags_offset, O2);
   __ ldub(O2, O1, O2);
-  __ cmp(O2, JVM_CONSTANT_UnresolvedString);    // unresolved string? If so, must resolve
-  __ brx(Assembler::equal, true, Assembler::pt, call_ldc);
-  __ delayed()->nop();
+  // unresolved string? If so, must resolve
+  __ cmp_and_brx_short(O2, JVM_CONSTANT_UnresolvedString, Assembler::equal, Assembler::pt, call_ldc);
 
-  __ cmp(O2, JVM_CONSTANT_UnresolvedClass);     // unresolved class? If so, must resolve
-  __ brx(Assembler::equal, true, Assembler::pt, call_ldc);
-  __ delayed()->nop();
+  // unresolved class? If so, must resolve
+  __ cmp_and_brx_short(O2, JVM_CONSTANT_UnresolvedClass, Assembler::equal, Assembler::pt, call_ldc);
 
-  __ cmp(O2, JVM_CONSTANT_UnresolvedClassInError);     // unresolved class in error state
-  __ brx(Assembler::equal, true, Assembler::pn, call_ldc);
-  __ delayed()->nop();
+  // unresolved class in error state
+  __ cmp_and_brx_short(O2, JVM_CONSTANT_UnresolvedClassInError, Assembler::equal, Assembler::pn, call_ldc);
 
   __ cmp(O2, JVM_CONSTANT_Class);      // need to call vm to get java mirror of the class
   __ brx(Assembler::notEqual, true, Assembler::pt, notClass);
@@ -301,8 +327,7 @@ void TemplateTable::ldc(bool wide) {
   __ set(wide, O1);
   call_VM(Otos_i, CAST_FROM_FN_PTR(address, InterpreterRuntime::ldc), O1);
   __ push(atos);
-  __ ba(false, exit);
-  __ delayed()->nop();
+  __ ba_short(exit);
 
   __ bind(notClass);
  // __ add(O0, base_offset, O0);
@@ -312,18 +337,19 @@ void TemplateTable::ldc(bool wide) {
   __ delayed()->cmp(O2, JVM_CONSTANT_String);
   __ ld(O0, O1, Otos_i);
   __ push(itos);
-  __ ba(false, exit);
-  __ delayed()->nop();
+  __ ba_short(exit);
 
   __ bind(notInt);
  // __ cmp(O2, JVM_CONSTANT_String);
+  __ brx(Assembler::equal, true, Assembler::pt, isString);
+  __ delayed()->cmp(O2, JVM_CONSTANT_Object);
   __ brx(Assembler::notEqual, true, Assembler::pt, notString);
   __ delayed()->ldf(FloatRegisterImpl::S, O0, O1, Ftos_f);
+  __ bind(isString);
   __ ld_ptr(O0, O1, Otos_i);
   __ verify_oop(Otos_i);
   __ push(atos);
-  __ ba(false, exit);
-  __ delayed()->nop();
+  __ ba_short(exit);
 
   __ bind(notString);
  // __ ldf(FloatRegisterImpl::S, O0, O1, Ftos_f);
@@ -352,7 +378,7 @@ void TemplateTable::fast_aldc(bool wide) {
   Register Rcache = G3_scratch;
   Register Rscratch = G4_scratch;
 
-  resolve_cache_and_index(f1_oop, Otos_i, Rcache, Rscratch, wide ? sizeof(u2) : sizeof(u1));
+  resolve_cache_and_index(f12_oop, Otos_i, Rcache, Rscratch, wide ? sizeof(u2) : sizeof(u1));
 
   __ verify_oop(Otos_i);
 
@@ -362,9 +388,7 @@ void TemplateTable::fast_aldc(bool wide) {
   __ load_klass(Otos_i, Rcon_klass);
   AddressLiteral array_klass_addr((address)Universe::systemObjArrayKlassObj_addr());
   __ load_contents(array_klass_addr, Rarray_klass);
-  __ cmp(Rarray_klass, Rcon_klass);
-  __ brx(Assembler::notEqual, false, Assembler::pt, L_done);
-  __ delayed()->nop();
+  __ cmp_and_brx_short(Rarray_klass, Rcon_klass, Assembler::notEqual, Assembler::pt, L_done);
   __ ld(Address(Otos_i, arrayOopDesc::length_offset_in_bytes()), Rcon_klass);
   __ tst(Rcon_klass);
   __ brx(Assembler::zero, true, Assembler::pt, L_done);
@@ -394,9 +418,7 @@ void TemplateTable::ldc2_w() {
   __ sll(O1, LogBytesPerWord, O1);
   __ add(O0, O1, G3_scratch);
 
-  __ cmp(O2, JVM_CONSTANT_Double);
-  __ brx(Assembler::notEqual, false, Assembler::pt, Long);
-  __ delayed()->nop();
+  __ cmp_and_brx_short(O2, JVM_CONSTANT_Double, Assembler::notEqual, Assembler::pt, Long);
   // A double can be placed at word-aligned locations in the constant pool.
   // Check out Conversions.java for an example.
   // Also constantPoolOopDesc::header_size() is 20, which makes it very difficult
@@ -410,8 +432,7 @@ void TemplateTable::ldc2_w() {
          f->successor());
 #endif
   __ push(dtos);
-  __ ba(false, exit);
-  __ delayed()->nop();
+  __ ba_short(exit);
 
   __ bind(Long);
 #ifdef _LP64
@@ -450,9 +471,7 @@ void TemplateTable::iload() {
     // last two iloads in a pair.  Comparing against fast_iload means that
     // the next bytecode is neither an iload or a caload, and therefore
     // an iload pair.
-    __ cmp(G3_scratch, (int)Bytecodes::_iload);
-    __ br(Assembler::equal, false, Assembler::pn, done);
-    __ delayed()->nop();
+    __ cmp_and_br_short(G3_scratch, (int)Bytecodes::_iload, Assembler::equal, Assembler::pn, done);
 
     __ cmp(G3_scratch, (int)Bytecodes::_fast_iload);
     __ br(Assembler::equal, false, Assembler::pn, rewrite);
@@ -694,9 +713,7 @@ void TemplateTable::aload_0() {
     aload(0);
 
     // if _getfield then wait with rewrite
-    __ cmp(G3_scratch, (int)Bytecodes::_getfield);
-    __ br(Assembler::equal, false, Assembler::pn, done);
-    __ delayed()->nop();
+    __ cmp_and_br_short(G3_scratch, (int)Bytecodes::_getfield, Assembler::equal, Assembler::pn, done);
 
     // if _igetfield then rewrite to _fast_iaccess_0
     assert(Bytecodes::java_code(Bytecodes::_fast_iaccess_0) == Bytecodes::_aload_0, "adjust fast bytecode def");
@@ -864,15 +881,14 @@ void TemplateTable::aastore() {
   __ index_check_without_pop(O3, O2, UseCompressedOops ? 2 : LogBytesPerWord, G3_scratch, O1);
 
   // do array store check - check for NULL value first
-  __ br_null( Otos_i, false, Assembler::pn, is_null );
-  __ delayed()->nop();
+  __ br_null_short( Otos_i, Assembler::pn, is_null );
 
   __ load_klass(O3, O4); // get array klass
   __ load_klass(Otos_i, O5); // get value klass
 
   // do fast instanceof cache test
 
-  __ ld_ptr(O4,     sizeof(oopDesc) + objArrayKlass::element_klass_offset_in_bytes(),  O4);
+  __ ld_ptr(O4,     in_bytes(objArrayKlass::element_klass_offset()),  O4);
 
   assert(Otos_i == O0, "just checking");
 
@@ -896,7 +912,7 @@ void TemplateTable::aastore() {
   __ bind(store_ok);
   do_oop_store(_masm, O1, noreg, arrayOopDesc::base_offset_in_bytes(T_OBJECT), Otos_i, G3_scratch, _bs->kind(), true);
 
-  __ ba(false,done);
+  __ ba(done);
   __ delayed()->inc(Lesp, 3* Interpreter::stackElementSize); // adj sp (pops array, index and value)
 
   __ bind(is_null);
@@ -1630,16 +1646,14 @@ void TemplateTable::branch(bool is_jsr, bool is_wide) {
       if (ProfileInterpreter) {
         // If no method data exists, go to profile_continue.
         __ ld_ptr(Lmethod, methodOopDesc::method_data_offset(), G4_scratch);
-        __ br_null(G4_scratch, false, Assembler::pn, Lno_mdo);
-        __ delayed()->nop();
+        __ br_null_short(G4_scratch, Assembler::pn, Lno_mdo);
 
         // Increment backedge counter in the MDO
         Address mdo_backedge_counter(G4_scratch, in_bytes(methodDataOopDesc::backedge_counter_offset()) +
                                                  in_bytes(InvocationCounter::counter_offset()));
         __ increment_mask_and_jump(mdo_backedge_counter, increment, mask, G3_scratch, Lscratch,
                                    Assembler::notZero, &Lforward);
-        __ ba(false, Loverflow);
-        __ delayed()->nop();
+        __ ba_short(Loverflow);
       }
 
       // If there's no MDO, increment counter in methodOop
@@ -1655,14 +1669,11 @@ void TemplateTable::branch(bool is_jsr, bool is_wide) {
 
       // Was an OSR adapter generated?
       // O0 = osr nmethod
-      __ br_null(O0, false, Assembler::pn, Lforward);
-      __ delayed()->nop();
+      __ br_null_short(O0, Assembler::pn, Lforward);
 
       // Has the nmethod been invalidated already?
       __ ld(O0, nmethod::entry_bci_offset(), O2);
-      __ cmp(O2, InvalidOSREntryBci);
-      __ br(Assembler::equal, false, Assembler::pn, Lforward);
-      __ delayed()->nop();
+      __ cmp_and_br_short(O2, InvalidOSREntryBci, Assembler::equal, Assembler::pn, Lforward);
 
       // migrate the interpreter frame off of the stack
 
@@ -1827,7 +1838,7 @@ void TemplateTable::tableswitch() {
   __ profile_switch_case(O2, O3, G3_scratch, G4_scratch);
   __ sll(O2, LogBytesPerInt, O2);
   __ add(O2, 3 * BytesPerInt, O2);
-  __ ba(false, continue_execution);
+  __ ba(continue_execution);
   __ delayed()->ld(O1, O2, O2);
   // handle default
   __ bind(default_case);
@@ -1855,7 +1866,7 @@ void TemplateTable::fast_linearswitch() {
   __ ld(O1, BytesPerInt, O2);
   __ sll(O2, LogBytesPerInt + 1, O2); // in word-pairs
   __ add(O1, 2 * BytesPerInt, O3); // set first pair addr
-  __ ba(false, loop_entry);
+  __ ba(loop_entry);
   __ delayed()->add(O3, O2, O2); // counter now points past last pair
 
   // table search
@@ -1874,8 +1885,7 @@ void TemplateTable::fast_linearswitch() {
   __ ld(O1, 0, O4); // get default offset
   if (ProfileInterpreter) {
     __ profile_switch_default(O3);
-    __ ba(false, continue_execution);
-    __ delayed()->nop();
+    __ ba_short(continue_execution);
   }
 
   // entry found -> get offset
@@ -1941,7 +1951,7 @@ void TemplateTable::fast_binaryswitch() {
 
   // and start
   Label entry;
-  __ ba(false, entry);
+  __ ba(entry);
   __ delayed()->ld( Rarray, -BytesPerInt, Rj);
   // (Rj is already in the native byte-ordering.)
 
@@ -1999,8 +2009,7 @@ void TemplateTable::fast_binaryswitch() {
   // (Rj is already in the native byte-ordering.)
 
   if (ProfileInterpreter) {
-    __ ba(false, continue_execution);
-    __ delayed()->nop();
+    __ ba_short(continue_execution);
   }
 
   __ bind(default_case); // fall through (if not profiling)
@@ -2022,7 +2031,7 @@ void TemplateTable::_return(TosState state) {
     __ access_local_ptr(G3_scratch, Otos_i);
     __ load_klass(Otos_i, O2);
     __ set(JVM_ACC_HAS_FINALIZER, G3);
-    __ ld(O2, Klass::access_flags_offset_in_bytes() + sizeof(oopDesc), O2);
+    __ ld(O2, in_bytes(Klass::access_flags_offset()), O2);
     __ andcc(G3, O2, G0);
     Label skip_register_finalizer;
     __ br(Assembler::zero, false, Assembler::pn, skip_register_finalizer);
@@ -2084,12 +2093,14 @@ void TemplateTable::resolve_cache_and_index(int byte_no,
   // Depends on cpCacheOop layout!
   Label resolved;
 
-  __ get_cache_and_index_at_bcp(Rcache, index, 1, index_size);
-  if (byte_no == f1_oop) {
-    // We are resolved if the f1 field contains a non-null object (CallSite, etc.)
-    // This kind of CP cache entry does not need to match the flags byte, because
+  if (byte_no == f12_oop) {
+    // We are resolved if the f1 field contains a non-null object (CallSite, MethodType, etc.)
+    // This kind of CP cache entry does not need to match bytecode_1 or bytecode_2, because
     // there is a 1-1 relation between bytecode type and CP entry type.
+    // The caller will also load a methodOop from f2.
+    assert(result != noreg, "");
     assert_different_registers(result, Rcache);
+    __ get_cache_and_index_at_bcp(Rcache, index, 1, index_size);
     __ ld_ptr(Rcache, constantPoolCacheOopDesc::base_offset() +
               ConstantPoolCacheEntry::f1_offset(), result);
     __ tst(result);
@@ -2098,15 +2109,9 @@ void TemplateTable::resolve_cache_and_index(int byte_no,
   } else {
     assert(byte_no == f1_byte || byte_no == f2_byte, "byte_no out of range");
     assert(result == noreg, "");  //else change code for setting result
-    const int shift_count = (1 + byte_no)*BitsPerByte;
-
-    __ ld_ptr(Rcache, constantPoolCacheOopDesc::base_offset() +
-              ConstantPoolCacheEntry::indices_offset(), Lbyte_code);
-
-    __ srl(  Lbyte_code, shift_count, Lbyte_code );
-    __ and3( Lbyte_code,        0xFF, Lbyte_code );
-    __ cmp(  Lbyte_code, (int)bytecode());
-    __ br(   Assembler::equal, false, Assembler::pt, resolved);
+    __ get_cache_and_index_and_bytecode_at_bcp(Rcache, index, Lbyte_code, byte_no, 1, index_size);
+    __ cmp(Lbyte_code, (int) bytecode());  // have we resolved this bytecode?
+    __ br(Assembler::equal, false, Assembler::pt, resolved);
     __ delayed()->set((int)bytecode(), O1);
   }
 
@@ -2120,10 +2125,13 @@ void TemplateTable::resolve_cache_and_index(int byte_no,
     case Bytecodes::_invokespecial  : // fall through
     case Bytecodes::_invokestatic   : // fall through
     case Bytecodes::_invokeinterface: entry = CAST_FROM_FN_PTR(address, InterpreterRuntime::resolve_invoke);  break;
+    case Bytecodes::_invokehandle   : entry = CAST_FROM_FN_PTR(address, InterpreterRuntime::resolve_invokehandle);  break;
     case Bytecodes::_invokedynamic  : entry = CAST_FROM_FN_PTR(address, InterpreterRuntime::resolve_invokedynamic);  break;
     case Bytecodes::_fast_aldc      : entry = CAST_FROM_FN_PTR(address, InterpreterRuntime::resolve_ldc);     break;
     case Bytecodes::_fast_aldc_w    : entry = CAST_FROM_FN_PTR(address, InterpreterRuntime::resolve_ldc);     break;
-    default                         : ShouldNotReachHere();                                 break;
+    default:
+      fatal(err_msg("unexpected bytecode: %s", Bytecodes::name(bytecode())));
+      break;
   }
   // first time invocation - must resolve first
   __ call_VM(noreg, entry, O1);
@@ -2136,48 +2144,54 @@ void TemplateTable::resolve_cache_and_index(int byte_no,
 }
 
 void TemplateTable::load_invoke_cp_cache_entry(int byte_no,
-                                               Register Rmethod,
-                                               Register Ritable_index,
-                                               Register Rflags,
+                                               Register method,
+                                               Register itable_index,
+                                               Register flags,
                                                bool is_invokevirtual,
                                                bool is_invokevfinal,
                                                bool is_invokedynamic) {
   // Uses both G3_scratch and G4_scratch
-  Register Rcache = G3_scratch;
-  Register Rscratch = G4_scratch;
-  assert_different_registers(Rcache, Rmethod, Ritable_index);
-
-  ByteSize cp_base_offset = constantPoolCacheOopDesc::base_offset();
+  Register cache = G3_scratch;
+  Register index = G4_scratch;
+  assert_different_registers(cache, method, itable_index);
 
   // determine constant pool cache field offsets
+  assert(is_invokevirtual == (byte_no == f2_byte), "is_invokevirtual flag redundant");
   const int method_offset = in_bytes(
-    cp_base_offset +
-      (is_invokevirtual
+      constantPoolCacheOopDesc::base_offset() +
+      ((byte_no == f2_byte)
        ? ConstantPoolCacheEntry::f2_offset()
        : ConstantPoolCacheEntry::f1_offset()
       )
     );
-  const int flags_offset = in_bytes(cp_base_offset +
+  const int flags_offset = in_bytes(constantPoolCacheOopDesc::base_offset() +
                                     ConstantPoolCacheEntry::flags_offset());
   // access constant pool cache fields
-  const int index_offset = in_bytes(cp_base_offset +
+  const int index_offset = in_bytes(constantPoolCacheOopDesc::base_offset() +
                                     ConstantPoolCacheEntry::f2_offset());
 
   if (is_invokevfinal) {
-    __ get_cache_and_index_at_bcp(Rcache, Rscratch, 1);
-    __ ld_ptr(Rcache, method_offset, Rmethod);
-  } else if (byte_no == f1_oop) {
-    // Resolved f1_oop goes directly into 'method' register.
-    resolve_cache_and_index(byte_no, Rmethod, Rcache, Rscratch, sizeof(u4));
+    __ get_cache_and_index_at_bcp(cache, index, 1);
+    __ ld_ptr(Address(cache, method_offset), method);
+  } else if (byte_no == f12_oop) {
+    // Resolved f1_oop (CallSite, MethodType, etc.) goes into 'itable_index'.
+    // Resolved f2_oop (methodOop invoker) will go into 'method' (at index_offset).
+    // See ConstantPoolCacheEntry::set_dynamic_call and set_method_handle.
+    size_t index_size = (is_invokedynamic ? sizeof(u4) : sizeof(u2));
+    resolve_cache_and_index(byte_no, itable_index, cache, index, index_size);
+    __ ld_ptr(Address(cache, index_offset), method);
+    itable_index = noreg;  // hack to disable load below
   } else {
-    resolve_cache_and_index(byte_no, noreg, Rcache, Rscratch, sizeof(u2));
-    __ ld_ptr(Rcache, method_offset, Rmethod);
+    resolve_cache_and_index(byte_no, noreg, cache, index, sizeof(u2));
+    __ ld_ptr(Address(cache, method_offset), method);
   }
 
-  if (Ritable_index != noreg) {
-    __ ld_ptr(Rcache, index_offset, Ritable_index);
+  if (itable_index != noreg) {
+    // pick up itable index from f2 also:
+    assert(byte_no == f1_byte, "already picked up f1");
+    __ ld_ptr(Address(cache, index_offset), itable_index);
   }
-  __ ld_ptr(Rcache, flags_offset, Rflags);
+  __ ld_ptr(Address(cache, flags_offset), flags);
 }
 
 // The Rcache register must be set before call
@@ -2213,9 +2227,7 @@ void TemplateTable::jvmti_post_field_access(Register Rcache,
     assert_different_registers(Rcache, index, G1_scratch);
     AddressLiteral get_field_access_count_addr(JvmtiExport::get_field_access_count_addr());
     __ load_contents(get_field_access_count_addr, G1_scratch);
-    __ tst(G1_scratch);
-    __ br(Assembler::zero, false, Assembler::pt, Label1);
-    __ delayed()->nop();
+    __ cmp_and_br_short(G1_scratch, 0, Assembler::equal, Assembler::pt, Label1);
 
     __ add(Rcache, in_bytes(cp_base_offset), Rcache);
 
@@ -2271,7 +2283,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
 
   if (__ membar_has_effect(membar_bits)) {
     // Get volatile flag
-    __ set((1 << ConstantPoolCacheEntry::volatileField), Lscratch);
+    __ set((1 << ConstantPoolCacheEntry::is_volatile_shift), Lscratch);
     __ and3(Rflags, Lscratch, Lscratch);
   }
 
@@ -2279,9 +2291,9 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
 
   // compute field type
   Label notByte, notInt, notShort, notChar, notLong, notFloat, notObj;
-  __ srl(Rflags, ConstantPoolCacheEntry::tosBits, Rflags);
-  // Make sure we don't need to mask Rflags for tosBits after the above shift
-  ConstantPoolCacheEntry::verify_tosBits();
+  __ srl(Rflags, ConstantPoolCacheEntry::tos_state_shift, Rflags);
+  // Make sure we don't need to mask Rflags after the above shift
+  ConstantPoolCacheEntry::verify_tos_state_shift();
 
   // Check atos before itos for getstatic, more likely (in Queens at least)
   __ cmp(Rflags, atos);
@@ -2295,7 +2307,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
   if (!is_static) {
     patch_bytecode(Bytecodes::_fast_agetfield, G3_scratch, G4_scratch);
   }
-  __ ba(false, checkVolatile);
+  __ ba(checkVolatile);
   __ delayed()->tst(Lscratch);
 
   __ bind(notObj);
@@ -2310,7 +2322,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
   if (!is_static) {
     patch_bytecode(Bytecodes::_fast_igetfield, G3_scratch, G4_scratch);
   }
-  __ ba(false, checkVolatile);
+  __ ba(checkVolatile);
   __ delayed()->tst(Lscratch);
 
   __ bind(notInt);
@@ -2326,7 +2338,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
   if (!is_static) {
     patch_bytecode(Bytecodes::_fast_lgetfield, G3_scratch, G4_scratch);
   }
-  __ ba(false, checkVolatile);
+  __ ba(checkVolatile);
   __ delayed()->tst(Lscratch);
 
   __ bind(notLong);
@@ -2341,7 +2353,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
   if (!is_static) {
     patch_bytecode(Bytecodes::_fast_bgetfield, G3_scratch, G4_scratch);
   }
-  __ ba(false, checkVolatile);
+  __ ba(checkVolatile);
   __ delayed()->tst(Lscratch);
 
   __ bind(notByte);
@@ -2356,7 +2368,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
   if (!is_static) {
     patch_bytecode(Bytecodes::_fast_cgetfield, G3_scratch, G4_scratch);
   }
-  __ ba(false, checkVolatile);
+  __ ba(checkVolatile);
   __ delayed()->tst(Lscratch);
 
   __ bind(notChar);
@@ -2371,7 +2383,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
   if (!is_static) {
     patch_bytecode(Bytecodes::_fast_sgetfield, G3_scratch, G4_scratch);
   }
-  __ ba(false, checkVolatile);
+  __ ba(checkVolatile);
   __ delayed()->tst(Lscratch);
 
   __ bind(notShort);
@@ -2387,7 +2399,7 @@ void TemplateTable::getfield_or_static(int byte_no, bool is_static) {
   if (!is_static) {
     patch_bytecode(Bytecodes::_fast_fgetfield, G3_scratch, G4_scratch);
   }
-  __ ba(false, checkVolatile);
+  __ ba(checkVolatile);
   __ delayed()->tst(Lscratch);
 
   __ bind(notFloat);
@@ -2444,7 +2456,7 @@ void TemplateTable::fast_accessfield(TosState state) {
   if (__ membar_has_effect(membar_bits)) {
     // Get volatile flag
     __ ld_ptr(Rcache, cp_base_offset + ConstantPoolCacheEntry::f2_offset(), Rflags);
-    __ set((1 << ConstantPoolCacheEntry::volatileField), Lscratch);
+    __ set((1 << ConstantPoolCacheEntry::is_volatile_shift), Lscratch);
   }
 
   switch (bytecode()) {
@@ -2496,9 +2508,7 @@ void TemplateTable::jvmti_post_fast_field_mod() {
     Label done;
     AddressLiteral get_field_modification_count_addr(JvmtiExport::get_field_modification_count_addr());
     __ load_contents(get_field_modification_count_addr, G4_scratch);
-    __ tst(G4_scratch);
-    __ br(Assembler::zero, false, Assembler::pt, done);
-    __ delayed()->nop();
+    __ cmp_and_br_short(G4_scratch, 0, Assembler::equal, Assembler::pt, done);
     __ pop_ptr(G4_scratch);     // copy the object pointer from tos
     __ verify_oop(G4_scratch);
     __ push_ptr(G4_scratch);    // put the object pointer back on tos
@@ -2549,9 +2559,7 @@ void TemplateTable::jvmti_post_field_mod(Register Rcache, Register index, bool i
     assert_different_registers(Rcache, index, G1_scratch);
     AddressLiteral get_field_modification_count_addr(JvmtiExport::get_field_modification_count_addr());
     __ load_contents(get_field_modification_count_addr, G1_scratch);
-    __ tst(G1_scratch);
-    __ br(Assembler::zero, false, Assembler::pt, Label1);
-    __ delayed()->nop();
+    __ cmp_and_br_short(G1_scratch, 0, Assembler::zero, Assembler::pt, Label1);
 
     // The Rcache and index registers have been already set.
     // This allows to eliminate this call but the Rcache and index
@@ -2572,17 +2580,16 @@ void TemplateTable::jvmti_post_field_mod(Register Rcache, Register index, bool i
       Label two_word, valsizeknown;
       __ ld_ptr(G1_scratch, cp_base_offset + ConstantPoolCacheEntry::flags_offset(), Rflags);
       __ mov(Lesp, G4_scratch);
-      __ srl(Rflags, ConstantPoolCacheEntry::tosBits, Rflags);
-      // Make sure we don't need to mask Rflags for tosBits after the above shift
-      ConstantPoolCacheEntry::verify_tosBits();
+      __ srl(Rflags, ConstantPoolCacheEntry::tos_state_shift, Rflags);
+      // Make sure we don't need to mask Rflags after the above shift
+      ConstantPoolCacheEntry::verify_tos_state_shift();
       __ cmp(Rflags, ltos);
       __ br(Assembler::equal, false, Assembler::pt, two_word);
       __ delayed()->cmp(Rflags, dtos);
       __ br(Assembler::equal, false, Assembler::pt, two_word);
       __ delayed()->nop();
       __ inc(G4_scratch, Interpreter::expr_offset_in_bytes(1));
-      __ br(Assembler::always, false, Assembler::pt, valsizeknown);
-      __ delayed()->nop();
+      __ ba_short(valsizeknown);
       __ bind(two_word);
 
       __ inc(G4_scratch, Interpreter::expr_offset_in_bytes(2));
@@ -2629,171 +2636,181 @@ void TemplateTable::putfield_or_static(int byte_no, bool is_static) {
 
   Label notVolatile, checkVolatile, exit;
   if (__ membar_has_effect(read_bits) || __ membar_has_effect(write_bits)) {
-    __ set((1 << ConstantPoolCacheEntry::volatileField), Lscratch);
+    __ set((1 << ConstantPoolCacheEntry::is_volatile_shift), Lscratch);
     __ and3(Rflags, Lscratch, Lscratch);
 
     if (__ membar_has_effect(read_bits)) {
-      __ tst(Lscratch);
-      __ br(Assembler::zero, false, Assembler::pt, notVolatile);
-      __ delayed()->nop();
+      __ cmp_and_br_short(Lscratch, 0, Assembler::equal, Assembler::pt, notVolatile);
       volatile_barrier(read_bits);
       __ bind(notVolatile);
     }
   }
 
-  __ srl(Rflags, ConstantPoolCacheEntry::tosBits, Rflags);
-  // Make sure we don't need to mask Rflags for tosBits after the above shift
-  ConstantPoolCacheEntry::verify_tosBits();
+  __ srl(Rflags, ConstantPoolCacheEntry::tos_state_shift, Rflags);
+  // Make sure we don't need to mask Rflags after the above shift
+  ConstantPoolCacheEntry::verify_tos_state_shift();
 
   // compute field type
   Label notInt, notShort, notChar, notObj, notByte, notLong, notFloat;
 
   if (is_static) {
     // putstatic with object type most likely, check that first
-    __ cmp(Rflags, atos );
+    __ cmp(Rflags, atos);
     __ br(Assembler::notEqual, false, Assembler::pt, notObj);
-    __ delayed() ->cmp(Rflags, itos );
+    __ delayed()->cmp(Rflags, itos);
 
     // atos
-    __ pop_ptr();
-    __ verify_oop(Otos_i);
-
-    do_oop_store(_masm, Rclass, Roffset, 0, Otos_i, G1_scratch, _bs->kind(), false);
-
-    __ ba(false, checkVolatile);
-    __ delayed()->tst(Lscratch);
+    {
+      __ pop_ptr();
+      __ verify_oop(Otos_i);
+      do_oop_store(_masm, Rclass, Roffset, 0, Otos_i, G1_scratch, _bs->kind(), false);
+      __ ba(checkVolatile);
+      __ delayed()->tst(Lscratch);
+    }
 
     __ bind(notObj);
-
-    // cmp(Rflags, itos );
+    // cmp(Rflags, itos);
     __ br(Assembler::notEqual, false, Assembler::pt, notInt);
-    __ delayed() ->cmp(Rflags, btos );
+    __ delayed()->cmp(Rflags, btos);
 
     // itos
-    __ pop_i();
-    __ st(Otos_i, Rclass, Roffset);
-    __ ba(false, checkVolatile);
-    __ delayed()->tst(Lscratch);
+    {
+      __ pop_i();
+      __ st(Otos_i, Rclass, Roffset);
+      __ ba(checkVolatile);
+      __ delayed()->tst(Lscratch);
+    }
 
     __ bind(notInt);
-
   } else {
     // putfield with int type most likely, check that first
-    __ cmp(Rflags, itos );
+    __ cmp(Rflags, itos);
     __ br(Assembler::notEqual, false, Assembler::pt, notInt);
-    __ delayed() ->cmp(Rflags, atos );
+    __ delayed()->cmp(Rflags, atos);
 
     // itos
-    __ pop_i();
-    pop_and_check_object(Rclass);
-    __ st(Otos_i, Rclass, Roffset);
-    patch_bytecode(Bytecodes::_fast_iputfield, G3_scratch, G4_scratch);
-    __ ba(false, checkVolatile);
-    __ delayed()->tst(Lscratch);
+    {
+      __ pop_i();
+      pop_and_check_object(Rclass);
+      __ st(Otos_i, Rclass, Roffset);
+      patch_bytecode(Bytecodes::_fast_iputfield, G3_scratch, G4_scratch, true, byte_no);
+      __ ba(checkVolatile);
+      __ delayed()->tst(Lscratch);
+    }
 
     __ bind(notInt);
-    // cmp(Rflags, atos );
+    // cmp(Rflags, atos);
     __ br(Assembler::notEqual, false, Assembler::pt, notObj);
-    __ delayed() ->cmp(Rflags, btos );
+    __ delayed()->cmp(Rflags, btos);
 
     // atos
-    __ pop_ptr();
-    pop_and_check_object(Rclass);
-    __ verify_oop(Otos_i);
-
-    do_oop_store(_masm, Rclass, Roffset, 0, Otos_i, G1_scratch, _bs->kind(), false);
-
-    patch_bytecode(Bytecodes::_fast_aputfield, G3_scratch, G4_scratch);
-    __ ba(false, checkVolatile);
-    __ delayed()->tst(Lscratch);
+    {
+      __ pop_ptr();
+      pop_and_check_object(Rclass);
+      __ verify_oop(Otos_i);
+      do_oop_store(_masm, Rclass, Roffset, 0, Otos_i, G1_scratch, _bs->kind(), false);
+      patch_bytecode(Bytecodes::_fast_aputfield, G3_scratch, G4_scratch, true, byte_no);
+      __ ba(checkVolatile);
+      __ delayed()->tst(Lscratch);
+    }
 
     __ bind(notObj);
   }
 
-  // cmp(Rflags, btos );
+  // cmp(Rflags, btos);
   __ br(Assembler::notEqual, false, Assembler::pt, notByte);
-  __ delayed() ->cmp(Rflags, ltos );
+  __ delayed()->cmp(Rflags, ltos);
 
   // btos
-  __ pop_i();
-  if (!is_static) pop_and_check_object(Rclass);
-  __ stb(Otos_i, Rclass, Roffset);
-  if (!is_static) {
-    patch_bytecode(Bytecodes::_fast_bputfield, G3_scratch, G4_scratch);
+  {
+    __ pop_i();
+    if (!is_static) pop_and_check_object(Rclass);
+    __ stb(Otos_i, Rclass, Roffset);
+    if (!is_static) {
+      patch_bytecode(Bytecodes::_fast_bputfield, G3_scratch, G4_scratch, true, byte_no);
+    }
+    __ ba(checkVolatile);
+    __ delayed()->tst(Lscratch);
   }
-  __ ba(false, checkVolatile);
-  __ delayed()->tst(Lscratch);
 
   __ bind(notByte);
-
-  // cmp(Rflags, ltos );
+  // cmp(Rflags, ltos);
   __ br(Assembler::notEqual, false, Assembler::pt, notLong);
-  __ delayed() ->cmp(Rflags, ctos );
+  __ delayed()->cmp(Rflags, ctos);
 
   // ltos
-  __ pop_l();
-  if (!is_static) pop_and_check_object(Rclass);
-  __ st_long(Otos_l, Rclass, Roffset);
-  if (!is_static) {
-    patch_bytecode(Bytecodes::_fast_lputfield, G3_scratch, G4_scratch);
+  {
+    __ pop_l();
+    if (!is_static) pop_and_check_object(Rclass);
+    __ st_long(Otos_l, Rclass, Roffset);
+    if (!is_static) {
+      patch_bytecode(Bytecodes::_fast_lputfield, G3_scratch, G4_scratch, true, byte_no);
+    }
+    __ ba(checkVolatile);
+    __ delayed()->tst(Lscratch);
   }
-  __ ba(false, checkVolatile);
-  __ delayed()->tst(Lscratch);
 
   __ bind(notLong);
-
-  // cmp(Rflags, ctos );
+  // cmp(Rflags, ctos);
   __ br(Assembler::notEqual, false, Assembler::pt, notChar);
-  __ delayed() ->cmp(Rflags, stos );
+  __ delayed()->cmp(Rflags, stos);
 
   // ctos (char)
-  __ pop_i();
-  if (!is_static) pop_and_check_object(Rclass);
-  __ sth(Otos_i, Rclass, Roffset);
-  if (!is_static) {
-    patch_bytecode(Bytecodes::_fast_cputfield, G3_scratch, G4_scratch);
+  {
+    __ pop_i();
+    if (!is_static) pop_and_check_object(Rclass);
+    __ sth(Otos_i, Rclass, Roffset);
+    if (!is_static) {
+      patch_bytecode(Bytecodes::_fast_cputfield, G3_scratch, G4_scratch, true, byte_no);
+    }
+    __ ba(checkVolatile);
+    __ delayed()->tst(Lscratch);
   }
-  __ ba(false, checkVolatile);
-  __ delayed()->tst(Lscratch);
 
   __ bind(notChar);
-  // cmp(Rflags, stos );
+  // cmp(Rflags, stos);
   __ br(Assembler::notEqual, false, Assembler::pt, notShort);
-  __ delayed() ->cmp(Rflags, ftos );
+  __ delayed()->cmp(Rflags, ftos);
 
-  // stos (char)
-  __ pop_i();
-  if (!is_static) pop_and_check_object(Rclass);
-  __ sth(Otos_i, Rclass, Roffset);
-  if (!is_static) {
-    patch_bytecode(Bytecodes::_fast_sputfield, G3_scratch, G4_scratch);
+  // stos (short)
+  {
+    __ pop_i();
+    if (!is_static) pop_and_check_object(Rclass);
+    __ sth(Otos_i, Rclass, Roffset);
+    if (!is_static) {
+      patch_bytecode(Bytecodes::_fast_sputfield, G3_scratch, G4_scratch, true, byte_no);
+    }
+    __ ba(checkVolatile);
+    __ delayed()->tst(Lscratch);
   }
-  __ ba(false, checkVolatile);
-  __ delayed()->tst(Lscratch);
 
   __ bind(notShort);
-  // cmp(Rflags, ftos );
+  // cmp(Rflags, ftos);
   __ br(Assembler::notZero, false, Assembler::pt, notFloat);
   __ delayed()->nop();
 
   // ftos
-  __ pop_f();
-  if (!is_static) pop_and_check_object(Rclass);
-  __ stf(FloatRegisterImpl::S, Ftos_f, Rclass, Roffset);
-  if (!is_static) {
-    patch_bytecode(Bytecodes::_fast_fputfield, G3_scratch, G4_scratch);
+  {
+    __ pop_f();
+    if (!is_static) pop_and_check_object(Rclass);
+    __ stf(FloatRegisterImpl::S, Ftos_f, Rclass, Roffset);
+    if (!is_static) {
+      patch_bytecode(Bytecodes::_fast_fputfield, G3_scratch, G4_scratch, true, byte_no);
+    }
+    __ ba(checkVolatile);
+    __ delayed()->tst(Lscratch);
   }
-  __ ba(false, checkVolatile);
-  __ delayed()->tst(Lscratch);
 
   __ bind(notFloat);
 
   // dtos
-  __ pop_d();
-  if (!is_static) pop_and_check_object(Rclass);
-  __ stf(FloatRegisterImpl::D, Ftos_d, Rclass, Roffset);
-  if (!is_static) {
-    patch_bytecode(Bytecodes::_fast_dputfield, G3_scratch, G4_scratch);
+  {
+    __ pop_d();
+    if (!is_static) pop_and_check_object(Rclass);
+    __ stf(FloatRegisterImpl::D, Ftos_d, Rclass, Roffset);
+    if (!is_static) {
+      patch_bytecode(Bytecodes::_fast_dputfield, G3_scratch, G4_scratch, true, byte_no);
+    }
   }
 
   __ bind(checkVolatile);
@@ -2827,12 +2844,10 @@ void TemplateTable::fast_storefield(TosState state) {
   Label notVolatile, checkVolatile, exit;
   if (__ membar_has_effect(read_bits) || __ membar_has_effect(write_bits)) {
     __ ld_ptr(Rcache, cp_base_offset + ConstantPoolCacheEntry::flags_offset(), Rflags);
-    __ set((1 << ConstantPoolCacheEntry::volatileField), Lscratch);
+    __ set((1 << ConstantPoolCacheEntry::is_volatile_shift), Lscratch);
     __ and3(Rflags, Lscratch, Lscratch);
     if (__ membar_has_effect(read_bits)) {
-      __ tst(Lscratch);
-      __ br(Assembler::zero, false, Assembler::pt, notVolatile);
-      __ delayed()->nop();
+      __ cmp_and_br_short(Lscratch, 0, Assembler::equal, Assembler::pt, notVolatile);
       volatile_barrier(read_bits);
       __ bind(notVolatile);
     }
@@ -2861,9 +2876,7 @@ void TemplateTable::fast_storefield(TosState state) {
   }
 
   if (__ membar_has_effect(write_bits)) {
-    __ tst(Lscratch);
-    __ br(Assembler::zero, false, Assembler::pt, exit);
-    __ delayed()->nop();
+    __ cmp_and_br_short(Lscratch, 0, Assembler::equal, Assembler::pt, exit);
     volatile_barrier(Assembler::StoreLoad);
     __ bind(exit);
   }
@@ -2914,7 +2927,7 @@ void TemplateTable::fast_xaccess(TosState state) {
 
     // Test volatile
     Label notVolatile;
-    __ set((1 << ConstantPoolCacheEntry::volatileField), Lscratch);
+    __ set((1 << ConstantPoolCacheEntry::is_volatile_shift), Lscratch);
     __ btst(Rflags, Lscratch);
     __ br(Assembler::zero, false, Assembler::pt, notVolatile);
     __ delayed()->nop();
@@ -2934,27 +2947,82 @@ void TemplateTable::count_calls(Register method, Register temp) {
   ShouldNotReachHere();
 }
 
+
+void TemplateTable::prepare_invoke(int byte_no,
+                                   Register method,  // linked method (or i-klass)
+                                   Register ra,      // return address
+                                   Register index,   // itable index, MethodType, etc.
+                                   Register recv,    // if caller wants to see it
+                                   Register flags    // if caller wants to test it
+                                   ) {
+  // determine flags
+  const Bytecodes::Code code = bytecode();
+  const bool is_invokeinterface  = code == Bytecodes::_invokeinterface;
+  const bool is_invokedynamic    = code == Bytecodes::_invokedynamic;
+  const bool is_invokehandle     = code == Bytecodes::_invokehandle;
+  const bool is_invokevirtual    = code == Bytecodes::_invokevirtual;
+  const bool is_invokespecial    = code == Bytecodes::_invokespecial;
+  const bool load_receiver       = (recv != noreg);
+  assert(load_receiver == (code != Bytecodes::_invokestatic && code != Bytecodes::_invokedynamic), "");
+  assert(recv  == noreg || recv  == O0, "");
+  assert(flags == noreg || flags == O1, "");
+
+  // setup registers & access constant pool cache
+  if (recv  == noreg)  recv  = O0;
+  if (flags == noreg)  flags = O1;
+  const Register temp = O2;
+  assert_different_registers(method, ra, index, recv, flags, temp);
+
+  load_invoke_cp_cache_entry(byte_no, method, index, flags, is_invokevirtual, false, is_invokedynamic);
+
+  __ mov(SP, O5_savedSP);  // record SP that we wanted the callee to restore
+
+  // maybe push appendix to arguments
+  if (is_invokedynamic || is_invokehandle) {
+    Label L_no_push;
+    __ verify_oop(index);
+    __ set((1 << ConstantPoolCacheEntry::has_appendix_shift), temp);
+    __ btst(flags, temp);
+    __ br(Assembler::zero, false, Assembler::pt, L_no_push);
+    __ delayed()->nop();
+    // Push the appendix as a trailing parameter.
+    // This must be done before we get the receiver,
+    // since the parameter_size includes it.
+    __ push_ptr(index);  // push appendix (MethodType, CallSite, etc.)
+    __ bind(L_no_push);
+  }
+
+  // load receiver if needed (after appendix is pushed so parameter size is correct)
+  if (load_receiver) {
+    __ and3(flags, ConstantPoolCacheEntry::parameter_size_mask, temp);  // get parameter size
+    __ load_receiver(temp, recv);  //  __ argument_address uses Gargs but we need Lesp
+    __ verify_oop(recv);
+  }
+
+  // compute return type
+  __ srl(flags, ConstantPoolCacheEntry::tos_state_shift, ra);
+  // Make sure we don't need to mask flags after the above shift
+  ConstantPoolCacheEntry::verify_tos_state_shift();
+  // load return address
+  {
+    const address table_addr = (is_invokeinterface || is_invokedynamic) ?
+        (address)Interpreter::return_5_addrs_by_index_table() :
+        (address)Interpreter::return_3_addrs_by_index_table();
+    AddressLiteral table(table_addr);
+    __ set(table, temp);
+    __ sll(ra, LogBytesPerWord, ra);
+    __ ld_ptr(Address(temp, ra), ra);
+  }
+}
+
+
 void TemplateTable::generate_vtable_call(Register Rrecv, Register Rindex, Register Rret) {
   Register Rtemp = G4_scratch;
   Register Rcall = Rindex;
   assert_different_registers(Rcall, G5_method, Gargs, Rret);
 
   // get target methodOop & entry point
-  const int base = instanceKlass::vtable_start_offset() * wordSize;
-  if (vtableEntry::size() % 3 == 0) {
-    // scale the vtable index by 12:
-    int one_third = vtableEntry::size() / 3;
-    __ sll(Rindex, exact_log2(one_third * 1 * wordSize), Rtemp);
-    __ sll(Rindex, exact_log2(one_third * 2 * wordSize), Rindex);
-    __ add(Rindex, Rtemp, Rindex);
-  } else {
-    // scale the vtable index by 8:
-    __ sll(Rindex, exact_log2(vtableEntry::size() * wordSize), Rindex);
-  }
-
-  __ add(Rrecv, Rindex, Rrecv);
-  __ ld_ptr(Rrecv, base + vtableEntry::method_offset_in_bytes(), G5_method);
-
+  __ lookup_virtual_method(Rrecv, Rindex, G5_method);
   __ call_from_interpreter(Rcall, Gargs, Rret);
 }
 
@@ -2963,16 +3031,16 @@ void TemplateTable::invokevirtual(int byte_no) {
   assert(byte_no == f2_byte, "use this argument");
 
   Register Rscratch = G3_scratch;
-  Register Rtemp = G4_scratch;
-  Register Rret = Lscratch;
-  Register Rrecv = G5_method;
+  Register Rtemp    = G4_scratch;
+  Register Rret     = Lscratch;
+  Register O0_recv  = O0;
   Label notFinal;
 
   load_invoke_cp_cache_entry(byte_no, G5_method, noreg, Rret, true, false, false);
   __ mov(SP, O5_savedSP); // record SP that we wanted the callee to restore
 
   // Check for vfinal
-  __ set((1 << ConstantPoolCacheEntry::vfinalMethod), G4_scratch);
+  __ set((1 << ConstantPoolCacheEntry::is_vfinal_shift), G4_scratch);
   __ btst(Rret, G4_scratch);
   __ br(Assembler::zero, false, Assembler::pt, notFinal);
   __ delayed()->and3(Rret, 0xFF, G4_scratch);      // gets number of parameters
@@ -2984,27 +3052,27 @@ void TemplateTable::invokevirtual(int byte_no) {
   __ bind(notFinal);
 
   __ mov(G5_method, Rscratch);  // better scratch register
-  __ load_receiver(G4_scratch, O0);  // gets receiverOop
-  // receiver is in O0
-  __ verify_oop(O0);
+  __ load_receiver(G4_scratch, O0_recv);  // gets receiverOop
+  // receiver is in O0_recv
+  __ verify_oop(O0_recv);
 
   // get return address
   AddressLiteral table(Interpreter::return_3_addrs_by_index_table());
   __ set(table, Rtemp);
-  __ srl(Rret, ConstantPoolCacheEntry::tosBits, Rret);          // get return type
-  // Make sure we don't need to mask Rret for tosBits after the above shift
-  ConstantPoolCacheEntry::verify_tosBits();
+  __ srl(Rret, ConstantPoolCacheEntry::tos_state_shift, Rret);          // get return type
+  // Make sure we don't need to mask Rret after the above shift
+  ConstantPoolCacheEntry::verify_tos_state_shift();
   __ sll(Rret,  LogBytesPerWord, Rret);
   __ ld_ptr(Rtemp, Rret, Rret);         // get return address
 
   // get receiver klass
-  __ null_check(O0, oopDesc::klass_offset_in_bytes());
-  __ load_klass(O0, Rrecv);
-  __ verify_oop(Rrecv);
+  __ null_check(O0_recv, oopDesc::klass_offset_in_bytes());
+  __ load_klass(O0_recv, O0_recv);
+  __ verify_oop(O0_recv);
 
-  __ profile_virtual_call(Rrecv, O4);
+  __ profile_virtual_call(O0_recv, O4);
 
-  generate_vtable_call(Rrecv, Rscratch, Rret);
+  generate_vtable_call(O0_recv, Rscratch, Rret);
 }
 
 void TemplateTable::fast_invokevfinal(int byte_no) {
@@ -3034,9 +3102,9 @@ void TemplateTable::invokevfinal_helper(Register Rscratch, Register Rret) {
   // get return address
   AddressLiteral table(Interpreter::return_3_addrs_by_index_table());
   __ set(table, Rtemp);
-  __ srl(Rret, ConstantPoolCacheEntry::tosBits, Rret);          // get return type
-  // Make sure we don't need to mask Rret for tosBits after the above shift
-  ConstantPoolCacheEntry::verify_tosBits();
+  __ srl(Rret, ConstantPoolCacheEntry::tos_state_shift, Rret);          // get return type
+  // Make sure we don't need to mask Rret after the above shift
+  ConstantPoolCacheEntry::verify_tos_state_shift();
   __ sll(Rret,  LogBytesPerWord, Rret);
   __ ld_ptr(Rtemp, Rret, Rret);         // get return address
 
@@ -3044,66 +3112,38 @@ void TemplateTable::invokevfinal_helper(Register Rscratch, Register Rret) {
   // do the call
   __ call_from_interpreter(Rscratch, Gargs, Rret);
 }
+
 
 void TemplateTable::invokespecial(int byte_no) {
   transition(vtos, vtos);
   assert(byte_no == f1_byte, "use this argument");
 
-  Register Rscratch = G3_scratch;
-  Register Rtemp = G4_scratch;
-  Register Rret = Lscratch;
+  const Register Rret     = Lscratch;
+  const Register O0_recv  = O0;
+  const Register Rscratch = G3_scratch;
 
-  load_invoke_cp_cache_entry(byte_no, G5_method, noreg, Rret, /*virtual*/ false, false, false);
-  __ mov(SP, O5_savedSP); // record SP that we wanted the callee to restore
-
-  __ verify_oop(G5_method);
-
-  __ lduh(G5_method, in_bytes(methodOopDesc::size_of_parameters_offset()), G4_scratch);
-  __ load_receiver(G4_scratch, O0);
-
-  // receiver NULL check
-  __ null_check(O0);
-
-  __ profile_call(O4);
-
-  // get return address
-  AddressLiteral table(Interpreter::return_3_addrs_by_index_table());
-  __ set(table, Rtemp);
-  __ srl(Rret, ConstantPoolCacheEntry::tosBits, Rret);          // get return type
-  // Make sure we don't need to mask Rret for tosBits after the above shift
-  ConstantPoolCacheEntry::verify_tosBits();
-  __ sll(Rret,  LogBytesPerWord, Rret);
-  __ ld_ptr(Rtemp, Rret, Rret);         // get return address
+  prepare_invoke(byte_no, G5_method, Rret, noreg, O0_recv);  // get receiver also for null check
+  __ null_check(O0_recv);
 
   // do the call
+  __ verify_oop(G5_method);
+  __ profile_call(O4);
   __ call_from_interpreter(Rscratch, Gargs, Rret);
 }
+
 
 void TemplateTable::invokestatic(int byte_no) {
   transition(vtos, vtos);
   assert(byte_no == f1_byte, "use this argument");
 
-  Register Rscratch = G3_scratch;
-  Register Rtemp = G4_scratch;
-  Register Rret = Lscratch;
+  const Register Rret     = Lscratch;
+  const Register Rscratch = G3_scratch;
 
-  load_invoke_cp_cache_entry(byte_no, G5_method, noreg, Rret, /*virtual*/ false, false, false);
-  __ mov(SP, O5_savedSP); // record SP that we wanted the callee to restore
-
-  __ verify_oop(G5_method);
-
-  __ profile_call(O4);
-
-  // get return address
-  AddressLiteral table(Interpreter::return_3_addrs_by_index_table());
-  __ set(table, Rtemp);
-  __ srl(Rret, ConstantPoolCacheEntry::tosBits, Rret);          // get return type
-  // Make sure we don't need to mask Rret for tosBits after the above shift
-  ConstantPoolCacheEntry::verify_tosBits();
-  __ sll(Rret,  LogBytesPerWord, Rret);
-  __ ld_ptr(Rtemp, Rret, Rret);         // get return address
+  prepare_invoke(byte_no, G5_method, Rret);  // get f1 methodOop
 
   // do the call
+  __ verify_oop(G5_method);
+  __ profile_call(O4);
   __ call_from_interpreter(Rscratch, Gargs, Rret);
 }
 
@@ -3120,7 +3160,7 @@ void TemplateTable::invokeinterface_object_method(Register RklassOop,
   Label notFinal;
 
   // Check for vfinal
-  __ set((1 << ConstantPoolCacheEntry::vfinalMethod), Rscratch);
+  __ set((1 << ConstantPoolCacheEntry::is_vfinal_shift), Rscratch);
   __ btst(Rflags, Rscratch);
   __ br(Assembler::zero, false, Assembler::pt, notFinal);
   __ delayed()->nop();
@@ -3142,53 +3182,37 @@ void TemplateTable::invokeinterface(int byte_no) {
   transition(vtos, vtos);
   assert(byte_no == f1_byte, "use this argument");
 
-  Register Rscratch = G4_scratch;
-  Register Rret = G3_scratch;
-  Register Rindex = Lscratch;
-  Register Rinterface = G1_scratch;
-  Register RklassOop = G5_method;
-  Register Rflags = O1;
+  const Register Rinterface  = G1_scratch;
+  const Register Rret        = G3_scratch;
+  const Register Rindex      = Lscratch;
+  const Register O0_recv     = O0;
+  const Register O1_flags    = O1;
+  const Register O2_klassOop = O2;
+  const Register Rscratch    = G4_scratch;
   assert_different_registers(Rscratch, G5_method);
 
-  load_invoke_cp_cache_entry(byte_no, Rinterface, Rindex, Rflags, /*virtual*/ false, false, false);
-  __ mov(SP, O5_savedSP); // record SP that we wanted the callee to restore
-
-  // get receiver
-  __ and3(Rflags, 0xFF, Rscratch);       // gets number of parameters
-  __ load_receiver(Rscratch, O0);
-  __ verify_oop(O0);
-
-  __ mov(Rflags, Rret);
-
-  // get return address
-  AddressLiteral table(Interpreter::return_5_addrs_by_index_table());
-  __ set(table, Rscratch);
-  __ srl(Rret, ConstantPoolCacheEntry::tosBits, Rret);          // get return type
-  // Make sure we don't need to mask Rret for tosBits after the above shift
-  ConstantPoolCacheEntry::verify_tosBits();
-  __ sll(Rret,  LogBytesPerWord, Rret);
-  __ ld_ptr(Rscratch, Rret, Rret);      // get return address
+  prepare_invoke(byte_no, Rinterface, Rret, Rindex, O0_recv, O1_flags);
 
   // get receiver klass
-  __ null_check(O0, oopDesc::klass_offset_in_bytes());
-  __ load_klass(O0, RklassOop);
-  __ verify_oop(RklassOop);
+  __ null_check(O0_recv, oopDesc::klass_offset_in_bytes());
+  __ load_klass(O0_recv, O2_klassOop);
+  __ verify_oop(O2_klassOop);
 
   // Special case of invokeinterface called for virtual method of
   // java.lang.Object.  See cpCacheOop.cpp for details.
   // This code isn't produced by javac, but could be produced by
   // another compliant java compiler.
   Label notMethod;
-  __ set((1 << ConstantPoolCacheEntry::methodInterface), Rscratch);
-  __ btst(Rflags, Rscratch);
+  __ set((1 << ConstantPoolCacheEntry::is_forced_virtual_shift), Rscratch);
+  __ btst(O1_flags, Rscratch);
   __ br(Assembler::zero, false, Assembler::pt, notMethod);
   __ delayed()->nop();
 
-  invokeinterface_object_method(RklassOop, Rinterface, Rret, Rflags);
+  invokeinterface_object_method(O2_klassOop, Rinterface, Rret, O1_flags);
 
   __ bind(notMethod);
 
-  __ profile_virtual_call(RklassOop, O4);
+  __ profile_virtual_call(O2_klassOop, O4);
 
   //
   // find entry point to call
@@ -3197,9 +3221,9 @@ void TemplateTable::invokeinterface(int byte_no) {
   // compute start of first itableOffsetEntry (which is at end of vtable)
   const int base = instanceKlass::vtable_start_offset() * wordSize;
   Label search;
-  Register Rtemp = Rflags;
+  Register Rtemp = O1_flags;
 
-  __ ld(RklassOop, instanceKlass::vtable_length_offset() * wordSize, Rtemp);
+  __ ld(O2_klassOop, instanceKlass::vtable_length_offset() * wordSize, Rtemp);
   if (align_object_offset(1) > 1) {
     __ round_to(Rtemp, align_object_offset(1));
   }
@@ -3210,7 +3234,7 @@ void TemplateTable::invokeinterface(int byte_no) {
     __ set(base, Rscratch);
     __ add(Rscratch, Rtemp, Rtemp);
   }
-  __ add(RklassOop, Rtemp, Rscratch);
+  __ add(O2_klassOop, Rtemp, Rscratch);
 
   __ bind(search);
 
@@ -3223,8 +3247,7 @@ void TemplateTable::invokeinterface(int byte_no) {
     // the VM should throw IncompatibleClassChangeError.  linkResolver checks
     // this too but that's only if the entry isn't already resolved, so we
     // need to check again.
-    __ br_notnull( Rtemp, false, Assembler::pt, ok);
-    __ delayed()->nop();
+    __ br_notnull_short( Rtemp, Assembler::pt, ok);
     call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::throw_IncompatibleClassChangeError));
     __ should_not_reach_here();
     __ bind(ok);
@@ -3243,14 +3266,12 @@ void TemplateTable::invokeinterface(int byte_no) {
   assert(itableMethodEntry::method_offset_in_bytes() == 0, "adjust instruction below");
   __ sll(Rindex, exact_log2(itableMethodEntry::size() * wordSize), Rindex);       // Rindex *= 8;
   __ add(Rscratch, Rindex, Rscratch);
-  __ ld_ptr(RklassOop, Rscratch, G5_method);
+  __ ld_ptr(O2_klassOop, Rscratch, G5_method);
 
   // Check for abstract method error.
   {
     Label ok;
-    __ tst(G5_method);
-    __ brx(Assembler::notZero, false, Assembler::pt, ok);
-    __ delayed()->nop();
+    __ br_notnull_short(G5_method, Assembler::pt, ok);
     call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::throw_AbstractMethodError));
     __ should_not_reach_here();
     __ bind(ok);
@@ -3261,13 +3282,42 @@ void TemplateTable::invokeinterface(int byte_no) {
 
   __ verify_oop(G5_method);
   __ call_from_interpreter(Rcall, Gargs, Rret);
+}
 
+
+void TemplateTable::invokehandle(int byte_no) {
+  transition(vtos, vtos);
+  assert(byte_no == f12_oop, "use this argument");
+
+  if (!EnableInvokeDynamic) {
+    // rewriter does not generate this bytecode
+    __ should_not_reach_here();
+    return;
+  }
+
+  const Register Rret       = Lscratch;
+  const Register G4_mtype   = G4_scratch;  // f1
+  const Register O0_recv    = O0;
+  const Register Rscratch   = G3_scratch;
+
+  prepare_invoke(byte_no, G5_method, Rret, G4_mtype, O0_recv);
+  __ null_check(O0_recv);
+
+  // G4: MethodType object (from f1)
+  // G5: MH.linkToCallSite method (from f2)
+
+  // Note:  G4_mtype is already pushed (if necessary) by prepare_invoke
+
+  // do the call
+  __ verify_oop(G5_method);
+  __ profile_final_call(O4);  // FIXME: profile the LambdaForm also
+  __ call_from_interpreter(Rscratch, Gargs, Rret);
 }
 
 
 void TemplateTable::invokedynamic(int byte_no) {
   transition(vtos, vtos);
-  assert(byte_no == f1_oop, "use this argument");
+  assert(byte_no == f12_oop, "use this argument");
 
   if (!EnableInvokeDynamic) {
     // We should not encounter this bytecode if !EnableInvokeDynamic.
@@ -3280,42 +3330,24 @@ void TemplateTable::invokedynamic(int byte_no) {
     return;
   }
 
-  // G5: CallSite object (f1)
-  // XX: unused (f2)
-  // XX: flags (unused)
+  const Register Rret        = Lscratch;
+  const Register G4_callsite = G4_scratch;
+  const Register Rscratch    = G3_scratch;
 
-  Register G5_callsite = G5_method;
-  Register Rscratch    = G3_scratch;
-  Register Rtemp       = G1_scratch;
-  Register Rret        = Lscratch;
+  prepare_invoke(byte_no, G5_method, Rret, G4_callsite);
 
-  load_invoke_cp_cache_entry(byte_no, G5_callsite, noreg, Rret,
-                             /*virtual*/ false, /*vfinal*/ false, /*indy*/ true);
-  __ mov(SP, O5_savedSP);  // record SP that we wanted the callee to restore
+  // G4: CallSite object (from f1)
+  // G5: MH.linkToCallSite method (from f2)
 
+  // Note:  G4_callsite is already pushed by prepare_invoke
+
+  // %%% should make a type profile for any invokedynamic that takes a ref argument
   // profile this call
   __ profile_call(O4);
 
-  // get return address
-  AddressLiteral table(Interpreter::return_5_addrs_by_index_table());
-  __ set(table, Rtemp);
-  __ srl(Rret, ConstantPoolCacheEntry::tosBits, Rret);  // get return type
-  // Make sure we don't need to mask Rret for tosBits after the above shift
-  ConstantPoolCacheEntry::verify_tosBits();
-  __ sll(Rret, LogBytesPerWord, Rret);
-  __ ld_ptr(Rtemp, Rret, Rret);  // get return address
-
-  __ verify_oop(G5_callsite);
-  __ load_heap_oop(G5_callsite, __ delayed_value(java_lang_invoke_CallSite::target_offset_in_bytes, Rscratch), G3_method_handle);
-  __ null_check(G3_method_handle);
-  __ verify_oop(G3_method_handle);
-
-  // Adjust Rret first so Llast_SP can be same as Rret
-  __ add(Rret, -frame::pc_return_offset, O7);
-  __ add(Lesp, BytesPerWord, Gargs);  // setup parameter pointer
-  __ jump_to_method_handle_entry(G3_method_handle, Rtemp, /* emit_delayed_nop */ false);
-  // Record SP so we can remove any stack space allocated by adapter transition
-  __ delayed()->mov(SP, Llast_SP);
+  // do the call
+  __ verify_oop(G5_method);
+  __ call_from_interpreter(Rscratch, Gargs, Rret);
 }
 
 
@@ -3351,13 +3383,13 @@ void TemplateTable::_new() {
   __ ld_ptr(Rscratch, Roffset, RinstanceKlass);
 
   // make sure klass is fully initialized:
-  __ ld(RinstanceKlass, instanceKlass::init_state_offset_in_bytes() + sizeof(oopDesc), G3_scratch);
+  __ ldub(RinstanceKlass, in_bytes(instanceKlass::init_state_offset()), G3_scratch);
   __ cmp(G3_scratch, instanceKlass::fully_initialized);
   __ br(Assembler::notEqual, false, Assembler::pn, slow_case);
-  __ delayed()->ld(RinstanceKlass, Klass::layout_helper_offset_in_bytes() + sizeof(oopDesc), Roffset);
+  __ delayed()->ld(RinstanceKlass, in_bytes(Klass::layout_helper_offset()), Roffset);
 
   // get instance_size in instanceKlass (already aligned)
-  //__ ld(RinstanceKlass, Klass::layout_helper_offset_in_bytes() + sizeof(oopDesc), Roffset);
+  //__ ld(RinstanceKlass, in_bytes(Klass::layout_helper_offset()), Roffset);
 
   // make sure klass does not have has_finalizer, or is abstract, or interface or java/lang/Class
   __ btst(Klass::_lh_instance_slow_path_bit, Roffset);
@@ -3375,7 +3407,7 @@ void TemplateTable::_new() {
 
   if(UseTLAB) {
     Register RoldTopValue = RallocatedObject;
-    Register RtopAddr = G3_scratch, RtlabWasteLimitValue = G3_scratch;
+    Register RtlabWasteLimitValue = G3_scratch;
     Register RnewTopValue = G1_scratch;
     Register RendValue = Rscratch;
     Register RfreeValue = RnewTopValue;
@@ -3405,17 +3437,14 @@ void TemplateTable::_new() {
 #else
       __ srl(RfreeValue, LogHeapWordSize, RfreeValue);
 #endif
-      __ cmp(RtlabWasteLimitValue, RfreeValue);
-      __ brx(Assembler::greaterEqualUnsigned, false, Assembler::pt, slow_case); // tlab waste is small
-      __ delayed()->nop();
+      __ cmp_and_brx_short(RtlabWasteLimitValue, RfreeValue, Assembler::greaterEqualUnsigned, Assembler::pt, slow_case); // tlab waste is small
 
       // increment waste limit to prevent getting stuck on this slow path
       __ add(RtlabWasteLimitValue, ThreadLocalAllocBuffer::refill_waste_limit_increment(), RtlabWasteLimitValue);
       __ st_ptr(RtlabWasteLimitValue, G2_thread, in_bytes(JavaThread::tlab_refill_waste_limit_offset()));
     } else {
       // No allocation in the shared eden.
-      __ br(Assembler::always, false, Assembler::pt, slow_case);
-      __ delayed()->nop();
+      __ ba_short(slow_case);
     }
   }
 
@@ -3437,18 +3466,14 @@ void TemplateTable::_new() {
 
     // RnewTopValue contains the top address after the new object
     // has been allocated.
-    __ cmp(RnewTopValue, RendValue);
-    __ brx(Assembler::greaterUnsigned, false, Assembler::pn, slow_case);
-    __ delayed()->nop();
+    __ cmp_and_brx_short(RnewTopValue, RendValue, Assembler::greaterUnsigned, Assembler::pn, slow_case);
 
     __ casx_under_lock(RtopAddr, RoldTopValue, RnewTopValue,
       VM_Version::v9_instructions_work() ? NULL :
       (address)StubRoutines::Sparc::atomic_memory_operation_lock_addr());
 
     // if someone beat us on the allocation, try again, otherwise continue
-    __ cmp(RoldTopValue, RnewTopValue);
-    __ brx(Assembler::notEqual, false, Assembler::pn, retry);
-    __ delayed()->nop();
+    __ cmp_and_brx_short(RoldTopValue, RnewTopValue, Assembler::notEqual, Assembler::pn, retry);
 
     // bump total bytes allocated by this thread
     // RoldTopValue and RtopAddr are dead, so can use G1 and G3
@@ -3463,7 +3488,11 @@ void TemplateTable::_new() {
     __ delayed()->add(RallocatedObject, sizeof(oopDesc), G3_scratch);
 
     // initialize remaining object fields
-    { Label loop;
+    if (UseBlockZeroing) {
+      // Use BIS for zeroing
+      __ bis_zeroing(G3_scratch, Roffset, G1_scratch, initialize_header);
+    } else {
+      Label loop;
       __ subcc(Roffset, wordSize, Roffset);
       __ bind(loop);
       //__ subcc(Roffset, wordSize, Roffset);      // executed above loop or in delay slot
@@ -3471,8 +3500,7 @@ void TemplateTable::_new() {
       __ br(Assembler::notEqual, false, Assembler::pt, loop);
       __ delayed()->subcc(Roffset, wordSize, Roffset);
     }
-    __ br(Assembler::always, false, Assembler::pt, initialize_header);
-    __ delayed()->nop();
+    __ ba_short(initialize_header);
   }
 
   // slow case
@@ -3482,14 +3510,13 @@ void TemplateTable::_new() {
 
   call_VM(Otos_i, CAST_FROM_FN_PTR(address, InterpreterRuntime::_new), O1, O2);
 
-  __ ba(false, done);
-  __ delayed()->nop();
+  __ ba_short(done);
 
   // Initialize the header: mark, klass
   __ bind(initialize_header);
 
   if (UseBiasedLocking) {
-    __ ld_ptr(RinstanceKlass, Klass::prototype_header_offset_in_bytes() + sizeof(oopDesc), G4_scratch);
+    __ ld_ptr(RinstanceKlass, in_bytes(Klass::prototype_header_offset()), G4_scratch);
   } else {
     __ set((intptr_t)markOopDesc::prototype(), G4_scratch);
   }
@@ -3547,8 +3574,7 @@ void TemplateTable::checkcast() {
   Register RspecifiedKlass = O4;
 
   // Check for casting a NULL
-  __ br_null(Otos_i, false, Assembler::pn, is_null);
-  __ delayed()->nop();
+  __ br_null_short(Otos_i, Assembler::pn, is_null);
 
   // Get value klass in RobjKlass
   __ load_klass(Otos_i, RobjKlass); // get value klass
@@ -3568,8 +3594,7 @@ void TemplateTable::checkcast() {
   call_VM(RspecifiedKlass, CAST_FROM_FN_PTR(address, InterpreterRuntime::quicken_io_cc) );
   __ pop_ptr(Otos_i, G3_scratch); // restore receiver
 
-  __ br(Assembler::always, false, Assembler::pt, resolved);
-  __ delayed()->nop();
+  __ ba_short(resolved);
 
   // Extract target class from constant pool
   __ bind(quicked);
@@ -3588,8 +3613,7 @@ void TemplateTable::checkcast() {
   __ bind(cast_ok);
 
   if (ProfileInterpreter) {
-    __ ba(false, done);
-    __ delayed()->nop();
+    __ ba_short(done);
   }
   __ bind(is_null);
   __ profile_null_seen(G3_scratch);
@@ -3605,8 +3629,7 @@ void TemplateTable::instanceof() {
   Register RspecifiedKlass = O4;
 
   // Check for casting a NULL
-  __ br_null(Otos_i, false, Assembler::pt, is_null);
-  __ delayed()->nop();
+  __ br_null_short(Otos_i, Assembler::pt, is_null);
 
   // Get value klass in RobjKlass
   __ load_klass(Otos_i, RobjKlass); // get value klass
@@ -3626,9 +3649,7 @@ void TemplateTable::instanceof() {
   call_VM(RspecifiedKlass, CAST_FROM_FN_PTR(address, InterpreterRuntime::quicken_io_cc) );
   __ pop_ptr(Otos_i, G3_scratch); // restore receiver
 
-  __ br(Assembler::always, false, Assembler::pt, resolved);
-  __ delayed()->nop();
-
+  __ ba_short(resolved);
 
   // Extract target class from constant pool
   __ bind(quicked);
@@ -3646,8 +3667,7 @@ void TemplateTable::instanceof() {
   __ clr( Otos_i );
 
   if (ProfileInterpreter) {
-    __ ba(false, done);
-    __ delayed()->nop();
+    __ ba_short(done);
   }
   __ bind(is_null);
   __ profile_null_seen(G3_scratch);
@@ -3721,7 +3741,7 @@ void TemplateTable::monitorenter() {
   {
     Label entry, loop, exit;
     __ add( __ top_most_monitor(), O2 ); // last one to check
-    __ ba( false, entry );
+    __ ba( entry );
     __ delayed()->mov( Lmonitors, O3 ); // first one to check
 
 
@@ -3754,8 +3774,7 @@ void TemplateTable::monitorenter() {
   { Label allocated;
 
     // found free slot?
-    __ br_notnull(O1, false, Assembler::pn, allocated);
-    __ delayed()->nop();
+    __ br_notnull_short(O1, Assembler::pn, allocated);
 
     __ add_monitor_to_stack( false, O2, O3 );
     __ mov(Lmonitors, O1);
@@ -3788,7 +3807,7 @@ void TemplateTable::monitorexit() {
 
   { Label entry, loop, found;
     __ add( __ top_most_monitor(), O2 ); // last one to check
-    __ ba(false, entry );
+    __ ba(entry);
     // use Lscratch to hold monitor elem to check, start with most recent monitor,
     // By using a local it survives the call to the C routine.
     __ delayed()->mov( Lmonitors, Lscratch );

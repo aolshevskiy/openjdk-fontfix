@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,8 +21,6 @@
  * questions.
  *
  */
-
-# define __STDC_FORMAT_MACROS
 
 // no precompiled headers
 #include "classfile/classLoader.hpp"
@@ -84,12 +82,6 @@
 # include "assembler_ppc.inline.hpp"
 # include "nativeInst_ppc.hpp"
 #endif
-#ifdef COMPILER1
-#include "c1/c1_Runtime1.hpp"
-#endif
-#ifdef COMPILER2
-#include "opto/runtime.hpp"
-#endif
 
 // put OS-includes here
 # include <sys/types.h>
@@ -129,7 +121,6 @@
 
 // for timer info max values which include all bits
 #define ALL_64_BITS CONST64(0xFFFFFFFFFFFFFFFF)
-#define SEC_IN_NANOSECS  1000000000LL
 
 #define LARGEPAGES_BIT (1 << 6)
 ////////////////////////////////////////////////////////////////////////////////
@@ -169,7 +160,35 @@ sigset_t SR_sigset;
 /* Used to protect dlsym() calls */
 static pthread_mutex_t dl_mutex;
 
-////////////////////////////////////////////////////////////////////////////////
+#ifdef JAVASE_EMBEDDED
+class MemNotifyThread: public Thread {
+  friend class VMStructs;
+ public:
+  virtual void run();
+
+ private:
+  static MemNotifyThread* _memnotify_thread;
+  int _fd;
+
+ public:
+
+  // Constructor
+  MemNotifyThread(int fd);
+
+  // Tester
+  bool is_memnotify_thread() const { return true; }
+
+  // Printing
+  char* name() const { return (char*)"Linux MemNotify Thread"; }
+
+  // Returns the single instance of the MemNotifyThread
+  static MemNotifyThread* memnotify_thread() { return _memnotify_thread; }
+
+  // Create and start the single instance of MemNotifyThread
+  static void start();
+};
+#endif // JAVASE_EMBEDDED
+
 // utility functions
 
 static int SR_initialize();
@@ -346,7 +365,7 @@ void os::init_system_properties_values() {
   // code needs to be changed accordingly.
 
   // The next few definitions allow the code to be verbatim:
-#define malloc(n) (char*)NEW_C_HEAP_ARRAY(char, (n))
+#define malloc(n) (char*)NEW_C_HEAP_ARRAY(char, (n), mtInternal)
 #define getenv(n) ::getenv(n)
 
 /*
@@ -614,7 +633,7 @@ void os::Linux::libpthread_init() {
 
   size_t n = confstr(_CS_GNU_LIBC_VERSION, NULL, 0);
   if (n > 0) {
-     char *str = (char *)malloc(n);
+     char *str = (char *)malloc(n, mtInternal);
      confstr(_CS_GNU_LIBC_VERSION, str, n);
      os::Linux::set_glibc_version(str);
   } else {
@@ -627,7 +646,7 @@ void os::Linux::libpthread_init() {
 
   n = confstr(_CS_GNU_LIBPTHREAD_VERSION, NULL, 0);
   if (n > 0) {
-     char *str = (char *)malloc(n);
+     char *str = (char *)malloc(n, mtInternal);
      confstr(_CS_GNU_LIBPTHREAD_VERSION, str, n);
      // Vanilla RH-9 (glibc 2.3.2) has a bug that confstr() always tells
      // us "NPTL-0.29" even we are running with LinuxThreads. Check if this
@@ -1660,11 +1679,11 @@ void os::dll_build_name(char* buffer, size_t buflen,
     // release the storage
     for (int i = 0 ; i < n ; i++) {
       if (pelements[i] != NULL) {
-        FREE_C_HEAP_ARRAY(char, pelements[i]);
+        FREE_C_HEAP_ARRAY(char, pelements[i], mtInternal);
       }
     }
     if (pelements != NULL) {
-      FREE_C_HEAP_ARRAY(char*, pelements);
+      FREE_C_HEAP_ARRAY(char*, pelements, mtInternal);
     }
   } else {
     snprintf(buffer, buflen, "%s/lib%s.so", pname, fname);
@@ -1707,7 +1726,7 @@ bool os::dll_address_to_function_name(address addr, char *buf,
     return true;
   } else if (dlinfo.dli_fname != NULL && dlinfo.dli_fbase != 0) {
     if (Decoder::decode((address)(addr - (address)dlinfo.dli_fbase),
-       dlinfo.dli_fname, buf, buflen, offset) == Decoder::no_error) {
+        buf, buflen, offset, dlinfo.dli_fname)) {
        return true;
     }
   }
@@ -1995,15 +2014,43 @@ void os::print_dll_info(outputStream *st) {
    }
 }
 
+void os::print_os_info_brief(outputStream* st) {
+  os::Linux::print_distro_info(st);
+
+  os::Posix::print_uname_info(st);
+
+  os::Linux::print_libversion_info(st);
+
+}
 
 void os::print_os_info(outputStream* st) {
   st->print("OS:");
 
-  // Try to identify popular distros.
-  // Most Linux distributions have /etc/XXX-release file, which contains
-  // the OS version string. Some have more than one /etc/XXX-release file
-  // (e.g. Mandrake has both /etc/mandrake-release and /etc/redhat-release.),
-  // so the order is important.
+  os::Linux::print_distro_info(st);
+
+  os::Posix::print_uname_info(st);
+
+  // Print warning if unsafe chroot environment detected
+  if (unsafe_chroot_detected) {
+    st->print("WARNING!! ");
+    st->print_cr(unstable_chroot_error);
+  }
+
+  os::Linux::print_libversion_info(st);
+
+  os::Posix::print_rlimit_info(st);
+
+  os::Posix::print_load_average(st);
+
+  os::Linux::print_full_memory_info(st);
+}
+
+// Try to identify popular distros.
+// Most Linux distributions have /etc/XXX-release file, which contains
+// the OS version string. Some have more than one /etc/XXX-release file
+// (e.g. Mandrake has both /etc/mandrake-release and /etc/redhat-release.),
+// so the order is important.
+void os::Linux::print_distro_info(outputStream* st) {
   if (!_print_ascii_file("/etc/mandrake-release", st) &&
       !_print_ascii_file("/etc/sun-release", st) &&
       !_print_ascii_file("/etc/redhat-release", st) &&
@@ -2016,23 +2063,9 @@ void os::print_os_info(outputStream* st) {
       st->print("Linux");
   }
   st->cr();
+}
 
-  // kernel
-  st->print("uname:");
-  struct utsname name;
-  uname(&name);
-  st->print(name.sysname); st->print(" ");
-  st->print(name.release); st->print(" ");
-  st->print(name.version); st->print(" ");
-  st->print(name.machine);
-  st->cr();
-
-  // Print warning if unsafe chroot environment detected
-  if (unsafe_chroot_detected) {
-    st->print("WARNING!! ");
-    st->print_cr(unstable_chroot_error);
-  }
-
+void os::Linux::print_libversion_info(outputStream* st) {
   // libc, pthread
   st->print("libc:");
   st->print(os::Linux::glibc_version()); st->print(" ");
@@ -2041,48 +2074,12 @@ void os::print_os_info(outputStream* st) {
      st->print("(%s stack)", os::Linux::is_floating_stack() ? "floating" : "fixed");
   }
   st->cr();
+}
 
-  // rlimit
-  st->print("rlimit:");
-  struct rlimit rlim;
-
-  st->print(" STACK ");
-  getrlimit(RLIMIT_STACK, &rlim);
-  if (rlim.rlim_cur == RLIM_INFINITY) st->print("infinity");
-  else st->print("%uk", rlim.rlim_cur >> 10);
-
-  st->print(", CORE ");
-  getrlimit(RLIMIT_CORE, &rlim);
-  if (rlim.rlim_cur == RLIM_INFINITY) st->print("infinity");
-  else st->print("%uk", rlim.rlim_cur >> 10);
-
-  st->print(", NPROC ");
-  getrlimit(RLIMIT_NPROC, &rlim);
-  if (rlim.rlim_cur == RLIM_INFINITY) st->print("infinity");
-  else st->print("%d", rlim.rlim_cur);
-
-  st->print(", NOFILE ");
-  getrlimit(RLIMIT_NOFILE, &rlim);
-  if (rlim.rlim_cur == RLIM_INFINITY) st->print("infinity");
-  else st->print("%d", rlim.rlim_cur);
-
-  st->print(", AS ");
-  getrlimit(RLIMIT_AS, &rlim);
-  if (rlim.rlim_cur == RLIM_INFINITY) st->print("infinity");
-  else st->print("%uk", rlim.rlim_cur >> 10);
-  st->cr();
-
-  // load average
-  st->print("load average:");
-  double loadavg[3];
-  os::loadavg(loadavg, 3);
-  st->print("%0.02f %0.02f %0.02f", loadavg[0], loadavg[1], loadavg[2]);
-  st->cr();
-
-  // meminfo
-  st->print("\n/proc/meminfo:\n");
-  _print_ascii_file("/proc/meminfo", st);
-  st->cr();
+void os::Linux::print_full_memory_info(outputStream* st) {
+   st->print("\n/proc/meminfo:\n");
+   _print_ascii_file("/proc/meminfo", st);
+   st->cr();
 }
 
 void os::print_memory_info(outputStream* st) {
@@ -2102,6 +2099,14 @@ void os::print_memory_info(outputStream* st) {
             ((jlong)si.totalswap * si.mem_unit) >> 10);
   st->print("(" UINT64_FORMAT "k free)",
             ((jlong)si.freeswap * si.mem_unit) >> 10);
+  st->cr();
+}
+
+void os::pd_print_cpu_info(outputStream* st) {
+  st->print("\n/proc/cpuinfo:\n");
+  if (!_print_ascii_file("/proc/cpuinfo", st)) {
+    st->print("  <Not Available>");
+  }
   st->cr();
 }
 
@@ -2458,11 +2463,17 @@ void linux_wrap_code(char* base, size_t size) {
 //       All it does is to check if there are enough free pages
 //       left at the time of mmap(). This could be a potential
 //       problem.
-bool os::commit_memory(char* addr, size_t size, bool exec) {
+bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
   int prot = exec ? PROT_READ|PROT_WRITE|PROT_EXEC : PROT_READ|PROT_WRITE;
   uintptr_t res = (uintptr_t) ::mmap(addr, size, prot,
                                    MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0);
-  return res != (uintptr_t) MAP_FAILED;
+  if (res != (uintptr_t) MAP_FAILED) {
+    if (UseNUMAInterleaving) {
+      numa_make_global(addr, size);
+    }
+    return true;
+  }
+  return false;
 }
 
 // Define MAP_HUGETLB here so we can build HotSpot on old systems.
@@ -2475,7 +2486,7 @@ bool os::commit_memory(char* addr, size_t size, bool exec) {
 #define MADV_HUGEPAGE 14
 #endif
 
-bool os::commit_memory(char* addr, size_t size, size_t alignment_hint,
+bool os::pd_commit_memory(char* addr, size_t size, size_t alignment_hint,
                        bool exec) {
   if (UseHugeTLBFS && alignment_hint > (size_t)vm_page_size()) {
     int prot = exec ? PROT_READ|PROT_WRITE|PROT_EXEC : PROT_READ|PROT_WRITE;
@@ -2483,13 +2494,23 @@ bool os::commit_memory(char* addr, size_t size, size_t alignment_hint,
       (uintptr_t) ::mmap(addr, size, prot,
                          MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS|MAP_HUGETLB,
                          -1, 0);
-    return res != (uintptr_t) MAP_FAILED;
+    if (res != (uintptr_t) MAP_FAILED) {
+      if (UseNUMAInterleaving) {
+        numa_make_global(addr, size);
+      }
+      return true;
+    }
+    // Fall through and try to use small pages
   }
 
-  return commit_memory(addr, size, exec);
+  if (commit_memory(addr, size, exec)) {
+    realign_memory(addr, size, alignment_hint);
+    return true;
+  }
+  return false;
 }
 
-void os::realign_memory(char *addr, size_t bytes, size_t alignment_hint) {
+void os::pd_realign_memory(char *addr, size_t bytes, size_t alignment_hint) {
   if (UseHugeTLBFS && alignment_hint > (size_t)vm_page_size()) {
     // We don't check the return value: madvise(MADV_HUGEPAGE) may not
     // be supported or the memory may already be backed by huge pages.
@@ -2497,8 +2518,15 @@ void os::realign_memory(char *addr, size_t bytes, size_t alignment_hint) {
   }
 }
 
-void os::free_memory(char *addr, size_t bytes) {
-  ::madvise(addr, bytes, MADV_DONTNEED);
+void os::pd_free_memory(char *addr, size_t bytes, size_t alignment_hint) {
+  // This method works by doing an mmap over an existing mmaping and effectively discarding
+  // the existing pages. However it won't work for SHM-based large pages that cannot be
+  // uncommitted at all. We don't do anything in this case to avoid creating a segment with
+  // small pages on top of the SHM segment. This method always works for small pages, so we
+  // allow that in any case.
+  if (alignment_hint <= (size_t)os::vm_page_size() || !UseSHM) {
+    commit_memory(addr, bytes, alignment_hint, false);
+  }
 }
 
 void os::numa_make_global(char *addr, size_t bytes) {
@@ -2542,6 +2570,31 @@ char *os::scan_pages(char *start, char* end, page_info* page_expected, page_info
   return end;
 }
 
+
+int os::Linux::sched_getcpu_syscall(void) {
+  unsigned int cpu;
+  int retval = -1;
+
+#if defined(IA32)
+# ifndef SYS_getcpu
+# define SYS_getcpu 318
+# endif
+  retval = syscall(SYS_getcpu, &cpu, NULL, NULL);
+#elif defined(AMD64)
+// Unfortunately we have to bring all these macros here from vsyscall.h
+// to be able to compile on old linuxes.
+# define __NR_vgetcpu 2
+# define VSYSCALL_START (-10UL << 20)
+# define VSYSCALL_SIZE 1024
+# define VSYSCALL_ADDR(vsyscall_nr) (VSYSCALL_START+VSYSCALL_SIZE*(vsyscall_nr))
+  typedef long (*vgetcpu_t)(unsigned int *cpu, unsigned int *node, unsigned long *tcache);
+  vgetcpu_t vgetcpu = (vgetcpu_t)VSYSCALL_ADDR(__NR_vgetcpu);
+  retval = vgetcpu(&cpu, NULL, NULL);
+#endif
+
+  return (retval == -1) ? retval : cpu;
+}
+
 // Something to do with the numa-aware allocator needs these symbols
 extern "C" JNIEXPORT void numa_warn(int number, char *where, ...) { }
 extern "C" JNIEXPORT void numa_error(char *where) { }
@@ -2565,6 +2618,10 @@ bool os::Linux::libnuma_init() {
   set_sched_getcpu(CAST_TO_FN_PTR(sched_getcpu_func_t,
                                   dlsym(RTLD_DEFAULT, "sched_getcpu")));
 
+  // If it's not, try a direct syscall.
+  if (sched_getcpu() == -1)
+    set_sched_getcpu(CAST_TO_FN_PTR(sched_getcpu_func_t, (void*)&sched_getcpu_syscall));
+
   if (sched_getcpu() != -1) { // Does it work?
     void *handle = dlopen("libnuma.so.1", RTLD_LAZY);
     if (handle != NULL) {
@@ -2583,7 +2640,7 @@ bool os::Linux::libnuma_init() {
       if (numa_available() != -1) {
         set_numa_all_nodes((unsigned long*)libnuma_dlsym(handle, "numa_all_nodes"));
         // Create a cpu -> node mapping
-        _cpu_to_node = new (ResourceObj::C_HEAP) GrowableArray<int>(0, true);
+        _cpu_to_node = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<int>(0, true);
         rebuild_cpu_to_node_map();
         return true;
       }
@@ -2613,7 +2670,7 @@ void os::Linux::rebuild_cpu_to_node_map() {
   cpu_to_node()->at_grow(cpu_num - 1);
   size_t node_num = numa_get_groups_num();
 
-  unsigned long *cpu_map = NEW_C_HEAP_ARRAY(unsigned long, cpu_map_size);
+  unsigned long *cpu_map = NEW_C_HEAP_ARRAY(unsigned long, cpu_map_size, mtInternal);
   for (size_t i = 0; i < node_num; i++) {
     if (numa_node_to_cpus(i, cpu_map, cpu_map_size * sizeof(unsigned long)) != -1) {
       for (size_t j = 0; j < cpu_map_valid_size; j++) {
@@ -2627,7 +2684,7 @@ void os::Linux::rebuild_cpu_to_node_map() {
       }
     }
   }
-  FREE_C_HEAP_ARRAY(unsigned long, cpu_map);
+  FREE_C_HEAP_ARRAY(unsigned long, cpu_map, mtInternal);
 }
 
 int os::Linux::get_node_by_cpu(int cpu_id) {
@@ -2646,7 +2703,7 @@ os::Linux::numa_tonode_memory_func_t os::Linux::_numa_tonode_memory;
 os::Linux::numa_interleave_memory_func_t os::Linux::_numa_interleave_memory;
 unsigned long* os::Linux::_numa_all_nodes;
 
-bool os::uncommit_memory(char* addr, size_t size) {
+bool os::pd_uncommit_memory(char* addr, size_t size) {
   uintptr_t res = (uintptr_t) ::mmap(addr, size, PROT_NONE,
                 MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE|MAP_ANONYMOUS, -1, 0);
   return res  != (uintptr_t) MAP_FAILED;
@@ -2711,7 +2768,7 @@ bool get_stack_bounds(uintptr_t *bottom, uintptr_t *top) {
 // munmap() the guard pages we don't leave a hole in the stack
 // mapping. This only affects the main/initial thread, but guard
 // against future OS changes
-bool os::create_stack_guard_pages(char* addr, size_t size) {
+bool os::pd_create_stack_guard_pages(char* addr, size_t size) {
   uintptr_t stack_extent, stack_base;
   bool chk_bounds = NOT_DEBUG(os::Linux::is_initial_thread()) DEBUG_ONLY(true);
   if (chk_bounds && get_stack_bounds(&stack_extent, &stack_base)) {
@@ -2784,12 +2841,12 @@ static int anon_munmap(char * addr, size_t size) {
   return ::munmap(addr, size) == 0;
 }
 
-char* os::reserve_memory(size_t bytes, char* requested_addr,
+char* os::pd_reserve_memory(size_t bytes, char* requested_addr,
                          size_t alignment_hint) {
   return anon_mmap(requested_addr, bytes, (requested_addr != NULL));
 }
 
-bool os::release_memory(char* addr, size_t size) {
+bool os::pd_release_memory(char* addr, size_t size) {
   return anon_munmap(addr, size);
 }
 
@@ -3055,6 +3112,10 @@ char* os::reserve_memory_special(size_t bytes, char* req_addr, bool exec) {
      return NULL;
   }
 
+  if ((addr != NULL) && UseNUMAInterleaving) {
+    numa_make_global(addr, bytes);
+  }
+
   return addr;
 }
 
@@ -3082,7 +3143,7 @@ bool os::can_execute_large_page_memory() {
 // Reserve memory at an arbitrary address, only if that area is
 // available (and not reserved for something else).
 
-char* os::attempt_reserve_memory_at(size_t bytes, char* requested_addr) {
+char* os::pd_attempt_reserve_memory_at(size_t bytes, char* requested_addr) {
   const int max_tries = 10;
   char* base[max_tries];
   size_t size[max_tries];
@@ -3176,8 +3237,6 @@ size_t os::read(int fd, void *buf, unsigned int nBytes) {
 // generates a SIGUSRx signal. Note that SIGUSR1 can interfere with
 // SIGSEGV, see 4355769.
 
-const int NANOSECS_PER_MILLISECS = 1000000;
-
 int os::sleep(Thread* thread, jlong millis, bool interruptible) {
   assert(thread == Thread::current(),  "thread consistency check");
 
@@ -3200,7 +3259,7 @@ int os::sleep(Thread* thread, jlong millis, bool interruptible) {
         // not a guarantee() because JVM should not abort on kernel/glibc bugs
         assert(!Linux::supports_monotonic_clock(), "time moving backwards");
       } else {
-        millis -= (newtime - prevtime) / NANOSECS_PER_MILLISECS;
+        millis -= (newtime - prevtime) / NANOSECS_PER_MILLISEC;
       }
 
       if(millis <= 0) {
@@ -3239,7 +3298,7 @@ int os::sleep(Thread* thread, jlong millis, bool interruptible) {
         // not a guarantee() because JVM should not abort on kernel/glibc bugs
         assert(!Linux::supports_monotonic_clock(), "time moving backwards");
       } else {
-        millis -= (newtime - prevtime) / NANOSECS_PER_MILLISECS;
+        millis -= (newtime - prevtime) / NANOSECS_PER_MILLISEC;
       }
 
       if(millis <= 0) break ;
@@ -3303,7 +3362,7 @@ void os::loop_breaker(int attempts) {
 // this reason, the code should not be used as default (ThreadPriorityPolicy=0).
 // It is only used when ThreadPriorityPolicy=1 and requires root privilege.
 
-int os::java_to_os_priority[MaxPriority + 1] = {
+int os::java_to_os_priority[CriticalPriority + 1] = {
   19,              // 0 Entry should never be used
 
    4,              // 1 MinPriority
@@ -3318,7 +3377,9 @@ int os::java_to_os_priority[MaxPriority + 1] = {
   -3,              // 8
   -4,              // 9 NearMaxPriority
 
-  -5               // 10 MaxPriority
+  -5,              // 10 MaxPriority
+
+  -5               // 11 CriticalPriority
 };
 
 static int prio_init() {
@@ -3332,6 +3393,9 @@ static int prio_init() {
       }
       ThreadPriorityPolicy = 0;
     }
+  }
+  if (UseCriticalJavaThreadPriority) {
+    os::java_to_os_priority[MaxPriority] = os::java_to_os_priority[CriticalPriority];
   }
   return 0;
 }
@@ -3385,9 +3449,6 @@ void os::hint_no_preempt() {}
 static void resume_clear_context(OSThread *osthread) {
   osthread->set_ucontext(NULL);
   osthread->set_siginfo(NULL);
-
-  // notify the suspend action is completed, we have now resumed
-  osthread->sr.clear_suspended();
 }
 
 static void suspend_save_context(OSThread *osthread, siginfo_t* siginfo, ucontext_t* context) {
@@ -3407,7 +3468,7 @@ static void suspend_save_context(OSThread *osthread, siginfo_t* siginfo, ucontex
 // its signal handlers run and prevents sigwait()'s use with the
 // mutex granting granting signal.
 //
-// Currently only ever called on the VMThread
+// Currently only ever called on the VMThread and JavaThreads (PC sampling)
 //
 static void SR_handler(int sig, siginfo_t* siginfo, ucontext_t* context) {
   // Save and restore errno to avoid confusing native code with EINTR
@@ -3416,38 +3477,44 @@ static void SR_handler(int sig, siginfo_t* siginfo, ucontext_t* context) {
 
   Thread* thread = Thread::current();
   OSThread* osthread = thread->osthread();
-  assert(thread->is_VM_thread(), "Must be VMThread");
-  // read current suspend action
-  int action = osthread->sr.suspend_action();
-  if (action == SR_SUSPEND) {
+  assert(thread->is_VM_thread() || thread->is_Java_thread(), "Must be VMThread or JavaThread");
+
+  os::SuspendResume::State current = osthread->sr.state();
+  if (current == os::SuspendResume::SR_SUSPEND_REQUEST) {
     suspend_save_context(osthread, siginfo, context);
 
-    // Notify the suspend action is about to be completed. do_suspend()
-    // waits until SR_SUSPENDED is set and then returns. We will wait
-    // here for a resume signal and that completes the suspend-other
-    // action. do_suspend/do_resume is always called as a pair from
-    // the same thread - so there are no races
+    // attempt to switch the state, we assume we had a SUSPEND_REQUEST
+    os::SuspendResume::State state = osthread->sr.suspended();
+    if (state == os::SuspendResume::SR_SUSPENDED) {
+      sigset_t suspend_set;  // signals for sigsuspend()
 
-    // notify the caller
-    osthread->sr.set_suspended();
+      // get current set of blocked signals and unblock resume signal
+      pthread_sigmask(SIG_BLOCK, NULL, &suspend_set);
+      sigdelset(&suspend_set, SR_signum);
 
-    sigset_t suspend_set;  // signals for sigsuspend()
+      // wait here until we are resumed
+      while (1) {
+        sigsuspend(&suspend_set);
 
-    // get current set of blocked signals and unblock resume signal
-    pthread_sigmask(SIG_BLOCK, NULL, &suspend_set);
-    sigdelset(&suspend_set, SR_signum);
+        os::SuspendResume::State result = osthread->sr.running();
+        if (result == os::SuspendResume::SR_RUNNING) {
+          break;
+        }
+      }
 
-    // wait here until we are resumed
-    do {
-      sigsuspend(&suspend_set);
-      // ignore all returns until we get a resume signal
-    } while (osthread->sr.suspend_action() != SR_CONTINUE);
+    } else if (state == os::SuspendResume::SR_RUNNING) {
+      // request was cancelled, continue
+    } else {
+      ShouldNotReachHere();
+    }
 
     resume_clear_context(osthread);
-
+  } else if (current == os::SuspendResume::SR_RUNNING) {
+    // request was cancelled, continue
+  } else if (current == os::SuspendResume::SR_WAKEUP_REQUEST) {
+    // ignore
   } else {
-    assert(action == SR_CONTINUE, "unexpected sr action");
-    // nothing special to do - just leave the handler
+    ShouldNotReachHere();
   }
 
   errno = old_errno;
@@ -3495,42 +3562,93 @@ static int SR_finalize() {
   return 0;
 }
 
+static int sr_notify(OSThread* osthread) {
+  int status = pthread_kill(osthread->pthread_id(), SR_signum);
+  assert_status(status == 0, status, "pthread_kill");
+  return status;
+}
+
+// "Randomly" selected value for how long we want to spin
+// before bailing out on suspending a thread, also how often
+// we send a signal to a thread we want to resume
+static const int RANDOMLY_LARGE_INTEGER = 1000000;
+static const int RANDOMLY_LARGE_INTEGER2 = 100;
 
 // returns true on success and false on error - really an error is fatal
 // but this seems the normal response to library errors
 static bool do_suspend(OSThread* osthread) {
+  assert(osthread->sr.is_running(), "thread should be running");
   // mark as suspended and send signal
-  osthread->sr.set_suspend_action(SR_SUSPEND);
-  int status = pthread_kill(osthread->pthread_id(), SR_signum);
-  assert_status(status == 0, status, "pthread_kill");
 
-  // check status and wait until notified of suspension
-  if (status == 0) {
-    for (int i = 0; !osthread->sr.is_suspended(); i++) {
-      os::yield_all(i);
-    }
-    osthread->sr.set_suspend_action(SR_NONE);
-    return true;
-  }
-  else {
-    osthread->sr.set_suspend_action(SR_NONE);
+  if (osthread->sr.request_suspend() != os::SuspendResume::SR_SUSPEND_REQUEST) {
+    // failed to switch, state wasn't running?
+    ShouldNotReachHere();
     return false;
   }
+
+  if (sr_notify(osthread) != 0) {
+    // try to cancel, switch to running
+
+    os::SuspendResume::State result = osthread->sr.cancel_suspend();
+    if (result == os::SuspendResume::SR_RUNNING) {
+      // cancelled
+      return false;
+    } else if (result == os::SuspendResume::SR_SUSPENDED) {
+      // somehow managed to suspend
+      return true;
+    } else {
+      ShouldNotReachHere();
+      return false;
+    }
+  }
+
+  // managed to send the signal and switch to SUSPEND_REQUEST, now wait for SUSPENDED
+
+  for (int n = 0; !osthread->sr.is_suspended(); n++) {
+    for (int i = 0; i < RANDOMLY_LARGE_INTEGER2 && !osthread->sr.is_suspended(); i++) {
+      os::yield_all(i);
+    }
+
+    // timeout, try to cancel the request
+    if (n >= RANDOMLY_LARGE_INTEGER) {
+      os::SuspendResume::State cancelled = osthread->sr.cancel_suspend();
+      if (cancelled == os::SuspendResume::SR_RUNNING) {
+        return false;
+      } else if (cancelled == os::SuspendResume::SR_SUSPENDED) {
+        return true;
+      } else {
+        ShouldNotReachHere();
+        return false;
+      }
+    }
+  }
+
+  guarantee(osthread->sr.is_suspended(), "Must be suspended");
+  return true;
 }
 
 static void do_resume(OSThread* osthread) {
   assert(osthread->sr.is_suspended(), "thread should be suspended");
-  osthread->sr.set_suspend_action(SR_CONTINUE);
 
-  int status = pthread_kill(osthread->pthread_id(), SR_signum);
-  assert_status(status == 0, status, "pthread_kill");
-  // check status and wait unit notified of resumption
-  if (status == 0) {
-    for (int i = 0; osthread->sr.is_suspended(); i++) {
-      os::yield_all(i);
+  if (osthread->sr.request_wakeup() != os::SuspendResume::SR_WAKEUP_REQUEST) {
+    // failed to switch to WAKEUP_REQUEST
+    ShouldNotReachHere();
+    return;
+  }
+
+  while (!osthread->sr.is_running()) {
+    if (sr_notify(osthread) == 0) {
+      for (int n = 0; n < RANDOMLY_LARGE_INTEGER && !osthread->sr.is_running(); n++) {
+        for (int i = 0; i < 100 && !osthread->sr.is_running(); i++) {
+          os::yield_all(i);
+        }
+      }
+    } else {
+      ShouldNotReachHere();
     }
   }
-  osthread->sr.set_suspend_action(SR_NONE);
+
+  guarantee(osthread->sr.is_running(), "Must be running!");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3810,14 +3928,19 @@ void os::Linux::install_signal_handlers() {
     }
 
     // We don't activate signal checker if libjsig is in place, we trust ourselves
-    // and if UserSignalHandler is installed all bets are off
+    // and if UserSignalHandler is installed all bets are off.
+    // Log that signal checking is off only if -verbose:jni is specified.
     if (CheckJNICalls) {
       if (libjsig_is_loaded) {
-        tty->print_cr("Info: libjsig is activated, all active signal checking is disabled");
+        if (PrintJNIResolving) {
+          tty->print_cr("Info: libjsig is activated, all active signal checking is disabled");
+        }
         check_signals = false;
       }
       if (AllowUserSignalHandlers) {
-        tty->print_cr("Info: AllowUserSignalHandlers is activated, all active signal checking is disabled");
+        if (PrintJNIResolving) {
+          tty->print_cr("Info: AllowUserSignalHandlers is activated, all active signal checking is disabled");
+        }
         check_signals = false;
       }
     }
@@ -3836,7 +3959,7 @@ jlong os::Linux::fast_thread_cpu_time(clockid_t clockid) {
   int rc = os::Linux::clock_gettime(clockid, &tp);
   assert(rc == 0, "clock_gettime is expected to return 0 code");
 
-  return (tp.tv_sec * SEC_IN_NANOSECS) + tp.tv_nsec;
+  return (tp.tv_sec * NANOSECS_PER_SEC) + tp.tv_nsec;
 }
 
 /////
@@ -4237,7 +4360,16 @@ jint os::init_2(void)
 }
 
 // this is called at the end of vm_initialization
-void os::init_3(void) { }
+void os::init_3(void)
+{
+#ifdef JAVASE_EMBEDDED
+  // Start the MemNotifyThread
+  if (LowMemoryProtection) {
+    MemNotifyThread::start();
+  }
+  return;
+#endif
+}
 
 // Mark the polling page as unreadable
 void os::make_polling_page_unreadable(void) {
@@ -4260,6 +4392,11 @@ int os::active_processor_count() {
   return online_cpus;
 }
 
+void os::set_native_thread_name(const char *name) {
+  // Not yet implemented.
+  return;
+}
+
 bool os::distribute_processes(uint length, uint* distribution) {
   // Not yet implemented.
   return false;
@@ -4272,6 +4409,40 @@ bool os::bind_to_processor(uint processor_id) {
 
 ///
 
+void os::SuspendedThreadTask::internal_do_task() {
+  if (do_suspend(_thread->osthread())) {
+    SuspendedThreadTaskContext context(_thread, _thread->osthread()->ucontext());
+    do_task(context);
+    do_resume(_thread->osthread());
+  }
+}
+
+class PcFetcher : public os::SuspendedThreadTask {
+public:
+  PcFetcher(Thread* thread) : os::SuspendedThreadTask(thread) {}
+  ExtendedPC result();
+protected:
+  void do_task(const os::SuspendedThreadTaskContext& context);
+private:
+  ExtendedPC _epc;
+};
+
+ExtendedPC PcFetcher::result() {
+  guarantee(is_done(), "task is not done yet.");
+  return _epc;
+}
+
+void PcFetcher::do_task(const os::SuspendedThreadTaskContext& context) {
+  Thread* thread = context.thread();
+  OSThread* osthread = thread->osthread();
+  if (osthread->ucontext() != NULL) {
+    _epc = os::Linux::ucontext_get_pc((ucontext_t *) context.ucontext());
+  } else {
+    // NULL context is unexpected, double-check this is the VMThread
+    guarantee(thread->is_VM_thread(), "can only be called for VMThread");
+  }
+}
+
 // Suspends the target using the signal mechanism and then grabs the PC before
 // resuming the target. Used by the flat-profiler only
 ExtendedPC os::get_thread_pc(Thread* thread) {
@@ -4279,22 +4450,9 @@ ExtendedPC os::get_thread_pc(Thread* thread) {
   assert(Thread::current()->is_Watcher_thread(), "Must be watcher");
   assert(thread->is_VM_thread(), "Can only be called for VMThread");
 
-  ExtendedPC epc;
-
-  OSThread* osthread = thread->osthread();
-  if (do_suspend(osthread)) {
-    if (osthread->ucontext() != NULL) {
-      epc = os::Linux::ucontext_get_pc(osthread->ucontext());
-    } else {
-      // NULL context is unexpected, double-check this is the VMThread
-      guarantee(thread->is_VM_thread(), "can only be called for VMThread");
-    }
-    do_resume(osthread);
-  }
-  // failure means pthread_kill failed for some reason - arguably this is
-  // a fatal problem, but such problems are ignored elsewhere
-
-  return epc;
+  PcFetcher fetcher(thread);
+  fetcher.run();
+  return fetcher.result();
 }
 
 int os::Linux::safe_cond_timedwait(pthread_cond_t *_cond, pthread_mutex_t *_mutex, const struct timespec *_abstime)
@@ -4582,18 +4740,16 @@ int os::socket_available(int fd, jint *pbytes) {
 }
 
 // Map a block of memory.
-char* os::map_memory(int fd, const char* file_name, size_t file_offset,
+char* os::pd_map_memory(int fd, const char* file_name, size_t file_offset,
                      char *addr, size_t bytes, bool read_only,
                      bool allow_exec) {
   int prot;
-  int flags;
+  int flags = MAP_PRIVATE;
 
   if (read_only) {
     prot = PROT_READ;
-    flags = MAP_SHARED;
   } else {
     prot = PROT_READ | PROT_WRITE;
-    flags = MAP_PRIVATE;
   }
 
   if (allow_exec) {
@@ -4614,7 +4770,7 @@ char* os::map_memory(int fd, const char* file_name, size_t file_offset,
 
 
 // Remap a block of memory.
-char* os::remap_memory(int fd, const char* file_name, size_t file_offset,
+char* os::pd_remap_memory(int fd, const char* file_name, size_t file_offset,
                        char *addr, size_t bytes, bool read_only,
                        bool allow_exec) {
   // same as map_memory() on this OS
@@ -4624,7 +4780,7 @@ char* os::remap_memory(int fd, const char* file_name, size_t file_offset,
 
 
 // Unmap a block of memory.
-bool os::unmap_memory(char* addr, size_t bytes) {
+bool os::pd_unmap_memory(char* addr, size_t bytes) {
   return munmap(addr, bytes) == 0;
 }
 
@@ -5063,9 +5219,6 @@ void os::PlatformEvent::unpark() {
  * is no need to track notifications.
  */
 
-
-#define NANOSECS_PER_SEC 1000000000
-#define NANOSECS_PER_MILLISEC 1000000
 #define MAX_SECS 100000000
 /*
  * This code is common to linux and solaris and will be moved to a
@@ -5323,15 +5476,18 @@ int os::fork_and_exec(char* cmd) {
 
 // is_headless_jre()
 //
-// Test for the existence of libmawt in motif21 or xawt directories
+// Test for the existence of xawt/libmawt.so or libawt_xawt.so
 // in order to report if we are running in a headless jre
+//
+// Since JDK8 xawt/libmawt.so was moved into the same directory
+// as libawt.so, and renamed libawt_xawt.so
 //
 bool os::is_headless_jre() {
     struct stat statbuf;
     char buf[MAXPATHLEN];
     char libmawtpath[MAXPATHLEN];
     const char *xawtstr  = "/xawt/libmawt.so";
-    const char *motifstr = "/motif21/libmawt.so";
+    const char *new_xawtstr = "/libawt_xawt.so";
     char *p;
 
     // Get path to libjvm.so
@@ -5352,11 +5508,98 @@ bool os::is_headless_jre() {
     strcat(libmawtpath, xawtstr);
     if (::stat(libmawtpath, &statbuf) == 0) return false;
 
-    // check motif21/libmawt.so
+    // check libawt_xawt.so
     strcpy(libmawtpath, buf);
-    strcat(libmawtpath, motifstr);
+    strcat(libmawtpath, new_xawtstr);
     if (::stat(libmawtpath, &statbuf) == 0) return false;
 
     return true;
 }
 
+// Get the default path to the core file
+// Returns the length of the string
+int os::get_core_path(char* buffer, size_t bufferSize) {
+  const char* p = get_current_directory(buffer, bufferSize);
+
+  if (p == NULL) {
+    assert(p != NULL, "failed to get current directory");
+    return 0;
+  }
+
+  return strlen(buffer);
+}
+
+#ifdef JAVASE_EMBEDDED
+//
+// A thread to watch the '/dev/mem_notify' device, which will tell us when the OS is running low on memory.
+//
+MemNotifyThread* MemNotifyThread::_memnotify_thread = NULL;
+
+// ctor
+//
+MemNotifyThread::MemNotifyThread(int fd): Thread() {
+  assert(memnotify_thread() == NULL, "we can only allocate one MemNotifyThread");
+  _fd = fd;
+
+  if (os::create_thread(this, os::os_thread)) {
+    _memnotify_thread = this;
+    os::set_priority(this, NearMaxPriority);
+    os::start_thread(this);
+  }
+}
+
+// Where all the work gets done
+//
+void MemNotifyThread::run() {
+  assert(this == memnotify_thread(), "expected the singleton MemNotifyThread");
+
+  // Set up the select arguments
+  fd_set rfds;
+  if (_fd != -1) {
+    FD_ZERO(&rfds);
+    FD_SET(_fd, &rfds);
+  }
+
+  // Now wait for the mem_notify device to wake up
+  while (1) {
+    // Wait for the mem_notify device to signal us..
+    int rc = select(_fd+1, _fd != -1 ? &rfds : NULL, NULL, NULL, NULL);
+    if (rc == -1) {
+      perror("select!\n");
+      break;
+    } else if (rc) {
+      //ssize_t free_before = os::available_memory();
+      //tty->print ("Notified: Free: %dK \n",os::available_memory()/1024);
+
+      // The kernel is telling us there is not much memory left...
+      // try to do something about that
+
+      // If we are not already in a GC, try one.
+      if (!Universe::heap()->is_gc_active()) {
+        Universe::heap()->collect(GCCause::_allocation_failure);
+
+        //ssize_t free_after = os::available_memory();
+        //tty->print ("Post-Notify: Free: %dK\n",free_after/1024);
+        //tty->print ("GC freed: %dK\n", (free_after - free_before)/1024);
+      }
+      // We might want to do something like the following if we find the GC's are not helping...
+      // Universe::heap()->size_policy()->set_gc_time_limit_exceeded(true);
+    }
+  }
+}
+
+//
+// See if the /dev/mem_notify device exists, and if so, start a thread to monitor it.
+//
+void MemNotifyThread::start() {
+  int    fd;
+  fd = open ("/dev/mem_notify", O_RDONLY, 0);
+  if (fd < 0) {
+      return;
+  }
+
+  if (memnotify_thread() == NULL) {
+    new MemNotifyThread(fd);
+  }
+}
+#endif // JAVASE_EMBEDDED

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,9 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <ctype.h>
+#ifdef _ALLBSD_SOURCE
+#include <unistd.h> /* gethostname */
+#endif
 
 #include "jvm.h"
 #include "jni_util.h"
@@ -70,8 +73,8 @@ Java_java_net_Inet6AddressImpl_getLocalHostName(JNIEnv *env, jobject this) {
     } else {
         // ensure null-terminated
         hostname[NI_MAXHOST] = '\0';
-#ifdef __linux__
-        /* On Linux gethostname() says "host.domain.sun.com".  On
+#if defined(__linux__) || defined(_ALLBSD_SOURCE)
+        /* On Linux/FreeBSD gethostname() says "host.domain.sun.com".  On
          * Solaris gethostname() says "host", so extra work is needed.
          */
 #else
@@ -109,7 +112,7 @@ Java_java_net_Inet6AddressImpl_getLocalHostName(JNIEnv *env, jobject this) {
             }
         }
 #endif /* AF_INET6 */
-#endif /* __linux__ */
+#endif /* __linux__ || _ALLBSD_SOURCE */
     }
     return (*env)->NewStringUTF(env, hostname);
 }
@@ -267,7 +270,7 @@ Java_java_net_Inet6AddressImpl_lookupAllHostAddr(JNIEnv *env, jobject this,
                     struct addrinfo *next
                         = (struct addrinfo*) malloc(sizeof(struct addrinfo));
                     if (!next) {
-                        JNU_ThrowOutOfMemoryError(env, "heap allocation failed");
+                        JNU_ThrowOutOfMemoryError(env, "Native heap allocation failed");
                         ret = NULL;
                         goto cleanupAndReturn;
                     }
@@ -509,11 +512,11 @@ ping6(JNIEnv *env, jint fd, struct sockaddr_in6* him, jint timeout,
       n = sendto(fd, sendbuf, plen, 0, (struct sockaddr*) him, sizeof(struct sockaddr_in6));
       if (n < 0 && errno != EINPROGRESS) {
 #ifdef __linux__
-        if (errno != EINVAL)
+        if (errno != EINVAL && errno != EHOSTUNREACH)
           /*
            * On some Linuxes, when bound to the loopback interface, sendto
-           * will fail and errno will be set to EINVAL. When that happens,
-           * don't throw an exception, just return false.
+           * will fail and errno will be set to EINVAL or EHOSTUNREACH.
+           * When that happens, don't throw an exception, just return false.
            */
 #endif /*__linux__ */
         NET_ThrowNew(env, errno, "Can't send ICMP packet");
@@ -536,10 +539,15 @@ ping6(JNIEnv *env, jint fd, struct sockaddr_in6* him, jint timeout,
            *       from the host that we are trying to determine is reachable.
            */
           if (n >= 8 && icmp6->icmp6_type == ICMP6_ECHO_REPLY &&
-              (ntohs(icmp6->icmp6_id) == pid) &&
-              NET_IsEqual(caddr, recv_caddr)) {
-            close(fd);
-            return JNI_TRUE;
+              (ntohs(icmp6->icmp6_id) == pid)) {
+            if (NET_IsEqual(caddr, recv_caddr)) {
+              close(fd);
+              return JNI_TRUE;
+            }
+            if (NET_IsZeroAddr(caddr)) {
+              close(fd);
+              return JNI_TRUE;
+            }
           }
         }
       } while (tmout2 > 0);
@@ -677,10 +685,11 @@ Java_java_net_Inet6AddressImpl_isReachable0(JNIEnv *env, jobject this,
         case EADDRNOTAVAIL: /* address is not available on  the  remote machine */
 #ifdef __linux__
         case EINVAL:
+        case EHOSTUNREACH:
           /*
            * On some Linuxes, when bound to the loopback interface, connect
-           * will fail and errno will be set to EINVAL. When that happens,
-           * don't throw an exception, just return false.
+           * will fail and errno will be set to EINVAL or EHOSTUNREACH.
+           * When that happens, don't throw an exception, just return false.
            */
 #endif /* __linux__ */
           close(fd);

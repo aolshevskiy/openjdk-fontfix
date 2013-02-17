@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,7 @@
 #include "runtime/vmThread.hpp"
 #include "runtime/vm_operations.hpp"
 #include "services/runtimeService.hpp"
+#include "trace/tracing.hpp"
 #include "utilities/dtrace.hpp"
 #include "utilities/events.hpp"
 #include "utilities/xmlstream.hpp"
@@ -46,10 +47,15 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
+#endif
 
+#ifndef USDT2
 HS_DTRACE_PROBE_DECL3(hotspot, vmops__request, char *, uintptr_t, int);
 HS_DTRACE_PROBE_DECL3(hotspot, vmops__begin, char *, uintptr_t, int);
 HS_DTRACE_PROBE_DECL3(hotspot, vmops__end, char *, uintptr_t, int);
+#endif /* !USDT2 */
 
 // Dummy VM operation to act as first element in our circular double-linked list
 class VM_Dummy: public VM_Operation {
@@ -159,8 +165,14 @@ void VMOperationQueue::drain_list_oops_do(OopClosure* f) {
 // High-level interface
 bool VMOperationQueue::add(VM_Operation *op) {
 
+#ifndef USDT2
   HS_DTRACE_PROBE3(hotspot, vmops__request, op->name(), strlen(op->name()),
                    op->evaluation_mode());
+#else /* USDT2 */
+  HOTSPOT_VMOPS_REQUEST(
+                   (char *) op->name(), strlen(op->name()),
+                   op->evaluation_mode());
+#endif /* USDT2 */
 
   // Encapsulates VM queue policy. Currently, that
   // only involves putting them on the right list
@@ -293,7 +305,7 @@ void VMThread::run() {
     os::check_heap();
     // Silent verification so as not to pollute normal output,
     // unless we really asked for it.
-    Universe::verify(true, !(PrintGCDetails || Verbose));
+    Universe::verify(!(PrintGCDetails || Verbose));
   }
 
   CompileBroker::set_should_block();
@@ -357,11 +369,35 @@ void VMThread::evaluate_operation(VM_Operation* op) {
 
   {
     PerfTraceTime vm_op_timer(perf_accumulated_vm_operation_time());
+#ifndef USDT2
     HS_DTRACE_PROBE3(hotspot, vmops__begin, op->name(), strlen(op->name()),
                      op->evaluation_mode());
+#else /* USDT2 */
+    HOTSPOT_VMOPS_BEGIN(
+                     (char *) op->name(), strlen(op->name()),
+                     op->evaluation_mode());
+#endif /* USDT2 */
+
+    EventExecuteVMOperation event;
+
     op->evaluate();
+
+    if (event.should_commit()) {
+      event.set_operation(op->type());
+      event.set_safepoint(op->evaluate_at_safepoint());
+      event.set_blocking(!op->evaluate_concurrently());
+      event.set_caller(op->calling_thread()->osthread()->thread_id());
+      event.commit();
+    }
+
+#ifndef USDT2
     HS_DTRACE_PROBE3(hotspot, vmops__end, op->name(), strlen(op->name()),
                      op->evaluation_mode());
+#else /* USDT2 */
+    HOTSPOT_VMOPS_END(
+                     (char *) op->name(), strlen(op->name()),
+                     op->evaluation_mode());
+#endif /* USDT2 */
   }
 
   // Last access of info in _cur_vm_operation!
@@ -586,7 +622,7 @@ void VMThread::execute(VM_Operation* op) {
     {
       VMOperationQueue_lock->lock_without_safepoint_check();
       bool ok = _vm_queue->add(op);
-      op->set_timestamp(os::javaTimeMillis());
+    op->set_timestamp(os::javaTimeMillis());
       VMOperationQueue_lock->notify();
       VMOperationQueue_lock->unlock();
       // VM_Operation got skipped

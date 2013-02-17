@@ -34,11 +34,6 @@ enum platform_dependent_constants {
   code_size2 = 22000            // simply increase if too small (assembler will crash if too small)
 };
 
-// MethodHandles adapters
-enum method_handles_platform_dependent_constants {
-  method_handles_adapters_code_size = 30000 DEBUG_ONLY(+ 10000)
-};
-
 class x86 {
  friend class StubGenerator;
  friend class VMStructs;
@@ -46,10 +41,14 @@ class x86 {
  private:
   static address _verify_mxcsr_entry;
   static address _verify_fpu_cntrl_wrd_entry;
+  // shuffle mask for fixing up 128-bit words consisting of big-endian 32-bit integers
+  static address _key_shuffle_mask_addr;
 
  public:
   static address verify_mxcsr_entry()                        { return _verify_mxcsr_entry; }
   static address verify_fpu_cntrl_wrd_entry()                { return _verify_fpu_cntrl_wrd_entry; }
+  static address key_shuffle_mask_addr()                     { return _key_shuffle_mask_addr; }
+
 };
 
   static bool    returns_to_call_stub(address return_pc)     { return return_pc == _call_stub_return_address; }

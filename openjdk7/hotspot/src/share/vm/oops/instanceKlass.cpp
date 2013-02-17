@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,6 +36,7 @@
 #include "memory/genOopClosures.inline.hpp"
 #include "memory/oopFactory.hpp"
 #include "memory/permGen.hpp"
+#include "oops/fieldStreams.hpp"
 #include "oops/instanceKlass.hpp"
 #include "oops/instanceMirrorKlass.hpp"
 #include "oops/instanceOop.hpp"
@@ -60,6 +61,9 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
+#endif
 #ifndef SERIALGC
 #include "gc_implementation/g1/g1CollectedHeap.inline.hpp"
 #include "gc_implementation/g1/g1OopClosures.inline.hpp"
@@ -75,6 +79,8 @@
 #endif
 
 #ifdef DTRACE_ENABLED
+
+#ifndef USDT2
 
 HS_DTRACE_PROBE_DECL4(hotspot, class__initialization__required,
   char*, intptr_t, oop, intptr_t);
@@ -118,6 +124,42 @@ HS_DTRACE_PROBE_DECL5(hotspot, class__initialization__end,
     HS_DTRACE_PROBE5(hotspot, class__initialization__##type,     \
       data, len, (clss)->class_loader(), thread_type, wait);     \
   }
+#else /* USDT2 */
+
+#define HOTSPOT_CLASS_INITIALIZATION_required HOTSPOT_CLASS_INITIALIZATION_REQUIRED
+#define HOTSPOT_CLASS_INITIALIZATION_recursive HOTSPOT_CLASS_INITIALIZATION_RECURSIVE
+#define HOTSPOT_CLASS_INITIALIZATION_concurrent HOTSPOT_CLASS_INITIALIZATION_CONCURRENT
+#define HOTSPOT_CLASS_INITIALIZATION_erroneous HOTSPOT_CLASS_INITIALIZATION_ERRONEOUS
+#define HOTSPOT_CLASS_INITIALIZATION_super__failed HOTSPOT_CLASS_INITIALIZATION_SUPER_FAILED
+#define HOTSPOT_CLASS_INITIALIZATION_clinit HOTSPOT_CLASS_INITIALIZATION_CLINIT
+#define HOTSPOT_CLASS_INITIALIZATION_error HOTSPOT_CLASS_INITIALIZATION_ERROR
+#define HOTSPOT_CLASS_INITIALIZATION_end HOTSPOT_CLASS_INITIALIZATION_END
+#define DTRACE_CLASSINIT_PROBE(type, clss, thread_type)          \
+  {                                                              \
+    char* data = NULL;                                           \
+    int len = 0;                                                 \
+    Symbol* name = (clss)->name();                               \
+    if (name != NULL) {                                          \
+      data = (char*)name->bytes();                               \
+      len = name->utf8_length();                                 \
+    }                                                            \
+    HOTSPOT_CLASS_INITIALIZATION_##type(                         \
+      data, len, (clss)->class_loader(), thread_type);           \
+  }
+
+#define DTRACE_CLASSINIT_PROBE_WAIT(type, clss, thread_type, wait) \
+  {                                                              \
+    char* data = NULL;                                           \
+    int len = 0;                                                 \
+    Symbol* name = (clss)->name();                               \
+    if (name != NULL) {                                          \
+      data = (char*)name->bytes();                               \
+      len = name->utf8_length();                                 \
+    }                                                            \
+    HOTSPOT_CLASS_INITIALIZATION_##type(                         \
+      data, len, (clss)->class_loader(), thread_type, wait);     \
+  }
+#endif /* USDT2 */
 
 #else //  ndef DTRACE_ENABLED
 
@@ -125,6 +167,8 @@ HS_DTRACE_PROBE_DECL5(hotspot, class__initialization__end,
 #define DTRACE_CLASSINIT_PROBE_WAIT(type, clss, thread_type, wait)
 
 #endif //  ndef DTRACE_ENABLED
+
+volatile int instanceKlass::_total_instanceKlass_count = 0;
 
 bool instanceKlass::should_be_initialized() const {
   return !is_initialized();
@@ -166,7 +210,7 @@ void instanceKlass::eager_initialize_impl(instanceKlassHandle this_oop) {
   // abort if someone beat us to the initialization
   if (!this_oop->is_not_initialized()) return;  // note: not equivalent to is_initialized()
 
-  ClassState old_state = this_oop->_init_state;
+  ClassState old_state = this_oop->init_state();
   link_class_impl(this_oop, true, THREAD);
   if (HAS_PENDING_EXCEPTION) {
     CLEAR_PENDING_EXCEPTION;
@@ -525,8 +569,18 @@ void instanceKlass::set_initialization_state_and_notify_impl(instanceKlassHandle
   ol.notify_all(CHECK);
 }
 
+// The embedded _implementor field can only record one implementor.
+// When there are more than one implementors, the _implementor field
+// is set to the interface klassOop itself. Following are the possible
+// values for the _implementor field:
+//   NULL                  - no implementor
+//   implementor klassOop  - one implementor
+//   self                  - more than one implementor
+//
+// The _implementor field only exists for interfaces.
 void instanceKlass::add_implementor(klassOop k) {
   assert(Compile_lock->owned_by_self(), "");
+  assert(is_interface(), "not interface");
   // Filter out my subinterfaces.
   // (Note: Interfaces are never on the subklass list.)
   if (instanceKlass::cast(k)->is_interface()) return;
@@ -541,17 +595,13 @@ void instanceKlass::add_implementor(klassOop k) {
     // Any supers of the super have the same (or fewer) transitive_interfaces.
     return;
 
-  // Update number of implementors
-  int i = _nof_implementors++;
-
-  // Record this implementor, if there are not too many already
-  if (i < implementors_limit) {
-    assert(_implementors[i] == NULL, "should be exactly one implementor");
-    oop_store_without_check((oop*)&_implementors[i], k);
-  } else if (i == implementors_limit) {
-    // clear out the list on first overflow
-    for (int i2 = 0; i2 < implementors_limit; i2++)
-      oop_store_without_check((oop*)&_implementors[i2], NULL);
+  klassOop ik = implementor();
+  if (ik == NULL) {
+    set_implementor(k);
+  } else if (ik != this->as_klassOop()) {
+    // There is already an implementor. Use itself as an indicator of
+    // more than one implementors.
+    set_implementor(this->as_klassOop());
   }
 
   // The implementor also implements the transitive_interfaces
@@ -561,9 +611,9 @@ void instanceKlass::add_implementor(klassOop k) {
 }
 
 void instanceKlass::init_implementor() {
-  for (int i = 0; i < implementors_limit; i++)
-    oop_store_without_check((oop*)&_implementors[i], NULL);
-  _nof_implementors = 0;
+  if (is_interface()) {
+    set_implementor(NULL);
+  }
 }
 
 
@@ -627,6 +677,7 @@ objArrayOop instanceKlass::allocate_objArray(int n, int length, TRAPS) {
   if (length < 0) THROW_0(vmSymbols::java_lang_NegativeArraySizeException());
   if (length > arrayOopDesc::max_array_length(T_OBJECT)) {
     report_java_out_of_memory("Requested array size exceeds VM limit");
+    JvmtiExport::post_array_size_exhausted();
     THROW_OOP_0(Universe::out_of_memory_error_array_size());
   }
   int size = objArrayOopDesc::object_size(length);
@@ -782,14 +833,11 @@ void instanceKlass::mask_for(methodHandle method, int bci,
 
 
 bool instanceKlass::find_local_field(Symbol* name, Symbol* sig, fieldDescriptor* fd) const {
-  const int n = fields()->length();
-  for (int i = 0; i < n; i += next_offset ) {
-    int name_index = fields()->ushort_at(i + name_index_offset);
-    int sig_index  = fields()->ushort_at(i + signature_index_offset);
-    Symbol* f_name = constants()->symbol_at(name_index);
-    Symbol* f_sig  = constants()->symbol_at(sig_index);
+  for (JavaFieldStream fs(as_klassOop()); !fs.done(); fs.next()) {
+    Symbol* f_name = fs.name();
+    Symbol* f_sig  = fs.signature();
     if (f_name == name && f_sig == sig) {
-      fd->initialize(as_klassOop(), i);
+      fd->initialize(as_klassOop(), fs.index());
       return true;
     }
   }
@@ -801,13 +849,11 @@ void instanceKlass::shared_symbols_iterate(SymbolClosure* closure) {
   Klass::shared_symbols_iterate(closure);
   closure->do_symbol(&_generic_signature);
   closure->do_symbol(&_source_file_name);
-  closure->do_symbol(&_source_debug_extension);
 
-  const int n = fields()->length();
-  for (int i = 0; i < n; i += next_offset ) {
-    int name_index = fields()->ushort_at(i + name_index_offset);
+  for (JavaFieldStream fs(this); !fs.done(); fs.next()) {
+    int name_index = fs.name_index();
     closure->do_symbol(constants()->symbol_at_addr(name_index));
-    int sig_index  = fields()->ushort_at(i + signature_index_offset);
+    int sig_index  = fs.signature_index();
     closure->do_symbol(constants()->symbol_at_addr(sig_index));
   }
 }
@@ -872,10 +918,9 @@ klassOop instanceKlass::find_field(Symbol* name, Symbol* sig, bool is_static, fi
 
 
 bool instanceKlass::find_local_field_from_offset(int offset, bool is_static, fieldDescriptor* fd) const {
-  int length = fields()->length();
-  for (int i = 0; i < length; i += next_offset) {
-    if (offset_from_fields( i ) == offset) {
-      fd->initialize(as_klassOop(), i);
+  for (JavaFieldStream fs(as_klassOop()); !fs.done(); fs.next()) {
+    if (fs.offset() == offset) {
+      fd->initialize(as_klassOop(), fs.index());
       if (fd->is_static() == is_static) return true;
     }
   }
@@ -906,11 +951,12 @@ void instanceKlass::methods_do(void f(methodOop method)) {
 
 
 void instanceKlass::do_local_static_fields(FieldClosure* cl) {
-  fieldDescriptor fd;
-  int length = fields()->length();
-  for (int i = 0; i < length; i += next_offset) {
-    fd.initialize(as_klassOop(), i);
-    if (fd.is_static()) cl->do_field(&fd);
+  for (JavaFieldStream fs(this); !fs.done(); fs.next()) {
+    if (fs.access_flags().is_static()) {
+      fieldDescriptor fd;
+      fd.initialize(as_klassOop(), fs.index());
+      cl->do_field(&fd);
+    }
   }
 }
 
@@ -922,11 +968,12 @@ void instanceKlass::do_local_static_fields(void f(fieldDescriptor*, TRAPS), TRAP
 
 
 void instanceKlass::do_local_static_fields_impl(instanceKlassHandle this_oop, void f(fieldDescriptor* fd, TRAPS), TRAPS) {
-  fieldDescriptor fd;
-  int length = this_oop->fields()->length();
-  for (int i = 0; i < length; i += next_offset) {
-    fd.initialize(this_oop(), i);
-    if (fd.is_static()) { f(&fd, CHECK); } // Do NOT remove {}! (CHECK macro expands into several statements)
+  for (JavaFieldStream fs(this_oop()); !fs.done(); fs.next()) {
+    if (fs.access_flags().is_static()) {
+      fieldDescriptor fd;
+      fd.initialize(this_oop(), fs.index());
+      f(&fd, CHECK);
+    }
   }
 }
 
@@ -941,11 +988,11 @@ void instanceKlass::do_nonstatic_fields(FieldClosure* cl) {
     super->do_nonstatic_fields(cl);
   }
   fieldDescriptor fd;
-  int length = fields()->length();
+  int length = java_fields_count();
   // In DebugInfo nonstatic fields are sorted by offset.
-  int* fields_sorted = NEW_C_HEAP_ARRAY(int, 2*(length+1));
+  int* fields_sorted = NEW_C_HEAP_ARRAY(int, 2*(length+1), mtClass);
   int j = 0;
-  for (int i = 0; i < length; i += next_offset) {
+  for (int i = 0; i < length; i += 1) {
     fd.initialize(as_klassOop(), i);
     if (!fd.is_static()) {
       fields_sorted[j + 0] = fd.offset();
@@ -963,7 +1010,7 @@ void instanceKlass::do_nonstatic_fields(FieldClosure* cl) {
       cl->do_field(&fd);
     }
   }
-  FREE_C_HEAP_ARRAY(int, fields_sorted);
+  FREE_C_HEAP_ARRAY(int, fields_sorted, mtClass);
 }
 
 
@@ -1093,6 +1140,36 @@ JNIid* instanceKlass::jni_id_for(int offset) {
   return probe;
 }
 
+u2 instanceKlass::enclosing_method_data(int offset) {
+  typeArrayOop inner_class_list = inner_classes();
+  if (inner_class_list == NULL) {
+    return 0;
+  }
+  int length = inner_class_list->length();
+  if (length % inner_class_next_offset == 0) {
+    return 0;
+  } else {
+    int index = length - enclosing_method_attribute_size;
+    typeArrayHandle inner_class_list_h(inner_class_list);
+    assert(offset < enclosing_method_attribute_size, "invalid offset");
+    return inner_class_list_h->ushort_at(index + offset);
+  }
+}
+
+void instanceKlass::set_enclosing_method_indices(u2 class_index,
+                                                 u2 method_index) {
+  typeArrayOop inner_class_list = inner_classes();
+  assert (inner_class_list != NULL, "_inner_classes list is not set up");
+  int length = inner_class_list->length();
+  if (length % inner_class_next_offset == enclosing_method_attribute_size) {
+    int index = length - enclosing_method_attribute_size;
+    typeArrayHandle inner_class_list_h(inner_class_list);
+    inner_class_list_h->ushort_at_put(
+      index + enclosing_method_class_index_offset, class_index);
+    inner_class_list_h->ushort_at_put(
+      index + enclosing_method_method_index_offset, method_index);
+  }
+}
 
 // Lookup or create a jmethodID.
 // This code is called by the VMThread and JavaThreads so the
@@ -1160,7 +1237,7 @@ jmethodID instanceKlass::get_jmethod_id(instanceKlassHandle ik_h, methodHandle m
     if (length <= idnum) {
       // allocate a new cache that might be used
       size_t size = MAX2(idnum+1, (size_t)ik_h->idnum_allocated_count());
-      new_jmeths = NEW_C_HEAP_ARRAY(jmethodID, size+1);
+      new_jmeths = NEW_C_HEAP_ARRAY(jmethodID, size+1, mtClass);
       memset(new_jmeths, 0, (size+1)*sizeof(jmethodID));
       // cache size is stored in element[0], other elements offset by one
       new_jmeths[0] = (jmethodID)size;
@@ -1321,7 +1398,7 @@ void instanceKlass::set_cached_itable_index(size_t idnum, int index) {
     // cache size is stored in element[0], other elements offset by one
     if (indices == NULL || (length = (size_t)indices[0]) <= idnum) {
       size_t size = MAX2(idnum+1, (size_t)idnum_allocated_count());
-      int* new_indices = NEW_C_HEAP_ARRAY(int, size+1);
+      int* new_indices = NEW_C_HEAP_ARRAY(int, size+1, mtClass);
       new_indices[0] = (int)size;
       // copy any existing entries
       size_t i;
@@ -1374,39 +1451,8 @@ int instanceKlass::cached_itable_index(size_t idnum) {
 
 
 //
-// nmethodBucket is used to record dependent nmethods for
-// deoptimization.  nmethod dependencies are actually <klass, method>
-// pairs but we really only care about the klass part for purposes of
-// finding nmethods which might need to be deoptimized.  Instead of
-// recording the method, a count of how many times a particular nmethod
-// was recorded is kept.  This ensures that any recording errors are
-// noticed since an nmethod should be removed as many times are it's
-// added.
-//
-class nmethodBucket {
- private:
-  nmethod*       _nmethod;
-  int            _count;
-  nmethodBucket* _next;
-
- public:
-  nmethodBucket(nmethod* nmethod, nmethodBucket* next) {
-    _nmethod = nmethod;
-    _next = next;
-    _count = 1;
-  }
-  int count()                             { return _count; }
-  int increment()                         { _count += 1; return _count; }
-  int decrement()                         { _count -= 1; assert(_count >= 0, "don't underflow"); return _count; }
-  nmethodBucket* next()                   { return _next; }
-  void set_next(nmethodBucket* b)         { _next = b; }
-  nmethod* get_nmethod()                  { return _nmethod; }
-};
-
-
-//
 // Walk the list of dependent nmethods searching for nmethods which
-// are dependent on the klassOop that was passed in and mark them for
+// are dependent on the changes that were passed in and mark them for
 // deoptimization.  Returns the number of nmethods found.
 //
 int instanceKlass::mark_dependent_nmethods(DepChange& changes) {
@@ -1810,24 +1856,22 @@ int instanceKlass::oop_update_pointers(ParCompactionManager* cm, oop obj) {
 void instanceKlass::follow_weak_klass_links(
   BoolObjectClosure* is_alive, OopClosure* keep_alive) {
   assert(is_alive->do_object_b(as_klassOop()), "this oop should be live");
-  if (ClassUnloading) {
-    for (int i = 0; i < implementors_limit; i++) {
-      klassOop impl = _implementors[i];
-      if (impl == NULL)  break;  // no more in the list
-      if (!is_alive->do_object_b(impl)) {
-        // remove this guy from the list by overwriting him with the tail
-        int lasti = --_nof_implementors;
-        assert(lasti >= i && lasti < implementors_limit, "just checking");
-        _implementors[i] = _implementors[lasti];
-        _implementors[lasti] = NULL;
-        --i; // rerun the loop at this index
+
+  if (is_interface()) {
+    if (ClassUnloading) {
+      klassOop impl = implementor();
+      if (impl != NULL) {
+        if (!is_alive->do_object_b(impl)) {
+          // remove this guy
+          *adr_implementor() = NULL;
+        }
       }
-    }
-  } else {
-    for (int i = 0; i < implementors_limit; i++) {
-      keep_alive->do_oop(&adr_implementors()[i]);
+    } else {
+      assert(adr_implementor() != NULL, "just checking");
+      keep_alive->do_oop(adr_implementor());
     }
   }
+
   Klass::follow_weak_klass_links(is_alive, keep_alive);
 }
 
@@ -1890,7 +1934,7 @@ void instanceKlass::release_C_heap_structures() {
 
   // deallocate the cached class file
   if (_cached_class_file_bytes != NULL) {
-    os::free(_cached_class_file_bytes);
+    os::free(_cached_class_file_bytes, mtClass);
     _cached_class_file_bytes = NULL;
     _cached_class_file_len = 0;
   }
@@ -1901,9 +1945,13 @@ void instanceKlass::release_C_heap_structures() {
   // class can't be referenced anymore).
   if (_array_name != NULL)  _array_name->decrement_refcount();
   if (_source_file_name != NULL) _source_file_name->decrement_refcount();
-  if (_source_debug_extension != NULL) _source_debug_extension->decrement_refcount();
   // walk constant pool and decrement symbol reference counts
   _constants->unreference_symbols();
+
+  if (_source_debug_extension != NULL) FREE_C_HEAP_ARRAY(char, _source_debug_extension, mtClass);
+
+  assert(_total_instanceKlass_count >= 1, "Sanity check");
+  Atomic::dec(&_total_instanceKlass_count);
 }
 
 void instanceKlass::set_source_file_name(Symbol* n) {
@@ -1911,9 +1959,22 @@ void instanceKlass::set_source_file_name(Symbol* n) {
   if (_source_file_name != NULL) _source_file_name->increment_refcount();
 }
 
-void instanceKlass::set_source_debug_extension(Symbol* n) {
-  _source_debug_extension = n;
-  if (_source_debug_extension != NULL) _source_debug_extension->increment_refcount();
+void instanceKlass::set_source_debug_extension(char* array, int length) {
+  if (array == NULL) {
+    _source_debug_extension = NULL;
+  } else {
+    // Adding one to the attribute length in order to store a null terminator
+    // character could cause an overflow because the attribute length is
+    // already coded with an u4 in the classfile, but in practice, it's
+    // unlikely to happen.
+    assert((length+1) > length, "Overflow checking");
+    char* sde = NEW_C_HEAP_ARRAY(char, (length + 1), mtClass);
+    for (int i = 0; i < length; i++) {
+      sde[i] = array[i];
+    }
+    sde[length] = '\0';
+    _source_debug_extension = sde;
+  }
 }
 
 address instanceKlass::static_field_addr(int offset) {
@@ -2098,28 +2159,21 @@ jint instanceKlass::compute_modifier_flags(TRAPS) const {
   jint access = access_flags().as_int();
 
   // But check if it happens to be member class.
-  typeArrayOop inner_class_list = inner_classes();
-  int length = (inner_class_list == NULL) ? 0 : inner_class_list->length();
-  assert (length % instanceKlass::inner_class_next_offset == 0, "just checking");
-  if (length > 0) {
-    typeArrayHandle inner_class_list_h(THREAD, inner_class_list);
-    instanceKlassHandle ik(THREAD, k);
-    for (int i = 0; i < length; i += instanceKlass::inner_class_next_offset) {
-      int ioff = inner_class_list_h->ushort_at(
-                      i + instanceKlass::inner_class_inner_class_info_offset);
+  instanceKlassHandle ik(THREAD, k);
+  InnerClassesIterator iter(ik);
+  for (; !iter.done(); iter.next()) {
+    int ioff = iter.inner_class_info_index();
+    // Inner class attribute can be zero, skip it.
+    // Strange but true:  JVM spec. allows null inner class refs.
+    if (ioff == 0) continue;
 
-      // Inner class attribute can be zero, skip it.
-      // Strange but true:  JVM spec. allows null inner class refs.
-      if (ioff == 0) continue;
-
-      // only look at classes that are already loaded
-      // since we are looking for the flags for our self.
-      Symbol* inner_name = ik->constants()->klass_name_at(ioff);
-      if ((ik->name() == inner_name)) {
-        // This is really a member class.
-        access = inner_class_list_h->ushort_at(i + instanceKlass::inner_class_access_flags_offset);
-        break;
-      }
+    // only look at classes that are already loaded
+    // since we are looking for the flags for our self.
+    Symbol* inner_name = ik->constants()->klass_name_at(ioff);
+    if ((ik->name() == inner_name)) {
+      // This is really a member class.
+      access = iter.inner_access_flags();
+      break;
     }
   }
   // Remember to strip ACC_SUPER bit
@@ -2380,6 +2434,22 @@ void instanceKlass::oop_print_value_on(oop obj, outputStream* st) {
   } else if (java_lang_boxing_object::is_instance(obj)) {
     st->print(" = ");
     java_lang_boxing_object::print(obj, st);
+  } else if (as_klassOop() == SystemDictionary::LambdaForm_klass()) {
+    oop vmentry = java_lang_invoke_LambdaForm::vmentry(obj);
+    if (vmentry != NULL) {
+      st->print(" => ");
+      vmentry->print_value_on(st);
+    }
+  } else if (as_klassOop() == SystemDictionary::MemberName_klass()) {
+    oop vmtarget = java_lang_invoke_MemberName::vmtarget(obj);
+    if (vmtarget != NULL) {
+      st->print(" = ");
+      vmtarget->print_value_on(st);
+    } else {
+      java_lang_invoke_MemberName::clazz(obj)->print_value_on(st);
+      st->print(".");
+      java_lang_invoke_MemberName::name(obj)->print_value_on(st);
+    }
   }
 }
 
@@ -2410,43 +2480,6 @@ void instanceKlass::oop_verify_on(oop obj, outputStream* st) {
   VerifyFieldClosure blk;
   oop_oop_iterate(obj, &blk);
 }
-
-#ifndef PRODUCT
-
-void instanceKlass::verify_class_klass_nonstatic_oop_maps(klassOop k) {
-  // This verification code is disabled.  JDK_Version::is_gte_jdk14x_version()
-  // cannot be called since this function is called before the VM is
-  // able to determine what JDK version is running with.
-  // The check below always is false since 1.4.
-  return;
-
-  // This verification code temporarily disabled for the 1.4
-  // reflection implementation since java.lang.Class now has
-  // Java-level instance fields. Should rewrite this to handle this
-  // case.
-  if (!(JDK_Version::is_gte_jdk14x_version() && UseNewReflection)) {
-    // Verify that java.lang.Class instances have a fake oop field added.
-    instanceKlass* ik = instanceKlass::cast(k);
-
-    // Check that we have the right class
-    static bool first_time = true;
-    guarantee(k == SystemDictionary::Class_klass() && first_time, "Invalid verify of maps");
-    first_time = false;
-    const int extra = java_lang_Class::number_of_fake_oop_fields;
-    guarantee(ik->nonstatic_field_size() == extra, "just checking");
-    guarantee(ik->nonstatic_oop_map_count() == 1, "just checking");
-    guarantee(ik->size_helper() == align_object_size(instanceOopDesc::header_size() + extra), "just checking");
-
-    // Check that the map is (2,extra)
-    int offset = java_lang_Class::klass_offset;
-
-    OopMapBlock* map = ik->start_of_nonstatic_oop_maps();
-    guarantee(map->offset() == offset && map->count() == (unsigned int) extra,
-              "sanity");
-  }
-}
-
-#endif // ndef PRODUCT
 
 // JNIid class for jfieldIDs only
 // Note to reviewers:
@@ -2508,7 +2541,7 @@ void instanceKlass::set_init_state(ClassState state) {
   bool good_state = as_klassOop()->is_shared() ? (_init_state <= state)
                                                : (_init_state < state);
   assert(good_state || state == allocated, "illegal state transition");
-  _init_state = state;
+  _init_state = (u1)state;
 }
 #endif
 
@@ -2531,7 +2564,7 @@ void instanceKlass::add_previous_version(instanceKlassHandle ikh,
     // This is the first previous version so make some space.
     // Start with 2 elements under the assumption that the class
     // won't be redefined much.
-    _previous_versions =  new (ResourceObj::C_HEAP)
+    _previous_versions =  new (ResourceObj::C_HEAP, mtClass)
                             GrowableArray<PreviousVersionNode *>(2, true);
   }
 
@@ -2557,7 +2590,7 @@ void instanceKlass::add_previous_version(instanceKlassHandle ikh,
       ("add: all methods are obsolete; flushing any EMCP weak refs"));
   } else {
     int local_count = 0;
-    GrowableArray<jweak>* method_refs = new (ResourceObj::C_HEAP)
+    GrowableArray<jweak>* method_refs = new (ResourceObj::C_HEAP, mtClass)
       GrowableArray<jweak>(emcp_method_count, true);
     for (int i = 0; i < old_methods->length(); i++) {
       if (emcp_methods->at(i)) {
@@ -2949,7 +2982,7 @@ PreviousVersionInfo* PreviousVersionWalker::next_previous_version() {
 
   while (_current_index < length) {
     PreviousVersionNode * pv_node = _previous_versions->at(_current_index++);
-    PreviousVersionInfo * pv_info = new (ResourceObj::C_HEAP)
+    PreviousVersionInfo * pv_info = new (ResourceObj::C_HEAP, mtClass)
                                           PreviousVersionInfo(pv_node);
 
     constantPoolHandle cp_h = pv_info->prev_constant_pool_handle();

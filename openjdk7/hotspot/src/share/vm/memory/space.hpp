@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,6 +43,9 @@
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "os_windows.inline.hpp"
+#endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "os_bsd.inline.hpp"
 #endif
 
 // A space is an abstraction for the "storage units" backing
@@ -102,7 +105,7 @@ class SpaceMemRegionOopsIterClosure: public OopClosure {
 // bottom() <= top() <= end()
 // top() is inclusive and end() is exclusive.
 
-class Space: public CHeapObj {
+class Space: public CHeapObj<mtGC> {
   friend class VMStructs;
  protected:
   HeapWord* _bottom;
@@ -184,7 +187,7 @@ class Space: public CHeapObj {
   // expensive operation. To prevent performance problems
   // on account of its inadvertent use in product jvm's,
   // we restrict its use to assertion checks only.
-  virtual bool is_in(const void* p) const;
+  virtual bool is_in(const void* p) const = 0;
 
   // Returns true iff the given reserved memory of the space contains the
   // given address.
@@ -303,7 +306,7 @@ class Space: public CHeapObj {
   }
 
   // Debugging
-  virtual void verify(bool allow_dirty) const = 0;
+  virtual void verify() const = 0;
 };
 
 // A MemRegionClosure (ResourceObj) whose "do_MemRegion" function applies an
@@ -530,7 +533,8 @@ protected:
    * by the MarkSweepAlwaysCompactCount parameter.                           \
    */                                                                        \
   int invocations = SharedHeap::heap()->perm_gen()->stat_record()->invocations;\
-  bool skip_dead = ((invocations % MarkSweepAlwaysCompactCount) != 0);       \
+  bool skip_dead = (MarkSweepAlwaysCompactCount < 1)                         \
+    ||((invocations % MarkSweepAlwaysCompactCount) != 0);                    \
                                                                              \
   size_t allowed_deadspace = 0;                                              \
   if (skip_dead) {                                                           \
@@ -876,10 +880,17 @@ class ContiguousSpace: public CompactibleSpace {
   void object_iterate_mem(MemRegion mr, UpwardsObjectClosure* cl);
   // iterates on objects up to the safe limit
   HeapWord* object_iterate_careful(ObjectClosureCareful* cl);
-  inline HeapWord* concurrent_iteration_safe_limit();
+  HeapWord* concurrent_iteration_safe_limit() {
+    assert(_concurrent_iteration_safe_limit <= top(),
+           "_concurrent_iteration_safe_limit update missed");
+    return _concurrent_iteration_safe_limit;
+  }
   // changes the safe limit, all objects from bottom() to the new
   // limit should be properly initialized
-  inline void set_concurrent_iteration_safe_limit(HeapWord* new_limit);
+  void set_concurrent_iteration_safe_limit(HeapWord* new_limit) {
+    assert(new_limit <= top(), "uninitialized objects in the safe range");
+    _concurrent_iteration_safe_limit = new_limit;
+  }
 
 #ifndef SERIALGC
   // In support of parallel oop_iterate.
@@ -944,7 +955,7 @@ class ContiguousSpace: public CompactibleSpace {
   }
 
   // Debugging
-  virtual void verify(bool allow_dirty) const;
+  virtual void verify() const;
 
   // Used to increase collection frequency.  "factor" of 0 means entire
   // space.
@@ -1096,7 +1107,7 @@ class OffsetTableContigSpace: public ContiguousSpace {
   virtual void print_on(outputStream* st) const;
 
   // Debugging
-  void verify(bool allow_dirty) const;
+  void verify() const;
 
   // Shared space support
   void serialize_block_offset_array_offsets(SerializeOopClosure* soc);

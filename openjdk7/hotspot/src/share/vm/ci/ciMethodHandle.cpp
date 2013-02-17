@@ -24,63 +24,18 @@
 
 #include "precompiled.hpp"
 #include "ci/ciClassList.hpp"
-#include "ci/ciInstance.hpp"
-#include "ci/ciMethodData.hpp"
 #include "ci/ciMethodHandle.hpp"
 #include "ci/ciUtilities.hpp"
-#include "prims/methodHandleWalk.hpp"
-#include "prims/methodHandles.hpp"
-
-// ciMethodHandle
+#include "classfile/javaClasses.hpp"
 
 // ------------------------------------------------------------------
-// ciMethodHandle::get_adapter
+// ciMethodHandle::get_vmtarget
 //
-// Return an adapter for this MethodHandle.
-ciMethod* ciMethodHandle::get_adapter_impl(bool is_invokedynamic) const {
+// Return: MH.form -> LF.vmentry -> MN.vmtarget
+ciMethod* ciMethodHandle::get_vmtarget() const {
   VM_ENTRY_MARK;
-  Handle h(get_oop());
-  methodHandle callee(_callee->get_methodOop());
-  // We catch all exceptions here that could happen in the method
-  // handle compiler and stop the VM.
-  MethodHandleCompiler mhc(h, callee->name(), callee->signature(), _profile->count(), is_invokedynamic, THREAD);
-  if (!HAS_PENDING_EXCEPTION) {
-    methodHandle m = mhc.compile(THREAD);
-    if (!HAS_PENDING_EXCEPTION) {
-      return CURRENT_ENV->get_object(m())->as_method();
-    }
-  }
-  if (PrintMiscellaneous && (Verbose || WizardMode)) {
-    tty->print("*** ciMethodHandle::get_adapter => ");
-    PENDING_EXCEPTION->print();
-    tty->print("*** get_adapter (%s): ", is_invokedynamic ? "indy" : "mh"); ((ciObject*)this)->print(); //@@
-  }
-  CLEAR_PENDING_EXCEPTION;
-  return NULL;
-}
-
-// ------------------------------------------------------------------
-// ciMethodHandle::get_adapter
-//
-// Return an adapter for this MethodHandle.
-ciMethod* ciMethodHandle::get_adapter(bool is_invokedynamic) const {
-  ciMethod* result = get_adapter_impl(is_invokedynamic);
-  if (result) {
-    // Fake up the MDO maturity.
-    ciMethodData* mdo = result->method_data();
-    if (mdo != NULL && _caller->method_data() != NULL && _caller->method_data()->is_mature()) {
-      mdo->set_mature();
-    }
-  }
-  return result;
-}
-
-
-// ------------------------------------------------------------------
-// ciMethodHandle::print_impl
-//
-// Implementation of the print method.
-void ciMethodHandle::print_impl(outputStream* st) {
-  st->print(" type=");
-  get_oop()->print();
+  oop form_oop     = java_lang_invoke_MethodHandle::form(get_oop());
+  oop vmentry_oop  = java_lang_invoke_LambdaForm::vmentry(form_oop);
+  oop vmtarget_oop = java_lang_invoke_MemberName::vmtarget(vmentry_oop);
+  return CURRENT_ENV->get_object(vmtarget_oop)->as_method();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -523,6 +523,7 @@ public class WindowsLookAndFeel extends BasicLookAndFeel
         Object ScrollbarBackgroundColor = new DesktopProperty(
                                                        "win.scrollbar.backgroundColor",
                                                         table.get("scrollbar"));
+        Object buttonFocusColor = new FocusColorProperty();
 
         Object TextBackground         = new XPColorValue(Part.EP_EDIT, null, Prop.FILLCOLOR,
                                                          WindowBackgroundColor);
@@ -629,7 +630,7 @@ public class WindowsLookAndFeel extends BasicLookAndFeel
             "Button.highlight", ControlHighlightColor,
             "Button.disabledForeground", InactiveTextColor,
             "Button.disabledShadow", ControlHighlightColor,
-            "Button.focus", black,
+            "Button.focus", buttonFocusColor,
             "Button.dashedRectGapX", new XPValue(Integer.valueOf(3), Integer.valueOf(5)),
             "Button.dashedRectGapY", new XPValue(Integer.valueOf(3), Integer.valueOf(4)),
             "Button.dashedRectGapWidth", new XPValue(Integer.valueOf(6), Integer.valueOf(10)),
@@ -644,6 +645,9 @@ public class WindowsLookAndFeel extends BasicLookAndFeel
                    "released SPACE", "released"
                  }),
 
+            "Caret.width",
+                  new DesktopProperty("win.caret.width", null),
+
             "CheckBox.font", ControlFont,
             "CheckBox.interiorBackground", WindowBackgroundColor,
             "CheckBox.background", ControlBackgroundColor,
@@ -652,7 +656,7 @@ public class WindowsLookAndFeel extends BasicLookAndFeel
             "CheckBox.darkShadow", ControlDarkShadowColor,
             "CheckBox.light", ControlLightColor,
             "CheckBox.highlight", ControlHighlightColor,
-            "CheckBox.focus", black,
+            "CheckBox.focus", buttonFocusColor,
             "CheckBox.focusInputMap",
                new UIDefaults.LazyInputMap(new Object[] {
                             "SPACE", "pressed",
@@ -770,9 +774,6 @@ public class WindowsLookAndFeel extends BasicLookAndFeel
                                                                "icons/NewFolder.gif"),
             "FileChooser.useSystemExtensionHiding", Boolean.TRUE,
 
-            "FileChooser.lookInLabelMnemonic", Integer.valueOf(KeyEvent.VK_I),
-            "FileChooser.fileNameLabelMnemonic", Integer.valueOf(KeyEvent.VK_N),
-            "FileChooser.filesOfTypeLabelMnemonic", Integer.valueOf(KeyEvent.VK_T),
             "FileChooser.usesSingleFilePane", Boolean.TRUE,
             "FileChooser.noPlacesBar", new DesktopProperty("win.comdlg.noPlacesBar",
                                                            Boolean.FALSE),
@@ -1010,7 +1011,7 @@ public class WindowsLookAndFeel extends BasicLookAndFeel
             "RadioButton.darkShadow", ControlDarkShadowColor,
             "RadioButton.light", ControlLightColor,
             "RadioButton.highlight", ControlHighlightColor,
-            "RadioButton.focus", black,
+            "RadioButton.focus", buttonFocusColor,
             "RadioButton.focusInputMap",
                new UIDefaults.LazyInputMap(new Object[] {
                           "SPACE", "pressed",
@@ -2614,6 +2615,21 @@ public class WindowsLookAndFeel extends BasicLookAndFeel
                          (int)(avg   * 255f) <<  8 |
                          (int)(avg   * 255f);
             return rgbval;
+        }
+    }
+
+    private static class FocusColorProperty extends DesktopProperty {
+        public FocusColorProperty () {
+            // Fallback value is never used bacause of the configureValue method doesn't return null
+            super("win.3d.backgroundColor", Color.BLACK);
+        }
+
+        @Override
+        protected Object configureValue(Object value) {
+            if (! ((Boolean)Toolkit.getDefaultToolkit().getDesktopProperty("win.highContrast.on")).booleanValue()){
+                return Color.BLACK;
+            }
+            return Color.BLACK.equals(value) ? Color.WHITE : Color.BLACK;
         }
     }
 

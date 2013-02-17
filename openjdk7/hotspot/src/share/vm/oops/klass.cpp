@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,7 @@
 #include "oops/oop.inline.hpp"
 #include "oops/oop.inline2.hpp"
 #include "runtime/atomic.hpp"
+#include "trace/traceMacros.hpp"
 
 void Klass::set_name(Symbol* n) {
   _name = n;
@@ -144,7 +145,7 @@ klassOop Klass::base_create_klass_oop(KlassHandle& klass, int size,
     }
     kl->set_secondary_supers(NULL);
     oop_store_without_check((oop*) &kl->_primary_supers[0], k);
-    kl->set_super_check_offset(primary_supers_offset_in_bytes() + sizeof(oopDesc));
+    kl->set_super_check_offset(in_bytes(primary_supers_offset()));
   }
 
   kl->set_java_mirror(NULL);
@@ -158,6 +159,7 @@ klassOop Klass::base_create_klass_oop(KlassHandle& klass, int size,
   kl->set_next_sibling(NULL);
   kl->set_alloc_count(0);
   kl->set_alloc_size(0);
+  TRACE_SET_KLASS_TRACE_ID(kl, 0);
 
   kl->set_prototype_header(markOopDesc::prototype());
   kl->set_biased_lock_revocation_count(0);
@@ -173,10 +175,9 @@ KlassHandle Klass::base_create_klass(KlassHandle& klass, int size,
 }
 
 void Klass_vtbl::post_new_init_klass(KlassHandle& klass,
-                                     klassOop new_klass,
-                                     int size) const {
+                                     klassOop new_klass) const {
   assert(!new_klass->klass_part()->null_vtbl(), "Not a complete klass");
-  CollectedHeap::post_allocation_install_obj_klass(klass, new_klass, size);
+  CollectedHeap::post_allocation_install_obj_klass(klass, new_klass);
 }
 
 void* Klass_vtbl::operator new(size_t ignored, KlassHandle& klass,
@@ -580,14 +581,6 @@ void Klass::oop_verify_on(oop obj, outputStream* st) {
   guarantee(obj->klass()->is_perm(),  "should be in permspace");
   guarantee(obj->klass()->is_klass(), "klass field is not a klass");
 }
-
-
-void Klass::oop_verify_old_oop(oop obj, oop* p, bool allow_dirty) {
-  /* $$$ I think this functionality should be handled by verification of
-  RememberedSet::verify_old_oop(obj, p, allow_dirty, false);
-  the card table. */
-}
-void Klass::oop_verify_old_oop(oop obj, narrowOop* p, bool allow_dirty) { }
 
 #ifndef PRODUCT
 

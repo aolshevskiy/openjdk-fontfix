@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,7 @@ import java.nio.channels.*;
 import java.nio.channels.spi.*;
 import java.util.*;
 import sun.net.NetHooks;
-
+import sun.misc.IoTrace;
 
 /**
  * An implementation of SocketChannels
@@ -80,8 +80,8 @@ class SocketChannelImpl
     private int state = ST_UNINITIALIZED;
 
     // Binding
-    private SocketAddress localAddress;
-    private SocketAddress remoteAddress;
+    private InetSocketAddress localAddress;
+    private InetSocketAddress remoteAddress;
 
     // Input/Output open
     private boolean isInputOpen = true;
@@ -278,6 +278,11 @@ class SocketChannelImpl
         synchronized (readLock) {
             if (!ensureReadOpen())
                 return -1;
+            Object traceContext = null;
+            if (isBlocking()) {
+                traceContext = IoTrace.socketReadBegin(remoteAddress.getAddress(),
+                                                      remoteAddress.getPort(), 0);
+            }
             int n = 0;
             try {
 
@@ -367,6 +372,11 @@ class SocketChannelImpl
 
             } finally {
                 readerCleanup();        // Clear reader thread
+
+                if (isBlocking()) {
+                    IoTrace.socketReadEnd(traceContext, n > 0 ? n : 0);
+                }
+
                 // The end method, which is defined in our superclass
                 // AbstractInterruptibleChannel, resets the interruption
                 // machinery.  If its argument is true then it returns
@@ -407,6 +417,11 @@ class SocketChannelImpl
             if (!ensureReadOpen())
                 return -1;
             long n = 0;
+            Object traceContext = null;
+            if (isBlocking()) {
+                traceContext = IoTrace.socketReadBegin(remoteAddress.getAddress(),
+                                                      remoteAddress.getPort(), 0);
+            }
             try {
                 begin();
                 synchronized (stateLock) {
@@ -423,6 +438,9 @@ class SocketChannelImpl
                 }
             } finally {
                 readerCleanup();
+                if (isBlocking()) {
+                    IoTrace.socketReadEnd(traceContext, n > 0 ? n : 0);
+                }
                 end(n > 0 || (n == IOStatus.UNAVAILABLE));
                 synchronized (stateLock) {
                     if ((n <= 0) && (!isInputOpen))
@@ -439,6 +457,10 @@ class SocketChannelImpl
         synchronized (writeLock) {
             ensureWriteOpen();
             int n = 0;
+            Object traceContext =
+                IoTrace.socketWriteBegin(remoteAddress.getAddress(),
+                                         remoteAddress.getPort());
+
             try {
                 begin();
                 synchronized (stateLock) {
@@ -454,6 +476,7 @@ class SocketChannelImpl
                 }
             } finally {
                 writerCleanup();
+                IoTrace.socketWriteEnd(traceContext, n > 0 ? n : 0);
                 end(n > 0 || (n == IOStatus.UNAVAILABLE));
                 synchronized (stateLock) {
                     if ((n <= 0) && (!isOutputOpen))
@@ -472,6 +495,9 @@ class SocketChannelImpl
         synchronized (writeLock) {
             ensureWriteOpen();
             long n = 0;
+            Object traceContext =
+                IoTrace.socketWriteBegin(remoteAddress.getAddress(),
+                                         remoteAddress.getPort());
             try {
                 begin();
                 synchronized (stateLock) {
@@ -487,6 +513,7 @@ class SocketChannelImpl
                 }
             } finally {
                 writerCleanup();
+                IoTrace.socketWriteEnd(traceContext, n > 0 ? n : 0);
                 end((n > 0) || (n == IOStatus.UNAVAILABLE));
                 synchronized (stateLock) {
                     if ((n <= 0) && (!isOutputOpen))
@@ -629,17 +656,6 @@ class SocketChannelImpl
                                 break;
                             }
 
-                            synchronized (stateLock) {
-                                if (isOpen() && (localAddress == null) ||
-                                    ((InetSocketAddress)localAddress)
-                                        .getAddress().isAnyLocalAddress())
-                                {
-                                    // Socket was not bound before connecting or
-                                    // Socket was bound with an "anyLocalAddress"
-                                    localAddress = Net.localAddress(fd);
-                                }
-                            }
-
                         } finally {
                             readerCleanup();
                             end((n > 0) || (n == IOStatus.UNAVAILABLE));
@@ -659,6 +675,8 @@ class SocketChannelImpl
                             // Connection succeeded; disallow further
                             // invocation
                             state = ST_CONNECTED;
+                            if (isOpen())
+                                localAddress = Net.localAddress(fd);
                             return true;
                         }
                         // If nonblocking and no exception then connection
@@ -747,6 +765,8 @@ class SocketChannelImpl
                 if (n > 0) {
                     synchronized (stateLock) {
                         state = ST_CONNECTED;
+                        if (isOpen())
+                            localAddress = Net.localAddress(fd);
                     }
                     return true;
                 }
@@ -816,7 +836,8 @@ class SocketChannelImpl
             // channel from using the old fd, which might be recycled in the
             // meantime and allocated to an entirely different channel.
             //
-            nd.preClose(fd);
+            if (state != ST_KILLED)
+                nd.preClose(fd);
 
             // Signal native threads, if needed.  If a target thread is not
             // currently blocked in an I/O operation then no harm is done since

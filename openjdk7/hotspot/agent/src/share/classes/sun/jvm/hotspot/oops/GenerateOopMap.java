@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -569,10 +569,10 @@ public class GenerateOopMap {
       case Bytecodes._invokedynamic:
         // FIXME: print signature of referenced method (need more
         // accessors in ConstantPool and ConstantPoolCache)
-        int idx = currentBC.getIndexBig();
+        int idx = currentBC.hasIndexU4() ? currentBC.getIndexU4() : currentBC.getIndexU2();
         tty.print(" idx " + idx);
         /*
-          int idx = currentBC.getIndexBig();
+          int idx = currentBC.getIndexU2();
           ConstantPool cp       = method().getConstants();
           int nameAndTypeIdx    = cp.name_and_type_ref_index_at(idx);
           int signatureIdx      = cp.signature_ref_index_at(nameAndTypeIdx);
@@ -609,10 +609,10 @@ public class GenerateOopMap {
       case Bytecodes._invokedynamic:
         // FIXME: print signature of referenced method (need more
         // accessors in ConstantPool and ConstantPoolCache)
-        int idx = currentBC.getIndexBig();
+        int idx = currentBC.hasIndexU4() ? currentBC.getIndexU4() : currentBC.getIndexU2();
         tty.print(" idx " + idx);
         /*
-          int idx = currentBC.getIndexBig();
+          int idx = currentBC.getIndexU2();
           constantPoolOop cp    = method().constants();
           int nameAndTypeIdx    = cp.name_and_type_ref_index_at(idx);
           int signatureIdx      = cp.signature_ref_index_at(nameAndTypeIdx);
@@ -651,10 +651,11 @@ public class GenerateOopMap {
     boolean fellThrough = false;  // False to get first BB marked.
 
     // First mark all exception handlers as start of a basic-block
-    TypeArray excps = method().getExceptionTable();
-    for(int i = 0; i < excps.getLength(); i += 4) {
-      int handler_pc_idx = i+2;
-      markBB(excps.getIntAt(handler_pc_idx), null);
+    if (method().hasExceptionTable()) {
+      ExceptionTableElement[] excps = method().getExceptionTable();
+      for(int i = 0; i < excps.length; i++) {
+        markBB(excps[i].getHandlerPC(), null);
+      }
     }
 
     // Then iterate through the code
@@ -891,14 +892,15 @@ public class GenerateOopMap {
 
     // Mark entry basic block as alive and all exception handlers
     _basic_blocks[0].markAsAlive();
-    TypeArray excps = method().getExceptionTable();
-    for(int i = 0; i < excps.getLength(); i += 4) {
-      int handler_pc_idx = i+2;
-      BasicBlock bb = getBasicBlockAt(excps.getIntAt(handler_pc_idx));
-      // If block is not already alive (due to multiple exception handlers to same bb), then
-      // make it alive
-      if (bb.isDead())
-        bb.markAsAlive();
+    if (method().hasExceptionTable()) {
+      ExceptionTableElement[] excps = method().getExceptionTable();
+      for(int i = 0; i < excps.length; i ++) {
+        BasicBlock bb = getBasicBlockAt(excps[i].getHandlerPC());
+        // If block is not already alive (due to multiple exception handlers to same bb), then
+        // make it alive
+        if (bb.isDead())
+          bb.markAsAlive();
+      }
     }
 
     BytecodeStream bcs = new BytecodeStream(_method);
@@ -1118,7 +1120,8 @@ public class GenerateOopMap {
       current instruction, starting in the current state. */
   void  interp1                             (BytecodeStream itr) {
     if (DEBUG) {
-      System.err.println(" - bci " + itr.bci());
+      System.err.println(" - bci " + itr.bci() + " " + itr.code());
+      printCurrentState(System.err, itr, false);
     }
 
     //    if (TraceNewOopMapGeneration) {
@@ -1179,8 +1182,8 @@ public class GenerateOopMap {
 
     case Bytecodes._ldc2_w:            ppush(vvCTS);               break;
 
-    case Bytecodes._ldc:               doLdc(itr.getIndex(), itr.bci());    break;
-    case Bytecodes._ldc_w:             doLdc(itr.getIndexBig(), itr.bci());break;
+    case Bytecodes._ldc:               doLdc(itr.bci());           break;
+    case Bytecodes._ldc_w:             doLdc(itr.bci());           break;
 
     case Bytecodes._iload:
     case Bytecodes._fload:             ppload(vCTS, itr.getIndex()); break;
@@ -1372,18 +1375,16 @@ public class GenerateOopMap {
     case Bytecodes._jsr:               doJsr(itr.dest());          break;
     case Bytecodes._jsr_w:             doJsr(itr.dest_w());        break;
 
-    case Bytecodes._getstatic:         doField(true,  true,
-                                               itr.getIndexBig(),
-                                               itr.bci()); break;
-    case Bytecodes._putstatic:         doField(false, true,  itr.getIndexBig(), itr.bci()); break;
-    case Bytecodes._getfield:          doField(true,  false, itr.getIndexBig(), itr.bci()); break;
-    case Bytecodes._putfield:          doField(false, false, itr.getIndexBig(), itr.bci()); break;
+    case Bytecodes._getstatic:         doField(true,  true,  itr.getIndexU2Cpcache(), itr.bci()); break;
+    case Bytecodes._putstatic:         doField(false, true,  itr.getIndexU2Cpcache(), itr.bci()); break;
+    case Bytecodes._getfield:          doField(true,  false, itr.getIndexU2Cpcache(), itr.bci()); break;
+    case Bytecodes._putfield:          doField(false, false, itr.getIndexU2Cpcache(), itr.bci()); break;
 
     case Bytecodes._invokevirtual:
-    case Bytecodes._invokespecial:     doMethod(false, false, itr.getIndexBig(), itr.bci()); break;
-    case Bytecodes._invokestatic:      doMethod(true,  false, itr.getIndexBig(), itr.bci()); break;
-    case Bytecodes._invokedynamic:     doMethod(false, true,  itr.getIndexBig(), itr.bci()); break;
-    case Bytecodes._invokeinterface:   doMethod(false, true,  itr.getIndexBig(), itr.bci()); break;
+    case Bytecodes._invokespecial:     doMethod(false, false, itr.getIndexU2Cpcache(), itr.bci()); break;
+    case Bytecodes._invokestatic:      doMethod(true,  false, itr.getIndexU2Cpcache(), itr.bci()); break;
+    case Bytecodes._invokedynamic:     doMethod(true,  false, itr.getIndexU4(),        itr.bci()); break;
+    case Bytecodes._invokeinterface:   doMethod(false,  true, itr.getIndexU2Cpcache(), itr.bci()); break;
     case Bytecodes._newarray:
     case Bytecodes._anewarray:         ppNewRef(vCTS, itr.bci()); break;
     case Bytecodes._checkcast:         doCheckcast(); break;
@@ -1469,12 +1470,12 @@ public class GenerateOopMap {
 
     if (_has_exceptions) {
       int bci = itr.bci();
-      TypeArray exct   = method().getExceptionTable();
-      for(int i = 0; i< exct.getLength(); i+=4) {
-        int start_pc   = exct.getIntAt(i);
-        int end_pc     = exct.getIntAt(i+1);
-        int handler_pc = exct.getIntAt(i+2);
-        int catch_type = exct.getIntAt(i+3);
+      ExceptionTableElement[] exct   = method().getExceptionTable();
+      for(int i = 0; i< exct.length; i++) {
+        int start_pc   = exct[i].getStartPC();
+        int end_pc     = exct[i].getEndPC();
+        int handler_pc = exct[i].getHandlerPC();
+        int catch_type = exct[i].getCatchTypeIndex();
 
         if (start_pc <= bci && bci < end_pc) {
           BasicBlock excBB = getBasicBlockAt(handler_pc);
@@ -1665,13 +1666,11 @@ public class GenerateOopMap {
     }
   }
 
-  void  doLdc                               (int idx, int bci) {
+  void  doLdc                               (int bci) {
+    BytecodeLoadConstant ldc = BytecodeLoadConstant.at(_method, bci);
     ConstantPool  cp  = method().getConstants();
-    ConstantTag   tag = cp.getTagAt(idx);
-    CellTypeState cts = (tag.isString() || tag.isUnresolvedString() ||
-                         tag.isKlass() || tag.isUnresolvedKlass())
-                          ? CellTypeState.makeLineRef(bci)
-                          : valCTS;
+    BasicType     bt = ldc.resultType();
+    CellTypeState cts = (bt == BasicType.T_OBJECT) ? CellTypeState.makeLineRef(bci) : valCTS;
     ppush1(cts);
   }
 
@@ -1729,15 +1728,7 @@ public class GenerateOopMap {
   void  doMethod                            (boolean is_static, boolean is_interface, int idx, int bci) {
     // Dig up signature for field in constant pool
     ConstantPool cp       = _method.getConstants();
-    int nameAndTypeIdx    = cp.getTagAt(idx).isNameAndType() ? idx : cp.getNameAndTypeRefIndexAt(idx);
-    int signatureIdx      = cp.getSignatureRefIndexAt(nameAndTypeIdx);
-    Symbol signature      = cp.getSymbolAt(signatureIdx);
-
-    if (DEBUG) {
-      System.err.println("doMethod: signature = " + signature.asString() + ", idx = " + idx +
-                         ", nameAndTypeIdx = " + nameAndTypeIdx + ", signatureIdx = " + signatureIdx +
-                         ", bci = " + bci);
-    }
+    Symbol signature      = cp.getSignatureRefAt(idx);
 
     // Parse method signature
     CellTypeStateList out = new CellTypeStateList(4);
@@ -2162,7 +2153,7 @@ public class GenerateOopMap {
     _conflict       = false;
     _max_locals     = (int) method().getMaxLocals();
     _max_stack      = (int) method().getMaxStack();
-    _has_exceptions = (method().getExceptionTable().getLength() > 0);
+    _has_exceptions = (method().hasExceptionTable());
     _nof_refval_conflicts = 0;
     _init_vars      = new ArrayList(5);  // There are seldom more than 5 init_vars
     _report_result  = false;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,6 +54,12 @@ public class Util {
      * Name of the resource directory.
      */
     public static final String RESOURCESDIR = "resources";
+
+    /**
+     * Resource bundle corresponding to the doclets.properties file.
+     */
+    public static final ResourceBundle RESOURCE_BUNDLE =
+                    ResourceBundle.getBundle(Configuration.DOCLETS_RESOURCE);
 
     /**
      * Return array of class members whose documentation is to be generated.
@@ -366,7 +372,13 @@ public class Util {
                     while((n = in.read(buf))>0) out.write(buf,0,n);
                 } else {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(in));
-                    BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out));
+                    BufferedWriter writer;
+                    if (configuration.docencoding == null) {
+                        writer = new BufferedWriter(new OutputStreamWriter(out));
+                    } else {
+                        writer = new BufferedWriter(new OutputStreamWriter(out,
+                            configuration.docencoding));
+                    }
                     try {
                         String line;
                         while ((line = reader.readLine()) != null) {
@@ -878,4 +890,24 @@ public class Util {
         }
         return false;
     }
+
+    /**
+     * A convenience method to get property name from the name of the
+     * getter or setter method.
+     * @param name name of the getter or setter method.
+     * @return the name of the property of the given setter of getter.
+     */
+    public static String propertyNameFromMethodName(String name) {
+        String propertyName = null;
+        if (name.startsWith("get") || name.startsWith("set")) {
+            propertyName = name.substring(3);
+        } else if (name.startsWith("is")) {
+            propertyName = name.substring(2);
+        }
+        if ((propertyName == null) || propertyName.isEmpty()){
+            return "";
+        }
+        return propertyName.substring(0, 1).toLowerCase()
+                + propertyName.substring(1);
+   }
 }

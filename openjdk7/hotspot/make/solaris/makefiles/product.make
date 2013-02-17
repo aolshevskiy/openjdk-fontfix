@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -40,6 +40,11 @@ endif
 # (OPT_CFLAGS/SLOWER is also available, to alter compilation of buggy files)
 ifeq ("${Platform_compiler}", "sparcWorks")
 
+ifeq ($(COMPILER_REV_NUMERIC), 510)
+# CC 5.10 has bug XXXXX with -xO4
+OPT_CFLAGS/jvmtiClassFileReconstituter.o = $(OPT_CFLAGS/O2)
+endif # COMPILER_REV_NUMERIC == 510
+
 ifeq ($(shell expr $(COMPILER_REV_NUMERIC) \>= 509), 1)
 # dtrace cannot handle tail call optimization (6672627, 6693876)
 OPT_CFLAGS/jni.o = $(OPT_CFLAGS/DEFAULT) $(OPT_CCFLAGS/NO_TAIL_CALL_OPT)
@@ -58,13 +63,9 @@ CFLAGS$(HOTSPARC_GENERIC) += $(OPT_CFLAGS/BYFILE)
 # to inhibit the effect of the previous line on CFLAGS.
 
 # Linker mapfiles
-# NOTE: inclusion of nonproduct mapfile not necessary; read it for details
-ifdef USE_GCC
 MAPFILE = $(GAMMADIR)/make/solaris/makefiles/mapfile-vers
-else
-MAPFILE = $(GAMMADIR)/make/solaris/makefiles/mapfile-vers \
-          $(GAMMADIR)/make/solaris/makefiles/mapfile-vers-nonproduct
 
+ifndef USE_GCC
 # This mapfile is only needed when compiling with dtrace support, 
 # and mustn't be otherwise.
 MAPFILE_DTRACE = $(GAMMADIR)/make/solaris/makefiles/mapfile-vers-$(TYPE)
@@ -72,8 +73,9 @@ MAPFILE_DTRACE = $(GAMMADIR)/make/solaris/makefiles/mapfile-vers-$(TYPE)
 REORDERFILE = $(GAMMADIR)/make/solaris/makefiles/reorder_$(TYPE)_$(BUILDARCH)
 endif
 
-# Don't strip in VM build; JDK build will strip libraries later
-# LINK_LIB.CC/POST_HOOK += $(STRIP_LIB.CC/POST_HOOK)
+# If we can create .debuginfo files, then the VM is stripped in vm.make
+# and this macro is not used.
+# LINK_LIB.CXX/POST_HOOK += $(STRIP_LIB.CXX/POST_HOOK)
 
 G_SUFFIX =
 SYSDEFS += -DPRODUCT

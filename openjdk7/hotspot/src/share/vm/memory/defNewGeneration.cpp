@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,10 @@
 #include "precompiled.hpp"
 #include "gc_implementation/shared/collectorCounters.hpp"
 #include "gc_implementation/shared/gcPolicyCounters.hpp"
+#include "gc_implementation/shared/gcHeapSummary.hpp"
+#include "gc_implementation/shared/gcTimer.hpp"
+#include "gc_implementation/shared/gcTraceTime.hpp"
+#include "gc_implementation/shared/gcTrace.hpp"
 #include "gc_implementation/shared/spaceDecorator.hpp"
 #include "memory/defNewGeneration.inline.hpp"
 #include "memory/gcLocker.inline.hpp"
@@ -47,6 +51,9 @@
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
+#endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
 #endif
 
 //
@@ -196,6 +203,8 @@ DefNewGeneration::DefNewGeneration(ReservedSpace rs,
   _next_gen = NULL;
   _tenuring_threshold = MaxTenuringThreshold;
   _pretenure_size_threshold_words = PretenureSizeThreshold >> LogHeapWordSize;
+
+  _gc_timer = new (ResourceObj::C_HEAP, mtGC) STWGCTimer();
 }
 
 void DefNewGeneration::compute_space_boundaries(uintx minimum_eden_size,
@@ -526,7 +535,13 @@ void DefNewGeneration::collect(bool   full,
                                size_t size,
                                bool   is_tlab) {
   assert(full || size > 0, "otherwise we don't want to collect");
+
   GenCollectedHeap* gch = GenCollectedHeap::heap();
+
+  _gc_timer->register_gc_start(os::elapsed_counter());
+  DefNewTracer gc_tracer;
+  gc_tracer.report_gc_start(gch->gc_cause(), _gc_timer->gc_start());
+
   _next_gen = gch->next_gen(this);
   assert(_next_gen != NULL,
     "This must be the youngest gen, and not the only gen");
@@ -545,9 +560,11 @@ void DefNewGeneration::collect(bool   full,
 
   init_assuming_no_promotion_failure();
 
-  TraceTime t1("GC", PrintGC && !PrintGCDetails, true, gclog_or_tty);
+  GCTraceTime t1(GCCauseString("GC", gch->gc_cause()), PrintGC && !PrintGCDetails, true, NULL);
   // Capture heap used before collection (for printing).
   size_t gch_prev_used = gch->used();
+
+  gch->trace_heap_before_gc(&gc_tracer);
 
   SpecializationStats::clear();
 
@@ -594,7 +611,7 @@ void DefNewGeneration::collect(bool   full,
   ReferenceProcessor* rp = ref_processor();
   rp->setup_policy(clear_all_soft_refs);
   rp->process_discovered_references(&is_alive, &keep_alive, &evacuate_followers,
-                                    NULL);
+                                    NULL, _gc_timer);
   if (!promotion_failed()) {
     // Swap the survivor spaces.
     eden()->clear(SpaceDecorator::Mangle);
@@ -652,7 +669,18 @@ void DefNewGeneration::collect(bool   full,
   from()->set_concurrent_iteration_safe_limit(from()->top());
   to()->set_concurrent_iteration_safe_limit(to()->top());
   SpecializationStats::print();
-  update_time_of_last_gc(os::javaTimeMillis());
+
+  // We need to use a monotonically non-deccreasing time in ms
+  // or we will see time-warp warnings and os::javaTimeMillis()
+  // does not guarantee monotonicity.
+  jlong now = os::javaTimeNanos() / NANOSECS_PER_MILLISEC;
+  update_time_of_last_gc(now);
+
+  gch->trace_heap_after_gc(&gc_tracer);
+
+  _gc_timer->register_gc_end(os::elapsed_counter());
+
+  gc_tracer.report_gc_end(_gc_timer->gc_end(), _gc_timer->time_partitions());
 }
 
 class RemoveForwardPointerClosure: public ObjectClosure {
@@ -905,6 +933,10 @@ void DefNewGeneration::gc_epilogue(bool full) {
     to()->check_mangled_unused_area_complete();
   }
 
+  if (!CleanChunkPoolAsync) {
+    Chunk::clean_chunk_pool();
+  }
+
   // update the generation and space performance counters
   update_counters();
   gch->collector_policy()->counters()->update_counters();
@@ -917,6 +949,10 @@ void DefNewGeneration::record_spaces_top() {
   from()->set_top_for_allocations();
 }
 
+void DefNewGeneration::ref_processor_init() {
+  Generation::ref_processor_init();
+}
+
 
 void DefNewGeneration::update_counters() {
   if (UsePerfData) {
@@ -927,10 +963,10 @@ void DefNewGeneration::update_counters() {
   }
 }
 
-void DefNewGeneration::verify(bool allow_dirty) {
-  eden()->verify(allow_dirty);
-  from()->verify(allow_dirty);
-    to()->verify(allow_dirty);
+void DefNewGeneration::verify() {
+  eden()->verify();
+  from()->verify();
+    to()->verify();
 }
 
 void DefNewGeneration::print_on(outputStream* st) const {

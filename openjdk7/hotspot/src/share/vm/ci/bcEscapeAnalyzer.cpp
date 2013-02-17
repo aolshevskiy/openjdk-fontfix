@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -150,11 +150,23 @@ void BCEscapeAnalyzer::set_method_escape(ArgumentMap vars) {
   clear_bits(vars, _arg_local);
 }
 
-void BCEscapeAnalyzer::set_global_escape(ArgumentMap vars) {
+void BCEscapeAnalyzer::set_global_escape(ArgumentMap vars, bool merge) {
   clear_bits(vars, _arg_local);
   clear_bits(vars, _arg_stack);
   if (vars.contains_allocated())
     _allocated_escapes = true;
+
+  if (merge && !vars.is_empty()) {
+    // Merge new state into already processed block.
+    // New state is not taken into account and
+    // it may invalidate set_returned() result.
+    if (vars.contains_unknown() || vars.contains_allocated()) {
+      _return_local = false;
+    }
+    if (vars.contains_unknown() || vars.contains_vars()) {
+      _return_allocated = false;
+    }
+  }
 }
 
 void BCEscapeAnalyzer::set_dirty(ArgumentMap vars) {
@@ -224,11 +236,17 @@ void BCEscapeAnalyzer::invoke(StateInfo &state, Bytecodes::Code code, ciMethod* 
   ciInstanceKlass* callee_holder = ciEnv::get_instance_klass_for_declared_method_holder(holder);
   ciInstanceKlass* actual_recv = callee_holder;
 
-  // some methods are obviously bindable without any type checks so
-  // convert them directly to an invokespecial.
-  if (target->is_loaded() && !target->is_abstract() &&
-      target->can_be_statically_bound() && code == Bytecodes::_invokevirtual) {
-    code = Bytecodes::_invokespecial;
+  // Some methods are obviously bindable without any type checks so
+  // convert them directly to an invokespecial or invokestatic.
+  if (target->is_loaded() && !target->is_abstract() && target->can_be_statically_bound()) {
+    switch (code) {
+    case Bytecodes::_invokevirtual:
+      code = Bytecodes::_invokespecial;
+      break;
+    case Bytecodes::_invokehandle:
+      code = target->is_static() ? Bytecodes::_invokestatic : Bytecodes::_invokespecial;
+      break;
+    }
   }
 
   // compute size of arguments
@@ -264,7 +282,7 @@ void BCEscapeAnalyzer::invoke(StateInfo &state, Bytecodes::Code code, ciMethod* 
   ciMethod* inline_target = NULL;
   if (target->is_loaded() && klass->is_loaded()
       && (klass->is_initialized() || klass->is_interface() && target->holder()->is_initialized())
-      && target->will_link(klass, callee_holder, code)) {
+      && target->is_loaded()) {
     if (code == Bytecodes::_invokestatic
         || code == Bytecodes::_invokespecial
         || code == Bytecodes::_invokevirtual && target->is_final_method()) {
@@ -347,7 +365,7 @@ void BCEscapeAnalyzer::iterate_one_block(ciBlock *blk, StateInfo &state, Growabl
       case Bytecodes::_nop:
         break;
       case Bytecodes::_aconst_null:
-        state.apush(empty_map);
+        state.apush(unknown_obj);
         break;
       case Bytecodes::_iconst_m1:
       case Bytecodes::_iconst_0:
@@ -380,6 +398,8 @@ void BCEscapeAnalyzer::iterate_one_block(ciBlock *blk, StateInfo &state, Growabl
         if (tag.is_long() || tag.is_double()) {
           // Only longs and doubles use 2 stack slots.
           state.lpush();
+        } else if (tag.basic_type() == T_OBJECT) {
+          state.apush(unknown_obj);
         } else {
           state.spush();
         }
@@ -810,8 +830,8 @@ void BCEscapeAnalyzer::iterate_one_block(ciBlock *blk, StateInfo &state, Growabl
         break;
       case Bytecodes::_getstatic:
       case Bytecodes::_getfield:
-        { bool will_link;
-          ciField* field = s.get_field(will_link);
+        { bool ignored_will_link;
+          ciField* field = s.get_field(ignored_will_link);
           BasicType field_type = field->type()->basic_type();
           if (s.cur_bc() != Bytecodes::_getstatic) {
             set_method_escape(state.apop());
@@ -849,11 +869,21 @@ void BCEscapeAnalyzer::iterate_one_block(ciBlock *blk, StateInfo &state, Growabl
       case Bytecodes::_invokestatic:
       case Bytecodes::_invokedynamic:
       case Bytecodes::_invokeinterface:
-        { bool will_link;
-          ciMethod* target = s.get_method(will_link);
-          ciKlass* holder = s.get_declared_method_holder();
-          invoke(state, s.cur_bc(), target, holder);
-          ciType* return_type = target->return_type();
+        { bool ignored_will_link;
+          ciSignature* declared_signature = NULL;
+          ciMethod* target = s.get_method(ignored_will_link, &declared_signature);
+          ciKlass*  holder = s.get_declared_method_holder();
+          assert(declared_signature != NULL, "cannot be null");
+          // Push appendix argument, if one.
+          if (s.has_appendix()) {
+            state.apush(unknown_obj);
+          }
+          // Pass in raw bytecode because we need to see invokehandle instructions.
+          invoke(state, s.cur_bc_raw(), target, holder);
+          // We are using the return type of the declared signature here because
+          // it might be a more concrete type than the one from the target (for
+          // e.g. invokedynamic and invokehandle).
+          ciType* return_type = declared_signature->return_type();
           if (!return_type->is_primitive_type()) {
             state.apush(unknown_obj);
           } else if (return_type->is_one_word()) {
@@ -999,7 +1029,7 @@ void BCEscapeAnalyzer::merge_block_states(StateInfo *blockstates, ciBlock *dest,
       t.set_difference(d_state->_stack[i]);
       extra_vars.set_union(t);
     }
-    set_global_escape(extra_vars);
+    set_global_escape(extra_vars, true);
   }
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@
 #include "c1/c1_ValueStack.hpp"
 #include "ci/ciMethodData.hpp"
 #include "ci/ciStreams.hpp"
+#include "compiler/compileLog.hpp"
 
 class MemoryBuffer;
 
@@ -225,7 +226,7 @@ class GraphBuilder VALUE_OBJ_CLASS_SPEC {
   void load_constant();
   void load_local(ValueType* type, int index);
   void store_local(ValueType* type, int index);
-  void store_local(ValueStack* state, Value value, ValueType* type, int index);
+  void store_local(ValueStack* state, Value value, int index);
   void load_indexed (BasicType type);
   void store_indexed(BasicType type);
   void stack_op(Bytecodes::Code code);
@@ -315,9 +316,17 @@ class GraphBuilder VALUE_OBJ_CLASS_SPEC {
                                ValueStack* return_state) { scope_data()->set_inline_cleanup_info(block,
                                                                                                   return_prev,
                                                                                                   return_state); }
+  void set_inline_cleanup_info() {
+    set_inline_cleanup_info(_block, _last, _state);
+  }
   BlockBegin*  inline_cleanup_block() const              { return scope_data()->inline_cleanup_block();  }
   Instruction* inline_cleanup_return_prev() const        { return scope_data()->inline_cleanup_return_prev(); }
   ValueStack*  inline_cleanup_state() const              { return scope_data()->inline_cleanup_state();  }
+  void restore_inline_cleanup_info() {
+    _block = inline_cleanup_block();
+    _last  = inline_cleanup_return_prev();
+    _state = inline_cleanup_state();
+  }
   void incr_num_returns()                                { scope_data()->incr_num_returns();             }
   int  num_returns() const                               { return scope_data()->num_returns();           }
   intx max_inline_size() const                           { return scope_data()->max_inline_size();       }
@@ -329,10 +338,16 @@ class GraphBuilder VALUE_OBJ_CLASS_SPEC {
   void fill_sync_handler(Value lock, BlockBegin* sync_handler, bool default_handler = false);
 
   // inliners
-  bool try_inline(ciMethod* callee, bool holder_known);
+  bool try_inline(           ciMethod* callee, bool holder_known, Bytecodes::Code bc = Bytecodes::_illegal, Value receiver = NULL);
   bool try_inline_intrinsics(ciMethod* callee);
-  bool try_inline_full      (ciMethod* callee, bool holder_known);
+  bool try_inline_full(      ciMethod* callee, bool holder_known, Bytecodes::Code bc = Bytecodes::_illegal, Value receiver = NULL);
   bool try_inline_jsr(int jsr_dest_bci);
+
+  const char* check_can_parse(ciMethod* callee) const;
+  const char* should_not_inline(ciMethod* callee) const;
+
+  // JSR 292 support
+  bool try_method_handle_inline(ciMethod* callee);
 
   // helpers
   void inline_bailout(const char* msg);
@@ -353,10 +368,11 @@ class GraphBuilder VALUE_OBJ_CLASS_SPEC {
   bool append_unsafe_put_raw(ciMethod* callee, BasicType t);
   bool append_unsafe_prefetch(ciMethod* callee, bool is_store, bool is_static);
   void append_unsafe_CAS(ciMethod* callee);
+  bool append_unsafe_get_and_set_obj(ciMethod* callee, bool is_add);
 
-  NOT_PRODUCT(void print_inline_result(ciMethod* callee, bool res);)
+  void print_inlining(ciMethod* callee, const char* msg = NULL, bool success = true);
 
-  void profile_call(Value recv, ciKlass* predicted_holder);
+  void profile_call(ciMethod* callee, Value recv, ciKlass* predicted_holder);
   void profile_invocation(ciMethod* inlinee, ValueStack* state);
 
   // Shortcuts to profiling control.

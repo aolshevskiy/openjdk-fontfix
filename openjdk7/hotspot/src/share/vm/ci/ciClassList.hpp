@@ -47,7 +47,9 @@ class ciObject;
 class   ciNullObject;
 class   ciInstance;
 class     ciCallSite;
+class     ciMemberName;
 class     ciMethodHandle;
+class     ciMethodType;
 class   ciMethod;
 class   ciMethodData;
 class     ciReceiverTypeData;  // part of ciMethodData
@@ -77,12 +79,14 @@ class         ciTypeArrayKlassKlass;
 
 // Everyone gives access to ciObjectFactory
 #define CI_PACKAGE_ACCESS \
-friend class ciObjectFactory;
+friend class ciObjectFactory; \
+friend class VMStructs;
 
 // These are the packages that have access to ciEnv
 // Any more access must be given explicitly.
 #define CI_PACKAGE_ACCESS_TO           \
 friend class ciObjectFactory;          \
+friend class VMStructs;                \
 friend class ciCallSite;               \
 friend class ciConstantPoolCache;      \
 friend class ciField;                  \
@@ -98,9 +102,11 @@ friend class ciExceptionHandlerStream; \
 friend class ciObject;                 \
 friend class ciNullObject;             \
 friend class ciInstance;               \
+friend class ciMemberName;             \
 friend class ciMethod;                 \
 friend class ciMethodData;             \
 friend class ciMethodHandle;           \
+friend class ciMethodType;             \
 friend class ciReceiverTypeData;       \
 friend class ciSymbol;                 \
 friend class ciArray;                  \

@@ -47,12 +47,10 @@ VM          = $(GAMMADIR)/src/share/vm
 Plat_File   = $(Platform_file)
 CDG         = cd $(GENERATED); 
 
-ifdef USE_PRECOMPILED_HEADER
-PrecompiledOption = -DUSE_PRECOMPILED_HEADER
-UpdatePCH         = $(MAKE) -f vm.make $(PRECOMPILED_HEADER) $(MFLAGS) 
+ifneq ($(USE_PRECOMPILED_HEADER),0)
+UpdatePCH = $(MAKE) -f vm.make $(PRECOMPILED_HEADER) $(MFLAGS) 
 else
-UpdatePCH         = \# precompiled header is not used
-PrecompiledOption = 
+UpdatePCH = \# precompiled header is not used
 endif
 
 Cached_plat = $(GENERATED)/platform.current
@@ -82,7 +80,7 @@ default: vm_build_preliminaries the_vm
 	@echo All done.
 
 # This is an explicit dependency for the sake of parallel makes.
-vm_build_preliminaries:  checks $(Cached_plat) $(AD_Files_If_Required) jvmti_stuff sa_stuff
+vm_build_preliminaries:  checks $(Cached_plat) $(AD_Files_If_Required) trace_stuff jvmti_stuff sa_stuff
 	@# We need a null action here, so implicit rules don't get consulted.
 
 $(Cached_plat): $(Plat_File)
@@ -95,6 +93,10 @@ ad_stuff: $(Cached_plat) $(adjust-mflags)
 # generate JVMTI files from the spec
 jvmti_stuff: $(Cached_plat) $(adjust-mflags)
 	@$(MAKE) -f jvmti.make $(MFLAGS-adjusted)
+
+# generate trace files
+trace_stuff: jvmti_stuff $(Cached_plat) $(adjust-mflags)
+	@$(MAKE) -f trace.make $(MFLAGS-adjusted)
 
 # generate SA jar files and native header
 sa_stuff:
@@ -117,8 +119,8 @@ the_vm: vm_build_preliminaries $(adjust-mflags)
 	@$(UpdatePCH)
 	@$(MAKE) -f vm.make $(MFLAGS-adjusted)
 
-install: the_vm
-	@$(MAKE) -f vm.make install
+install gamma: the_vm
+	@$(MAKE) -f vm.make $@
 
 # next rules support "make foo.[ois]"
 

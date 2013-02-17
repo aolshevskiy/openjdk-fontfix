@@ -208,11 +208,18 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
         return name;
     }
 
+    private static native String getLocalHostname();
+    private static native int getJvmPID();
+
     void postInit(XCreateWindowParams params) {
         super.postInit(params);
 
         // Init WM_PROTOCOLS atom
         initWMProtocols();
+
+        // Set _NET_WM_PID and WM_CLIENT_MACHINE using this JVM
+        XAtom.get("WM_CLIENT_MACHINE").setProperty(getWindow(), getLocalHostname());
+        XAtom.get("_NET_WM_PID").setCard32Property(getWindow(), getJvmPID());
 
         // Set WM_TRANSIENT_FOR and group_leader
         Window t_window = (Window)target;
@@ -245,6 +252,20 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
                 finally {
                     XToolkit.awtUnlock();
                 }
+            }
+        }
+
+        if (owner != null || isSimpleWindow()) {
+            XToolkit.awtLock();
+            try {
+                XNETProtocol protocol = XWM.getWM().getNETProtocol();
+                if (protocol != null && protocol.active()) {
+                    XAtomList net_wm_state = getNETWMState();
+                    net_wm_state.add(protocol.XA_NET_WM_STATE_SKIP_TASKBAR);
+                    setNETWMState(net_wm_state);
+                }
+            } finally {
+                XToolkit.awtUnlock();
             }
         }
 
@@ -473,14 +494,6 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
                              bounds.x, bounds.y, bounds.width, bounds.height);
             XWM.setMotifDecor(this, false, 0, 0);
 
-            XNETProtocol protocol = XWM.getWM().getNETProtocol();
-            if (protocol != null && protocol.active()) {
-                XAtomList net_wm_state = getNETWMState();
-                net_wm_state.add(protocol.XA_NET_WM_STATE_SKIP_TASKBAR);
-                setNETWMState(net_wm_state);
-            }
-
-
             boolean isResized = !bounds.getSize().equals(oldBounds.getSize());
             boolean isMoved = !bounds.getLocation().equals(oldBounds.getLocation());
             if (isMoved || isResized) {
@@ -603,7 +616,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
 
     public void handleWindowFocusIn_Dispatch() {
         if (EventQueue.isDispatchThread()) {
-            XKeyboardFocusManagerPeer.setCurrentNativeFocusedWindow((Window) target);
+            XKeyboardFocusManagerPeer.getInstance().setCurrentFocusedWindow((Window) target);
             WindowEvent we = new WindowEvent((Window)target, WindowEvent.WINDOW_GAINED_FOCUS);
             SunToolkit.setSystemGenerated(we);
             target.dispatchEvent(we);
@@ -612,7 +625,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
 
     public void handleWindowFocusInSync(long serial) {
         WindowEvent we = new WindowEvent((Window)target, WindowEvent.WINDOW_GAINED_FOCUS);
-        XKeyboardFocusManagerPeer.setCurrentNativeFocusedWindow((Window) target);
+        XKeyboardFocusManagerPeer.getInstance().setCurrentFocusedWindow((Window) target);
         sendEvent(we);
     }
     // NOTE: This method may be called by privileged threads.
@@ -620,7 +633,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     public void handleWindowFocusIn(long serial) {
         WindowEvent we = new WindowEvent((Window)target, WindowEvent.WINDOW_GAINED_FOCUS);
         /* wrap in Sequenced, then post*/
-        XKeyboardFocusManagerPeer.setCurrentNativeFocusedWindow((Window) target);
+        XKeyboardFocusManagerPeer.getInstance().setCurrentFocusedWindow((Window) target);
         postEvent(wrapInSequenced((AWTEvent) we));
     }
 
@@ -628,15 +641,15 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     //       DO NOT INVOKE CLIENT CODE ON THIS THREAD!
     public void handleWindowFocusOut(Window oppositeWindow, long serial) {
         WindowEvent we = new WindowEvent((Window)target, WindowEvent.WINDOW_LOST_FOCUS, oppositeWindow);
-        XKeyboardFocusManagerPeer.setCurrentNativeFocusedWindow(null);
-        XKeyboardFocusManagerPeer.setCurrentNativeFocusOwner(null);
+        XKeyboardFocusManagerPeer.getInstance().setCurrentFocusedWindow(null);
+        XKeyboardFocusManagerPeer.getInstance().setCurrentFocusOwner(null);
         /* wrap in Sequenced, then post*/
         postEvent(wrapInSequenced((AWTEvent) we));
     }
     public void handleWindowFocusOutSync(Window oppositeWindow, long serial) {
         WindowEvent we = new WindowEvent((Window)target, WindowEvent.WINDOW_LOST_FOCUS, oppositeWindow);
-        XKeyboardFocusManagerPeer.setCurrentNativeFocusedWindow(null);
-        XKeyboardFocusManagerPeer.setCurrentNativeFocusOwner(null);
+        XKeyboardFocusManagerPeer.getInstance().setCurrentFocusedWindow(null);
+        XKeyboardFocusManagerPeer.getInstance().setCurrentFocusOwner(null);
         sendEvent(we);
     }
 
@@ -1124,7 +1137,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
             // getWMState() always returns 0 (Withdrawn) for simple windows. Hence
             // we ignore the state for such windows.
             if (isVisible() && (state == XUtilConstants.NormalState || isSimpleWindow())) {
-                if (XKeyboardFocusManagerPeer.getCurrentNativeFocusedWindow() ==
+                if (XKeyboardFocusManagerPeer.getInstance().getCurrentFocusedWindow() ==
                         getTarget())
                 {
                     show = true;
@@ -1151,15 +1164,25 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
     }
 
     public void dispose() {
+        if (isGrabbed()) {
+            if (grabLog.isLoggable(PlatformLogger.FINE)) {
+                grabLog.fine("Generating UngrabEvent on {0} because of the window disposal", this);
+            }
+            postEventToEventQueue(new sun.awt.UngrabEvent(getEventSource()));
+        }
+
         SunToolkit.awtLock();
+
         try {
             windows.remove(this);
         } finally {
             SunToolkit.awtUnlock();
         }
+
         if (warningWindow != null) {
             warningWindow.destroy();
         }
+
         removeRootPropertyEventDispatcher();
         mustControlStackPosition = false;
         super.dispose();
@@ -1171,12 +1194,13 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
          * receive WM_TAKE_FOCUS.
          */
         if (isSimpleWindow()) {
-            if (target == XKeyboardFocusManagerPeer.getCurrentNativeFocusedWindow()) {
+            if (target == XKeyboardFocusManagerPeer.getInstance().getCurrentFocusedWindow()) {
                 Window owner = getDecoratedOwner((Window)target);
                 ((XWindowPeer)AWTAccessor.getComponentAccessor().getPeer(owner)).requestWindowFocus();
             }
         }
     }
+
     boolean isResizable() {
         return winAttr.isResizable;
     }
@@ -1811,7 +1835,7 @@ class XWindowPeer extends XPanelPeer implements WindowPeer,
         // If this is Frame or Dialog we can't assure focus request success - but we still can try
         // If this is Window and its owner Frame is active we can be sure request succedded.
         Window ownerWindow  = XWindowPeer.getDecoratedOwner((Window)target);
-        Window focusedWindow = XKeyboardFocusManagerPeer.getCurrentNativeFocusedWindow();
+        Window focusedWindow = XKeyboardFocusManagerPeer.getInstance().getCurrentFocusedWindow();
         Window activeWindow = XWindowPeer.getDecoratedOwner(focusedWindow);
 
         if (isWMStateNetHidden()) {

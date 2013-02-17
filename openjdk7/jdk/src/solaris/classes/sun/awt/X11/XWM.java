@@ -101,7 +101,9 @@ final class XWM
         ICE_WM = 10,
         METACITY_WM = 11,
         COMPIZ_WM = 12,
-        LG3D_WM = 13;
+        LG3D_WM = 13,
+        CWM_WM = 14,
+        MUTTER_WM = 15;
     public String toString() {
         switch  (WMID) {
           case NO_WM:
@@ -128,6 +130,10 @@ final class XWM
               return "Compiz";
           case LG3D_WM:
               return "LookingGlass";
+          case CWM_WM:
+              return "CWM";
+          case MUTTER_WM:
+              return "Mutter";
           case UNDETERMINED_WM:
           default:
               return "Undetermined WM";
@@ -555,6 +561,10 @@ final class XWM
         return isNetWMName("LG3D");
     }
 
+    static boolean isCWM() {
+        return isNetWMName("CWM");
+    }
+
     /*
      * Is Metacity running?
      */
@@ -566,8 +576,12 @@ final class XWM
 //                            getIntProperty(XToolkit.getDefaultRootWindow(), XAtom.XA_CARDINAL)) == 0);
     }
 
+    static boolean isMutter() {
+        return isNetWMName("Mutter");
+    }
+
     static boolean isNonReparentingWM() {
-        return (XWM.getWMID() == XWM.COMPIZ_WM || XWM.getWMID() == XWM.LG3D_WM);
+        return (XWM.getWMID() == XWM.COMPIZ_WM || XWM.getWMID() == XWM.LG3D_WM || XWM.getWMID() == XWM.CWM_WM);
     }
 
     /*
@@ -735,6 +749,8 @@ final class XWM
                 awt_wmgr = XWM.ENLIGHTEN_WM;
             } else if (isMetacity()) {
                 awt_wmgr = XWM.METACITY_WM;
+            } else if (isMutter()) {
+                awt_wmgr = XWM.MUTTER_WM;
             } else if (isSawfish()) {
                 awt_wmgr = XWM.SAWFISH_WM;
             } else if (isKDE2()) {
@@ -743,6 +759,8 @@ final class XWM
                 awt_wmgr = XWM.COMPIZ_WM;
             } else if (isLookingGlass()) {
                 awt_wmgr = LG3D_WM;
+            } else if (isCWM()) {
+                awt_wmgr = CWM_WM;
             } else if (doIsIceWM && isIceWM()) {
                 awt_wmgr = XWM.ICE_WM;
             }

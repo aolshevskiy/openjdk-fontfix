@@ -27,6 +27,8 @@
 #include "code/codeCache.hpp"
 #include "gc_implementation/parallelScavenge/pcTasks.hpp"
 #include "gc_implementation/parallelScavenge/psParallelCompact.hpp"
+#include "gc_implementation/shared/gcTimer.hpp"
+#include "gc_implementation/shared/gcTraceTime.hpp"
 #include "gc_interface/collectedHeap.hpp"
 #include "memory/universe.hpp"
 #include "oops/objArrayKlass.inline.hpp"
@@ -48,8 +50,8 @@ void ThreadRootsMarkingTask::do_it(GCTaskManager* manager, uint which) {
 
   ResourceMark rm;
 
-  NOT_PRODUCT(TraceTime tm("ThreadRootsMarkingTask",
-    PrintGCDetails && TraceParallelOldGCTasks, true, gclog_or_tty));
+  NOT_PRODUCT(GCTraceTime tm("ThreadRootsMarkingTask",
+    PrintGCDetails && TraceParallelOldGCTasks, true, NULL));
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
   PSParallelCompact::MarkAndPushClosure mark_and_push_closure(cm);
@@ -69,8 +71,8 @@ void ThreadRootsMarkingTask::do_it(GCTaskManager* manager, uint which) {
 void MarkFromRootsTask::do_it(GCTaskManager* manager, uint which) {
   assert(Universe::heap()->is_gc_active(), "called outside gc");
 
-  NOT_PRODUCT(TraceTime tm("MarkFromRootsTask",
-    PrintGCDetails && TraceParallelOldGCTasks, true, gclog_or_tty));
+  NOT_PRODUCT(GCTraceTime tm("MarkFromRootsTask",
+    PrintGCDetails && TraceParallelOldGCTasks, true, NULL));
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
   PSParallelCompact::MarkAndPushClosure mark_and_push_closure(cm);
@@ -78,10 +80,6 @@ void MarkFromRootsTask::do_it(GCTaskManager* manager, uint which) {
   switch (_root_type) {
     case universe:
       Universe::oops_do(&mark_and_push_closure);
-      break;
-
-    case reference_processing:
-      ReferenceProcessor::oops_do(&mark_and_push_closure);
       break;
 
     case jni_handles:
@@ -138,8 +136,8 @@ void RefProcTaskProxy::do_it(GCTaskManager* manager, uint which)
 {
   assert(Universe::heap()->is_gc_active(), "called outside gc");
 
-  NOT_PRODUCT(TraceTime tm("RefProcTask",
-    PrintGCDetails && TraceParallelOldGCTasks, true, gclog_or_tty));
+  NOT_PRODUCT(GCTraceTime tm("RefProcTask",
+    PrintGCDetails && TraceParallelOldGCTasks, true, NULL));
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
   PSParallelCompact::MarkAndPushClosure mark_and_push_closure(cm);
@@ -156,15 +154,16 @@ void RefProcTaskExecutor::execute(ProcessTask& task)
 {
   ParallelScavengeHeap* heap = PSParallelCompact::gc_heap();
   uint parallel_gc_threads = heap->gc_task_manager()->workers();
+  uint active_gc_threads = heap->gc_task_manager()->active_workers();
   RegionTaskQueueSet* qset = ParCompactionManager::region_array();
-  ParallelTaskTerminator terminator(parallel_gc_threads, qset);
+  ParallelTaskTerminator terminator(active_gc_threads, qset);
   GCTaskQueue* q = GCTaskQueue::create();
   for(uint i=0; i<parallel_gc_threads; i++) {
     q->enqueue(new RefProcTaskProxy(task, i));
   }
   if (task.marks_oops_alive()) {
     if (parallel_gc_threads>1) {
-      for (uint j=0; j<parallel_gc_threads; j++) {
+      for (uint j=0; j<active_gc_threads; j++) {
         q->enqueue(new StealMarkingTask(&terminator));
       }
     }
@@ -193,8 +192,8 @@ StealMarkingTask::StealMarkingTask(ParallelTaskTerminator* t) :
 void StealMarkingTask::do_it(GCTaskManager* manager, uint which) {
   assert(Universe::heap()->is_gc_active(), "called outside gc");
 
-  NOT_PRODUCT(TraceTime tm("StealMarkingTask",
-    PrintGCDetails && TraceParallelOldGCTasks, true, gclog_or_tty));
+  NOT_PRODUCT(GCTraceTime tm("StealMarkingTask",
+    PrintGCDetails && TraceParallelOldGCTasks, true, NULL));
 
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
@@ -220,18 +219,43 @@ void StealMarkingTask::do_it(GCTaskManager* manager, uint which) {
 // StealRegionCompactionTask
 //
 
-
 StealRegionCompactionTask::StealRegionCompactionTask(ParallelTaskTerminator* t):
   _terminator(t) {}
 
 void StealRegionCompactionTask::do_it(GCTaskManager* manager, uint which) {
   assert(Universe::heap()->is_gc_active(), "called outside gc");
 
-  NOT_PRODUCT(TraceTime tm("StealRegionCompactionTask",
-    PrintGCDetails && TraceParallelOldGCTasks, true, gclog_or_tty));
+  NOT_PRODUCT(GCTraceTime tm("StealRegionCompactionTask",
+    PrintGCDetails && TraceParallelOldGCTasks, true, NULL));
 
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
+
+
+  // If not all threads are active, get a draining stack
+  // from the list.  Else, just use this threads draining stack.
+  uint which_stack_index;
+  bool use_all_workers = manager->all_workers_active();
+  if (use_all_workers) {
+    which_stack_index = which;
+    assert(manager->active_workers() == ParallelGCThreads,
+           err_msg("all_workers_active has been incorrectly set: "
+                   " active %d  ParallelGCThreads %d", manager->active_workers(),
+                   ParallelGCThreads));
+  } else {
+    which_stack_index = ParCompactionManager::pop_recycled_stack_index();
+  }
+
+  cm->set_region_stack_index(which_stack_index);
+  cm->set_region_stack(ParCompactionManager::region_list(which_stack_index));
+  if (TraceDynamicGCThreads) {
+    gclog_or_tty->print_cr("StealRegionCompactionTask::do_it "
+                           "region_stack_index %d region_stack = 0x%x "
+                           " empty (%d) use all workers %d",
+    which_stack_index, ParCompactionManager::region_list(which_stack_index),
+    cm->region_stack()->is_empty(),
+    use_all_workers);
+  }
 
   // Has to drain stacks first because there may be regions on
   // preloaded onto the stack and this thread may never have
@@ -268,8 +292,8 @@ UpdateDensePrefixTask::UpdateDensePrefixTask(
 
 void UpdateDensePrefixTask::do_it(GCTaskManager* manager, uint which) {
 
-  NOT_PRODUCT(TraceTime tm("UpdateDensePrefixTask",
-    PrintGCDetails && TraceParallelOldGCTasks, true, gclog_or_tty));
+  NOT_PRODUCT(GCTraceTime tm("UpdateDensePrefixTask",
+    PrintGCDetails && TraceParallelOldGCTasks, true, NULL));
 
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
@@ -283,12 +307,56 @@ void UpdateDensePrefixTask::do_it(GCTaskManager* manager, uint which) {
 void DrainStacksCompactionTask::do_it(GCTaskManager* manager, uint which) {
   assert(Universe::heap()->is_gc_active(), "called outside gc");
 
-  NOT_PRODUCT(TraceTime tm("DrainStacksCompactionTask",
-    PrintGCDetails && TraceParallelOldGCTasks, true, gclog_or_tty));
+  NOT_PRODUCT(GCTraceTime tm("DrainStacksCompactionTask",
+    PrintGCDetails && TraceParallelOldGCTasks, true, NULL));
 
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
 
+  uint which_stack_index;
+  bool use_all_workers = manager->all_workers_active();
+  if (use_all_workers) {
+    which_stack_index = which;
+    assert(manager->active_workers() == ParallelGCThreads,
+           err_msg("all_workers_active has been incorrectly set: "
+                   " active %d  ParallelGCThreads %d", manager->active_workers(),
+                   ParallelGCThreads));
+  } else {
+    which_stack_index = stack_index();
+  }
+
+  cm->set_region_stack(ParCompactionManager::region_list(which_stack_index));
+  if (TraceDynamicGCThreads) {
+    gclog_or_tty->print_cr("DrainStacksCompactionTask::do_it which = %d "
+                           "which_stack_index = %d/empty(%d) "
+                           "use all workers %d",
+                           which, which_stack_index,
+                           cm->region_stack()->is_empty(),
+                           use_all_workers);
+  }
+
+  cm->set_region_stack_index(which_stack_index);
+
   // Process any regions already in the compaction managers stacks.
   cm->drain_region_stacks();
+
+  assert(cm->region_stack()->is_empty(), "Not empty");
+
+  if (!use_all_workers) {
+    // Always give up the region stack.
+    assert(cm->region_stack() ==
+           ParCompactionManager::region_list(cm->region_stack_index()),
+           "region_stack and region_stack_index are inconsistent");
+    ParCompactionManager::push_recycled_stack_index(cm->region_stack_index());
+
+    if (TraceDynamicGCThreads) {
+      void* old_region_stack = (void*) cm->region_stack();
+      int old_region_stack_index = cm->region_stack_index();
+      gclog_or_tty->print_cr("Pushing region stack 0x%x/%d",
+        old_region_stack, old_region_stack_index);
+    }
+
+    cm->set_region_stack(NULL);
+    cm->set_region_stack_index((uint)max_uintx);
+  }
 }

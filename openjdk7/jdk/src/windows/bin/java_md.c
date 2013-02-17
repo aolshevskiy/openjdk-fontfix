@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -171,7 +171,8 @@ GetArchPath(int nbits)
 void
 CreateExecutionEnvironment(int *pargc, char ***pargv,
                            char *jrepath, jint so_jrepath,
-                           char *jvmpath, jint so_jvmpath) {
+                           char *jvmpath, jint so_jvmpath,
+                           char *jvmcfg,  jint so_jvmcfg) {
     char * jvmtype;
     int i = 0;
     int running = CURRENT_DATA_MODEL;
@@ -200,8 +201,11 @@ CreateExecutionEnvironment(int *pargc, char ***pargv,
         exit(2);
     }
 
+    JLI_Snprintf(jvmcfg, so_jvmcfg, "%s%slib%s%s%sjvm.cfg",
+        jrepath, FILESEP, FILESEP, (char*)GetArch(), FILESEP);
+
     /* Find the specified JVM type */
-    if (ReadKnownVMs(jrepath, (char*)GetArch(), JNI_FALSE) < 1) {
+    if (ReadKnownVMs(jvmcfg, JNI_FALSE) < 1) {
         JLI_ReportErrorMessage(CFG_ERROR7);
         exit(1);
     }
@@ -1323,3 +1327,119 @@ void AWTPreloadStop() {
 }
 
 #endif /* ENABLE_AWT_PRELOAD */
+
+int
+JVMInit(InvocationFunctions* ifn, jlong threadStackSize,
+        int argc, char **argv,
+        int mode, char *what, int ret)
+{
+    ShowSplashScreen();
+    return ContinueInNewThread(ifn, threadStackSize, argc, argv, mode, what, ret);
+}
+
+void
+PostJVMInit(JNIEnv *env, jstring mainClass, JavaVM *vm)
+{
+    // stubbed out for windows and *nixes.
+}
+
+void
+RegisterThread()
+{
+    // stubbed out for windows and *nixes.
+}
+
+/*
+ * on windows, we return a false to indicate this option is not applicable
+ */
+jboolean
+ProcessPlatformOption(const char *arg)
+{
+    return JNI_FALSE;
+}
+
+/*
+ * At this point we have the arguments to the application, and we need to
+ * check with original stdargs in order to compare which of these truly
+ * needs expansion. cmdtoargs will specify this if it finds a bare
+ * (unquoted) argument containing a glob character(s) ie. * or ?
+ */
+jobjectArray
+CreateApplicationArgs(JNIEnv *env, char **strv, int argc)
+{
+    int i, j, idx, tlen;
+    jobjectArray outArray, inArray;
+    char *ostart, *astart, **nargv;
+    jboolean needs_expansion = JNI_FALSE;
+    jmethodID mid;
+    int stdargc;
+    StdArg *stdargs;
+    jclass cls = GetLauncherHelperClass(env);
+    NULL_CHECK0(cls);
+
+    if (argc == 0) {
+        return NewPlatformStringArray(env, strv, argc);
+    }
+    // the holy grail we need to compare with.
+    stdargs = JLI_GetStdArgs();
+    stdargc = JLI_GetStdArgc();
+
+    // sanity check, this should never happen
+    if (argc > stdargc) {
+        JLI_TraceLauncher("Warning: app args is larger than the original, %d %d\n", argc, stdargc);
+        JLI_TraceLauncher("passing arguments as-is.\n");
+        return NewPlatformStringArray(env, strv, argc);
+    }
+
+    // sanity check, match the args we have, to the holy grail
+    idx = stdargc - argc;
+    ostart = stdargs[idx].arg;
+    astart = strv[0];
+    // sanity check, ensure that the first argument of the arrays are the same
+    if (JLI_StrCmp(ostart, astart) != 0) {
+        // some thing is amiss the args don't match
+        JLI_TraceLauncher("Warning: app args parsing error\n");
+        JLI_TraceLauncher("passing arguments as-is\n");
+        return NewPlatformStringArray(env, strv, argc);
+    }
+
+    // make a copy of the args which will be expanded in java if required.
+    nargv = (char **)JLI_MemAlloc(argc * sizeof(char*));
+    for (i = 0, j = idx; i < argc; i++, j++) {
+        jboolean arg_expand = (JLI_StrCmp(stdargs[j].arg, strv[i]) == 0)
+                                ? stdargs[j].has_wildcard
+                                : JNI_FALSE;
+        if (needs_expansion == JNI_FALSE)
+            needs_expansion = arg_expand;
+
+        // indicator char + String + NULL terminator, the java method will strip
+        // out the first character, the indicator character, so no matter what
+        // we add the indicator
+        tlen = 1 + JLI_StrLen(strv[i]) + 1;
+        nargv[i] = (char *) JLI_MemAlloc(tlen);
+        JLI_Snprintf(nargv[i], tlen, "%c%s", arg_expand ? 'T' : 'F', strv[i]);
+        JLI_TraceLauncher("%s\n", nargv[i]);
+    }
+
+    if (!needs_expansion) {
+        // clean up any allocated memory and return back the old arguments
+        for (i = 0 ; i < argc ; i++) {
+            JLI_MemFree(nargv[i]);
+        }
+        JLI_MemFree(nargv);
+        return NewPlatformStringArray(env, strv, argc);
+    }
+    NULL_CHECK0(mid = (*env)->GetStaticMethodID(env, cls,
+                                                "expandArgs",
+                                                "([Ljava/lang/String;)[Ljava/lang/String;"));
+
+    // expand the arguments that require expansion, the java method will strip
+    // out the indicator character.
+    inArray = NewPlatformStringArray(env, nargv, argc);
+    outArray = (*env)->CallStaticObjectMethod(env, cls, mid, inArray);
+    for (i = 0; i < argc; i++) {
+        JLI_MemFree(nargv[i]);
+    }
+    JLI_MemFree(nargv);
+    return outArray;
+}

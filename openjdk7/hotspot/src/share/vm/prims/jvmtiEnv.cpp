@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,6 +67,9 @@
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
+#endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
 #endif
 
 
@@ -170,7 +173,7 @@ JvmtiEnv::GetThreadLocalStorage(jthread thread, void** data_ptr) {
     // from native so as to resolve the jthread.
 
     ThreadInVMfromNative __tiv(current_thread);
-    __ENTRY(jvmtiError, JvmtiEnv::GetThreadLocalStorage , current_thread)
+    VM_ENTRY_BASE(jvmtiError, JvmtiEnv::GetThreadLocalStorage , current_thread)
     debug_only(VMNativeEntryWrapper __vew;)
 
     oop thread_oop = JNIHandles::resolve_external_guard(thread);
@@ -264,7 +267,10 @@ JvmtiEnv::RetransformClasses(jint class_count, const jclass* classes) {
 
     instanceKlassHandle ikh(current_thread, k_oop);
     if (ikh->get_cached_class_file_bytes() == NULL) {
-      // not cached, we need to reconstitute the class file from VM representation
+      // Not cached, we need to reconstitute the class file from the
+      // VM representation. We don't attach the reconstituted class
+      // bytes to the instanceKlass here because they have not been
+      // validated and we're not at a safepoint.
       constantPoolHandle  constants(current_thread, ikh->constants());
       ObjectLocker ol(constants, current_thread);    // lock constant pool while we query it
 
@@ -654,8 +660,6 @@ JvmtiEnv::GetJLocationFormat(jvmtiJlocationFormat* format_ptr) {
   return JVMTI_ERROR_NONE;
 } /* end GetJLocationFormat */
 
-#ifndef JVMTI_KERNEL
-
   //
   // Thread functions
   //
@@ -1006,7 +1010,7 @@ JvmtiEnv::GetOwnedMonitorInfo(JavaThread* java_thread, jint* owned_monitor_count
 
   // growable array of jvmti monitors info on the C-heap
   GrowableArray<jvmtiMonitorStackDepthInfo*> *owned_monitors_list =
-      new (ResourceObj::C_HEAP) GrowableArray<jvmtiMonitorStackDepthInfo*>(1, true);
+      new (ResourceObj::C_HEAP, mtInternal) GrowableArray<jvmtiMonitorStackDepthInfo*>(1, true);
 
   uint32_t debug_bits = 0;
   if (is_thread_fully_suspended(java_thread, true, &debug_bits)) {
@@ -1051,7 +1055,7 @@ JvmtiEnv::GetOwnedMonitorStackDepthInfo(JavaThread* java_thread, jint* monitor_i
 
   // growable array of jvmti monitors info on the C-heap
   GrowableArray<jvmtiMonitorStackDepthInfo*> *owned_monitors_list =
-         new (ResourceObj::C_HEAP) GrowableArray<jvmtiMonitorStackDepthInfo*>(1, true);
+         new (ResourceObj::C_HEAP, mtInternal) GrowableArray<jvmtiMonitorStackDepthInfo*>(1, true);
 
   uint32_t debug_bits = 0;
   if (is_thread_fully_suspended(java_thread, true, &debug_bits)) {
@@ -2044,7 +2048,6 @@ JvmtiEnv::SetFieldAccessWatch(fieldDescriptor* fdesc_ptr) {
   // make sure we haven't set this watch before
   if (fdesc_ptr->is_field_access_watched()) return JVMTI_ERROR_DUPLICATE;
   fdesc_ptr->set_is_field_access_watched(true);
-  update_klass_field_access_flag(fdesc_ptr);
 
   JvmtiEventController::change_field_watch(JVMTI_EVENT_FIELD_ACCESS, true);
 
@@ -2057,7 +2060,6 @@ JvmtiEnv::ClearFieldAccessWatch(fieldDescriptor* fdesc_ptr) {
   // make sure we have a watch to clear
   if (!fdesc_ptr->is_field_access_watched()) return JVMTI_ERROR_NOT_FOUND;
   fdesc_ptr->set_is_field_access_watched(false);
-  update_klass_field_access_flag(fdesc_ptr);
 
   JvmtiEventController::change_field_watch(JVMTI_EVENT_FIELD_ACCESS, false);
 
@@ -2070,7 +2072,6 @@ JvmtiEnv::SetFieldModificationWatch(fieldDescriptor* fdesc_ptr) {
   // make sure we haven't set this watch before
   if (fdesc_ptr->is_field_modification_watched()) return JVMTI_ERROR_DUPLICATE;
   fdesc_ptr->set_is_field_modification_watched(true);
-  update_klass_field_access_flag(fdesc_ptr);
 
   JvmtiEventController::change_field_watch(JVMTI_EVENT_FIELD_MODIFICATION, true);
 
@@ -2083,7 +2084,6 @@ JvmtiEnv::ClearFieldModificationWatch(fieldDescriptor* fdesc_ptr) {
    // make sure we have a watch to clear
   if (!fdesc_ptr->is_field_modification_watched()) return JVMTI_ERROR_NOT_FOUND;
   fdesc_ptr->set_is_field_modification_watched(false);
-  update_klass_field_access_flag(fdesc_ptr);
 
   JvmtiEventController::change_field_watch(JVMTI_EVENT_FIELD_MODIFICATION, false);
 
@@ -2539,15 +2539,12 @@ JvmtiEnv::GetSourceDebugExtension(oop k_mirror, char** source_debug_extension_pt
     if (!Klass::cast(k)->oop_is_instance()) {
       return JVMTI_ERROR_ABSENT_INFORMATION;
     }
-    Symbol* sdeOop = instanceKlass::cast(k)->source_debug_extension();
-    NULL_CHECK(sdeOop, JVMTI_ERROR_ABSENT_INFORMATION);
+    char* sde = instanceKlass::cast(k)->source_debug_extension();
+    NULL_CHECK(sde, JVMTI_ERROR_ABSENT_INFORMATION);
 
     {
-      JavaThread* current_thread  = JavaThread::current();
-      ResourceMark rm(current_thread);
-      const char* sdecp = (const char*) sdeOop->as_C_string();
-      *source_debug_extension_ptr = (char *) jvmtiMalloc(strlen(sdecp)+1);
-      strcpy(*source_debug_extension_ptr, sdecp);
+      *source_debug_extension_ptr = (char *) jvmtiMalloc(strlen(sde)+1);
+      strcpy(*source_debug_extension_ptr, sde);
     }
   }
 
@@ -3452,5 +3449,3 @@ JvmtiEnv::SetSystemProperty(const char* property, const char* value_ptr) {
   }
   return err;
 } /* end SetSystemProperty */
-
-#endif // !JVMTI_KERNEL

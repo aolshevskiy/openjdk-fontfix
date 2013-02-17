@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -135,7 +135,8 @@ class frame VALUE_OBJ_CLASS_SPEC {
   bool is_interpreted_frame()    const;
   bool is_java_frame()           const;
   bool is_entry_frame()          const;             // Java frame called from C?
-  bool is_ricochet_frame()       const;
+  bool is_stub_frame()           const;
+  bool is_ignored_frame()        const;
   bool is_native_frame()         const;
   bool is_runtime_frame()        const;
   bool is_compiled_frame()       const;
@@ -176,7 +177,6 @@ class frame VALUE_OBJ_CLASS_SPEC {
   // Helper methods for better factored code in frame::sender
   frame sender_for_compiled_frame(RegisterMap* map) const;
   frame sender_for_entry_frame(RegisterMap* map) const;
-  frame sender_for_ricochet_frame(RegisterMap* map) const;
   frame sender_for_interpreter_frame(RegisterMap* map) const;
   frame sender_for_native_frame(RegisterMap* map) const;
 
@@ -221,6 +221,19 @@ class frame VALUE_OBJ_CLASS_SPEC {
   // returns the stack pointer of the calling frame
   intptr_t* sender_sp() const;
 
+  // Returns the real 'frame pointer' for the current frame.
+  // This is the value expected by the platform ABI when it defines a
+  // frame pointer register. It may differ from the effective value of
+  // the FP register when that register is used in the JVM for other
+  // purposes (like compiled frames on some platforms).
+  // On other platforms, it is defined so that the stack area used by
+  // this frame goes from real_fp() to sp().
+  intptr_t* real_fp() const;
+
+  // Deoptimization info, if needed (platform dependent).
+  // Stored in the initial_info field of the unroll info, to be used by
+  // the platform dependent deoptimization blobs.
+  intptr_t *initial_deoptimization_info();
 
   // Interpreter frames:
 
@@ -402,7 +415,6 @@ class frame VALUE_OBJ_CLASS_SPEC {
   // Oops-do's
   void oops_compiled_arguments_do(Symbol* signature, bool has_receiver, const RegisterMap* reg_map, OopClosure* f);
   void oops_interpreted_do(OopClosure* f, const RegisterMap* map, bool query_oop_map_cache = true);
-  void oops_ricochet_do(OopClosure* f, const RegisterMap* map);
 
  private:
   void oops_interpreted_arguments_do(Symbol* signature, bool has_receiver, OopClosure* f);
@@ -481,7 +493,7 @@ class frame VALUE_OBJ_CLASS_SPEC {
 
 };
 
-#ifdef ASSERT
+#ifndef PRODUCT
 // A simple class to describe a location on the stack
 class FrameValue VALUE_OBJ_CLASS_SPEC {
  public:
@@ -511,8 +523,10 @@ class FrameValues {
   // Used by frame functions to describe locations.
   void describe(int owner, intptr_t* location, const char* description, int priority = 0);
 
+#ifdef ASSERT
   void validate();
-  void print();
+#endif
+  void print(JavaThread* thread);
 };
 
 #endif

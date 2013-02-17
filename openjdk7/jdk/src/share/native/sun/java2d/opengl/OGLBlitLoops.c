@@ -393,7 +393,16 @@ OGLBlitSwToTexture(SurfaceDataRasInfo *srcInfo, OGLPixelFormat *pf,
                    OGLSDOps *dstOps,
                    jint dx1, jint dy1, jint dx2, jint dy2)
 {
+    jboolean adjustAlpha = (pf != NULL && !pf->hasAlpha);
     j2d_glBindTexture(dstOps->textureTarget, dstOps->textureID);
+
+    if (adjustAlpha) {
+        // if the source surface does not have an alpha channel,
+        // we need to ensure that the alpha values are forced to 1.0f
+        j2d_glPixelTransferf(GL_ALPHA_SCALE, 0.0f);
+        j2d_glPixelTransferf(GL_ALPHA_BIAS, 1.0f);
+    }
+
     // in case pixel stride is not a multiple of scanline stride the copy
     // has to be done line by line (see 6207877)
     if (srcInfo->scanStride % srcInfo->pixelStride != 0) {
@@ -412,6 +421,11 @@ OGLBlitSwToTexture(SurfaceDataRasInfo *srcInfo, OGLPixelFormat *pf,
         j2d_glTexSubImage2D(dstOps->textureTarget, 0,
                             dx1, dy1, dx2-dx1, dy2-dy1,
                             pf->format, pf->type, srcInfo->rasBase);
+    }
+    if (adjustAlpha) {
+        // restore scale/bias to their original values
+        j2d_glPixelTransferf(GL_ALPHA_SCALE, 1.0f);
+        j2d_glPixelTransferf(GL_ALPHA_BIAS, 0.0f);
     }
 }
 
@@ -743,6 +757,15 @@ OGLBlitLoops_SurfaceToSwBlit(JNIEnv *env, OGLContext *oglc,
             j2d_glPixelStorei(GL_PACK_ROW_LENGTH,
                               dstInfo.scanStride / dstInfo.pixelStride);
             j2d_glPixelStorei(GL_PACK_ALIGNMENT, pf.alignment);
+#ifdef MACOSX
+            if (srcOps->isOpaque) {
+                // For some reason Apple's OpenGL implementation will
+                // read back zero values from the alpha channel of an
+                // opaque surface when using glReadPixels(), so here we
+                // force the resulting pixels to be fully opaque.
+                j2d_glPixelTransferf(GL_ALPHA_BIAS, 1.0);
+            }
+#endif
 
             J2dTraceLn4(J2D_TRACE_VERBOSE, "  sx=%d sy=%d w=%d h=%d",
                         srcx, srcy, width, height);
@@ -763,6 +786,12 @@ OGLBlitLoops_SurfaceToSwBlit(JNIEnv *env, OGLContext *oglc,
                 dsty++;
                 height--;
             }
+
+#ifdef MACOSX
+            if (srcOps->isOpaque) {
+                j2d_glPixelTransferf(GL_ALPHA_BIAS, 0.0);
+            }
+#endif
 
             j2d_glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
             j2d_glPixelStorei(GL_PACK_SKIP_ROWS, 0);
@@ -814,11 +843,27 @@ OGLBlitLoops_CopyArea(JNIEnv *env,
     SurfaceData_IntersectBlitBounds(&dstBounds, &srcBounds, -dx, -dy);
 
     if (dstBounds.x1 < dstBounds.x2 && dstBounds.y1 < dstBounds.y2) {
+#ifdef MACOSX
+        if (dstOps->isOpaque) {
+            // For some reason Apple's OpenGL implementation will fail
+            // to render glCopyPixels() when the src/dst rectangles are
+            // overlapping and glColorMask() has disabled writes to the
+            // alpha channel.  The workaround is to temporarily re-enable
+            // the alpha channel during the glCopyPixels() operation.
+            j2d_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        }
+#endif
+
         OGLBlitSurfaceToSurface(oglc, dstOps, dstOps,
                                 srcBounds.x1, srcBounds.y1,
                                 srcBounds.x2, srcBounds.y2,
                                 dstBounds.x1, dstBounds.y1,
                                 dstBounds.x2, dstBounds.y2);
+#ifdef MACOSX
+        if (dstOps->isOpaque) {
+            j2d_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+        }
+#endif
     }
 }
 

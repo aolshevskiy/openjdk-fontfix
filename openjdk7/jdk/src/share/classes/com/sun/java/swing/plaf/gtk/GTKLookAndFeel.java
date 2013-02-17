@@ -787,7 +787,6 @@ public class GTKLookAndFeel extends SynthLookAndFeel {
             "List.font", new FontLazyValue(Region.LIST),
             "List.rendererUseUIBorder", Boolean.FALSE,
 
-            "Menu.shortcutKeys", new int[] {KeyEvent.ALT_MASK},
             "Menu.arrowIcon", new GTKStyle.GTKLazyValue(
                               "com.sun.java.swing.plaf.gtk.GTKIconFactory",
                               "getMenuArrowIcon"),
@@ -796,9 +795,10 @@ public class GTKLookAndFeel extends SynthLookAndFeel {
             "Menu.margin", zeroInsets,
             "Menu.cancelMode", "hideMenuTree",
             "Menu.alignAcceleratorText", Boolean.FALSE,
+            "Menu.useMenuBarForTopLevelMenus", Boolean.TRUE,
 
 
-            "MenuBar.windowBindings", new Object[] {
+                "MenuBar.windowBindings", new Object[] {
                 "F10", "takeFocus" },
             "MenuBar.font", new FontLazyValue(Region.MENU_BAR),
 

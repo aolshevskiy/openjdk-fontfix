@@ -98,7 +98,7 @@ class TemplateTable: AllStatic {
  public:
   enum Operation { add, sub, mul, div, rem, _and, _or, _xor, shl, shr, ushr };
   enum Condition { equal, not_equal, less, less_equal, greater, greater_equal };
-  enum CacheByte { f1_byte = 1, f2_byte = 2, f1_oop = 0x11 };  // byte_no codes
+  enum CacheByte { f1_byte = 1, f2_byte = 2, f12_oop = 0x12 };  // byte_no codes
 
  private:
   static bool            _is_initialized;        // true if TemplateTable has been initialized
@@ -120,8 +120,8 @@ class TemplateTable: AllStatic {
 
   // helpers
   static void unimplemented_bc();
-  static void patch_bytecode(Bytecodes::Code bc, Register scratch1,
-                             Register scratch2, bool load_bc_in_scratch = true);
+  static void patch_bytecode(Bytecodes::Code bc, Register bc_reg,
+                             Register temp_reg, bool load_bc_into_bc_reg = true, int byte_no = -1);
 
   // C calls
   static void call_VM(Register oop_result, address entry_point);
@@ -294,6 +294,7 @@ class TemplateTable: AllStatic {
   static void invokestatic(int byte_no);
   static void invokeinterface(int byte_no);
   static void invokedynamic(int byte_no);
+  static void invokehandle(int byte_no);
   static void fast_invokevfinal(int byte_no);
 
   static void getfield_or_static(int byte_no, bool is_static);

@@ -191,22 +191,19 @@ address AbstractInterpreterGenerator::generate_slow_signature_handler() {
     // Optimization, see if there are any more args and get out prior to checking
     // all 16 float registers.  My guess is that this is rare.
     // If is_register is false, then we are done the first six integer args.
-      __ tst(G4_scratch);
-      __ brx(Assembler::zero, false, Assembler::pt, done);
-      __ delayed()->nop();
-
+      __ br_null_short(G4_scratch, Assembler::pt, done);
     }
-    __ ba(false, NextArg);
+    __ ba(NextArg);
     __ delayed()->srl( G4_scratch, 2, G4_scratch );
 
     __ bind(LoadFloatArg);
     __ ldf( FloatRegisterImpl::S, a, ldarg.as_float_register(), 4);
-    __ ba(false, NextArg);
+    __ ba(NextArg);
     __ delayed()->srl( G4_scratch, 2, G4_scratch );
 
     __ bind(LoadDoubleArg);
     __ ldf( FloatRegisterImpl::D, a, ldarg.as_double_register() );
-    __ ba(false, NextArg);
+    __ ba(NextArg);
     __ delayed()->srl( G4_scratch, 2, G4_scratch );
 
     __ bind(NextArg);
@@ -234,8 +231,7 @@ void InterpreterGenerator::generate_counter_overflow(Label& Lcontinue) {
   __ call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::frequency_counter_overflow), O2, O2, true);
   // returns verified_entry_point or NULL
   // we ignore it in any case
-  __ ba(false, Lcontinue);
-  __ delayed()->nop();
+  __ ba_short(Lcontinue);
 
 }
 
@@ -256,17 +252,6 @@ address InterpreterGenerator::generate_abstract_entry(void) {
   __ should_not_reach_here();
   return entry;
 
-}
-
-
-// Method handle invoker
-// Dispatch a method of the form java.lang.invoke.MethodHandles::invoke(...)
-address InterpreterGenerator::generate_method_handle_entry(void) {
-  if (!EnableInvokeDynamic) {
-    return generate_abstract_entry();
-  }
-
-  return MethodHandles::generate_method_handle_interpreter_entry(_masm);
 }
 
 
@@ -399,7 +384,7 @@ address AbstractInterpreterGenerator::generate_method_entry(AbstractInterpreter:
     case Interpreter::empty                  : entry_point = ((InterpreterGenerator*)this)->generate_empty_entry();        break;
     case Interpreter::accessor               : entry_point = ((InterpreterGenerator*)this)->generate_accessor_entry();     break;
     case Interpreter::abstract               : entry_point = ((InterpreterGenerator*)this)->generate_abstract_entry();     break;
-    case Interpreter::method_handle          : entry_point = ((InterpreterGenerator*)this)->generate_method_handle_entry(); break;
+
     case Interpreter::java_lang_math_sin     :                                                                             break;
     case Interpreter::java_lang_math_cos     :                                                                             break;
     case Interpreter::java_lang_math_tan     :                                                                             break;
@@ -407,9 +392,13 @@ address AbstractInterpreterGenerator::generate_method_entry(AbstractInterpreter:
     case Interpreter::java_lang_math_abs     :                                                                             break;
     case Interpreter::java_lang_math_log     :                                                                             break;
     case Interpreter::java_lang_math_log10   :                                                                             break;
+    case Interpreter::java_lang_math_pow     :                                                                             break;
+    case Interpreter::java_lang_math_exp     :                                                                             break;
     case Interpreter::java_lang_ref_reference_get
                                              : entry_point = ((InterpreterGenerator*)this)->generate_Reference_get_entry(); break;
-    default                                  : ShouldNotReachHere();                                                       break;
+    default:
+      fatal(err_msg("unexpected method kind: %d", kind));
+      break;
   }
 
   if (entry_point) return entry_point;

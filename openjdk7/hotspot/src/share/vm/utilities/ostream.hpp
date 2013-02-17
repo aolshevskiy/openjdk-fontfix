@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,9 +59,11 @@ class outputStream : public ResourceObj {
    outputStream(int width, bool has_time_stamps);
 
    // indentation
-   void indent();
+   outputStream& indent();
    void inc() { _indentation++; };
    void dec() { _indentation--; };
+   void inc(int n) { _indentation += n; };
+   void dec(int n) { _indentation -= n; };
    int  indentation() const    { return _indentation; }
    void set_indentation(int i) { _indentation = i;    }
    void fill_to(int col);
@@ -84,6 +86,7 @@ class outputStream : public ResourceObj {
    void print_raw(const char* str, int len)   { write(str,         len); }
    void print_raw_cr(const char* str)         { write(str, strlen(str)); cr(); }
    void print_raw_cr(const char* str, int len){ write(str,         len); cr(); }
+   void print_data(void* data, size_t len, bool with_ascii);
    void put(char ch);
    void sp(int count = 1);
    void cr();
@@ -110,16 +113,30 @@ class outputStream : public ResourceObj {
    // flushing
    virtual void flush() {}
    virtual void write(const char* str, size_t len) = 0;
-   virtual ~outputStream() {}  // close properly on deletion
+   virtual void rotate_log() {} // GC log rotation
+   virtual ~outputStream() {}   // close properly on deletion
 
    void dec_cr() { dec(); cr(); }
    void inc_cr() { inc(); cr(); }
 };
 
 // standard output
-                                // ANSI C++ name collision
+// ANSI C++ name collision
 extern outputStream* tty;           // tty output
 extern outputStream* gclog_or_tty;  // stream for gc log if -Xloggc:<f>, or tty
+
+class streamIndentor : public StackObj {
+ private:
+  outputStream* _str;
+  int _amount;
+
+ public:
+  streamIndentor(outputStream* str, int amt = 2) : _str(str), _amount(amt) {
+    _str->inc(_amount);
+  }
+  ~streamIndentor() { _str->dec(_amount); }
+};
+
 
 // advisory locking for the shared tty stream:
 class ttyLocker: StackObj {
@@ -176,6 +193,7 @@ class fileStream : public outputStream {
   FILE* _file;
   bool  _need_close;
  public:
+  fileStream() { _file = NULL; _need_close = false; }
   fileStream(const char* file_name);
   fileStream(const char* file_name, const char* opentype);
   fileStream(FILE* file) { _file = file; _need_close = false; }
@@ -208,6 +226,20 @@ class fdStream : public outputStream {
   int fd() const { return _fd; }
   virtual void write(const char* c, size_t len);
   void flush() {};
+};
+
+class rotatingFileStream : public fileStream {
+ protected:
+  char*  _file_name;
+  jlong  _bytes_writen;
+  uintx  _cur_file_num;             // current logfile rotation number, from 0 to MaxGCLogFileNumbers-1
+ public:
+  rotatingFileStream(const char* file_name);
+  rotatingFileStream(const char* file_name, const char* opentype);
+  rotatingFileStream(FILE* file) : fileStream(file) {}
+  ~rotatingFileStream();
+  virtual void write(const char* c, size_t len);
+  virtual void rotate_log();
 };
 
 void ostream_init();

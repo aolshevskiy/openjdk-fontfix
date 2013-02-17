@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -171,7 +171,6 @@ address    TemplateInterpreter::_throw_ArrayIndexOutOfBoundsException_entry = NU
 address    TemplateInterpreter::_throw_ArrayStoreException_entry            = NULL;
 address    TemplateInterpreter::_throw_ArithmeticException_entry            = NULL;
 address    TemplateInterpreter::_throw_ClassCastException_entry             = NULL;
-address    TemplateInterpreter::_throw_WrongMethodType_entry                = NULL;
 address    TemplateInterpreter::_throw_NullPointerException_entry           = NULL;
 address    TemplateInterpreter::_throw_StackOverflowError_entry             = NULL;
 address    TemplateInterpreter::_throw_exception_entry                      = NULL;
@@ -346,7 +345,6 @@ void TemplateInterpreterGenerator::generate_all() {
     Interpreter::_throw_ArrayStoreException_entry            = generate_klass_exception_handler("java/lang/ArrayStoreException"                 );
     Interpreter::_throw_ArithmeticException_entry            = generate_exception_handler("java/lang/ArithmeticException"           , "/ by zero");
     Interpreter::_throw_ClassCastException_entry             = generate_ClassCastException_handler();
-    Interpreter::_throw_WrongMethodType_entry                = generate_WrongMethodType_handler();
     Interpreter::_throw_NullPointerException_entry           = generate_exception_handler("java/lang/NullPointerException"          , NULL       );
     Interpreter::_throw_StackOverflowError_entry             = generate_StackOverflowError_handler();
   }
@@ -364,7 +362,6 @@ void TemplateInterpreterGenerator::generate_all() {
   method_entry(empty)
   method_entry(accessor)
   method_entry(abstract)
-  method_entry(method_handle)
   method_entry(java_lang_math_sin  )
   method_entry(java_lang_math_cos  )
   method_entry(java_lang_math_tan  )
@@ -372,7 +369,11 @@ void TemplateInterpreterGenerator::generate_all() {
   method_entry(java_lang_math_sqrt )
   method_entry(java_lang_math_log  )
   method_entry(java_lang_math_log10)
+  method_entry(java_lang_math_exp  )
+  method_entry(java_lang_math_pow  )
   method_entry(java_lang_ref_reference_get)
+
+  initialize_method_handle_entries();
 
   // all native method kinds (must be one contiguous block)
   Interpreter::_native_entry_begin = Interpreter::code()->code_end();

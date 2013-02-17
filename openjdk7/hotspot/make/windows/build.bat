@@ -1,6 +1,6 @@
 @echo off
 REM
-REM Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+REM Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
 REM DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 REM
 REM This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,8 @@ cl 2>&1 | grep "IA-64" >NUL
 if %errorlevel% == 0 goto isia64
 cl 2>&1 | grep "AMD64" >NUL
 if %errorlevel% == 0 goto amd64
+cl 2>&1 | grep "x64" >NUL
+if %errorlevel% == 0 goto amd64
 set ARCH=x86
 set BUILDARCH=i486
 set Platform_arch=x86
@@ -65,7 +67,6 @@ goto usage
 
 :test1
 if "%2" == "core"      goto test2
-if "%2" == "kernel"    goto test2
 if "%2" == "compiler1" goto test2
 if "%2" == "compiler2" goto test2
 if "%2" == "tiered"    goto test2
@@ -107,7 +108,7 @@ echo Usage: build flavor version workspace bootstrap_dir [build_id] [windbg_home
 echo.
 echo where:
 echo flavor is "product", "debug" or "fastdebug",
-echo version is "core", "kernel", "compiler1", "compiler2", or "tiered",
+echo version is "core", "compiler1", "compiler2", or "tiered",
 echo workspace is source directory without trailing slash, 
 echo bootstrap_dir is a full path to a JDK in which bin/java 
 echo   and bin/javac are present and working, and build_id is an 

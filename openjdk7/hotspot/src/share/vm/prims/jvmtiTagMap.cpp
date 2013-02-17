@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,7 +55,7 @@
 // and the tag value. In addition an entry includes a next pointer which
 // is used to chain entries together.
 
-class JvmtiTagHashmapEntry : public CHeapObj {
+class JvmtiTagHashmapEntry : public CHeapObj<mtInternal> {
  private:
   friend class JvmtiTagMap;
 
@@ -106,7 +106,7 @@ class JvmtiTagHashmapEntry : public CHeapObj {
 // entries. It also provides a function to iterate over all entries
 // in the hashmap.
 
-class JvmtiTagHashmap : public CHeapObj {
+class JvmtiTagHashmap : public CHeapObj<mtInternal> {
  private:
   friend class JvmtiTagMap;
 
@@ -150,7 +150,7 @@ class JvmtiTagHashmap : public CHeapObj {
     _resize_threshold = (int)(_load_factor * _size);
     _resizing_enabled = true;
     size_t s = initial_size * sizeof(JvmtiTagHashmapEntry*);
-    _table = (JvmtiTagHashmapEntry**)os::malloc(s);
+    _table = (JvmtiTagHashmapEntry**)os::malloc(s, mtInternal);
     if (_table == NULL) {
       vm_exit_out_of_memory(s, "unable to allocate initial hashtable for jvmti object tags");
     }
@@ -188,7 +188,7 @@ class JvmtiTagHashmap : public CHeapObj {
 
     // allocate new table
     size_t s = new_size * sizeof(JvmtiTagHashmapEntry*);
-    JvmtiTagHashmapEntry** new_table = (JvmtiTagHashmapEntry**)os::malloc(s);
+    JvmtiTagHashmapEntry** new_table = (JvmtiTagHashmapEntry**)os::malloc(s, mtInternal);
     if (new_table == NULL) {
       warning("unable to allocate larger hashtable for jvmti object tags");
       set_resizing_enabled(false);
@@ -585,7 +585,7 @@ class CallbackWrapper : public StackObj {
     _o = klassOop_if_java_lang_Class(o);
 
     // object size
-    _obj_size = _o->size() * wordSize;
+    _obj_size = (jlong)_o->size() * wordSize;
 
     // record the context
     _tag_map = tag_map;
@@ -776,7 +776,7 @@ jlong JvmtiTagMap::get_tag(jobject object) {
 // For each field it holds the field index (as defined by the JVMTI specification),
 // the field type, and the offset.
 
-class ClassFieldDescriptor: public CHeapObj {
+class ClassFieldDescriptor: public CHeapObj<mtInternal> {
  private:
   int _field_index;
   int _field_offset;
@@ -790,7 +790,7 @@ class ClassFieldDescriptor: public CHeapObj {
   int field_offset() const  { return _field_offset; }
 };
 
-class ClassFieldMap: public CHeapObj {
+class ClassFieldMap: public CHeapObj<mtInternal> {
  private:
   enum {
     initial_field_count = 5
@@ -821,7 +821,8 @@ class ClassFieldMap: public CHeapObj {
 };
 
 ClassFieldMap::ClassFieldMap() {
-  _fields = new (ResourceObj::C_HEAP) GrowableArray<ClassFieldDescriptor*>(initial_field_count, true);
+  _fields = new (ResourceObj::C_HEAP, mtInternal)
+    GrowableArray<ClassFieldDescriptor*>(initial_field_count, true);
 }
 
 ClassFieldMap::~ClassFieldMap() {
@@ -892,7 +893,7 @@ ClassFieldMap* ClassFieldMap::create_map_of_instance_fields(oop obj) {
 // heap iteration and avoid creating a field map for each object in the heap
 // (only need to create the map when the first instance of a class is encountered).
 //
-class JvmtiCachedClassFieldMap : public CHeapObj {
+class JvmtiCachedClassFieldMap : public CHeapObj<mtInternal> {
  private:
    enum {
      initial_class_count = 200
@@ -957,7 +958,8 @@ bool ClassFieldMapCacheMark::_is_active;
 // record that the given instanceKlass is caching a field map
 void JvmtiCachedClassFieldMap::add_to_class_list(instanceKlass* ik) {
   if (_class_list == NULL) {
-    _class_list = new (ResourceObj::C_HEAP) GrowableArray<instanceKlass*>(initial_class_count, true);
+    _class_list = new (ResourceObj::C_HEAP, mtInternal)
+      GrowableArray<instanceKlass*>(initial_class_count, true);
   }
   _class_list->push(ik);
 }
@@ -1160,7 +1162,7 @@ static jint invoke_primitive_field_callback_for_static_fields
 
     // get offset and field value
     int offset = field->field_offset();
-    address addr = (address)k + offset;
+    address addr = (address)k->java_mirror() + offset;
     jvalue value;
     copy_to_jvalue(&value, addr, value_type);
 
@@ -1526,8 +1528,8 @@ class TagObjectCollector : public JvmtiTagHashmapEntryClosure {
     _env = env;
     _tags = (jlong*)tags;
     _tag_count = tag_count;
-    _object_results = new (ResourceObj::C_HEAP) GrowableArray<jobject>(1,true);
-    _tag_results = new (ResourceObj::C_HEAP) GrowableArray<uint64_t>(1,true);
+    _object_results = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<jobject>(1,true);
+    _tag_results = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<uint64_t>(1,true);
   }
 
   ~TagObjectCollector() {
@@ -1647,6 +1649,7 @@ class ObjectMarker : AllStatic {
   // saved headers
   static GrowableArray<oop>* _saved_oop_stack;
   static GrowableArray<markOop>* _saved_mark_stack;
+  static bool _needs_reset;                  // do we need to reset mark bits?
 
  public:
   static void init();                       // initialize
@@ -1654,10 +1657,14 @@ class ObjectMarker : AllStatic {
 
   static inline void mark(oop o);           // mark an object
   static inline bool visited(oop o);        // check if object has been visited
+
+  static inline bool needs_reset()            { return _needs_reset; }
+  static inline void set_needs_reset(bool v)  { _needs_reset = v; }
 };
 
 GrowableArray<oop>* ObjectMarker::_saved_oop_stack = NULL;
 GrowableArray<markOop>* ObjectMarker::_saved_mark_stack = NULL;
+bool ObjectMarker::_needs_reset = true;  // need to reset mark bits by default
 
 // initialize ObjectMarker - prepares for object marking
 void ObjectMarker::init() {
@@ -1667,8 +1674,8 @@ void ObjectMarker::init() {
   Universe::heap()->ensure_parsability(false);  // no need to retire TLABs
 
   // create stacks for interesting headers
-  _saved_mark_stack = new (ResourceObj::C_HEAP) GrowableArray<markOop>(4000, true);
-  _saved_oop_stack = new (ResourceObj::C_HEAP) GrowableArray<oop>(4000, true);
+  _saved_mark_stack = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<markOop>(4000, true);
+  _saved_oop_stack = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<oop>(4000, true);
 
   if (UseBiasedLocking) {
     BiasedLocking::preserve_marks();
@@ -1680,7 +1687,13 @@ void ObjectMarker::done() {
   // iterate over all objects and restore the mark bits to
   // their initial value
   RestoreMarksClosure blk;
-  Universe::heap()->object_iterate(&blk);
+  if (needs_reset()) {
+    Universe::heap()->object_iterate(&blk);
+  } else {
+    // We don't need to reset mark bits on this call, but reset the
+    // flag to the default for the next call.
+    set_needs_reset(true);
+  }
 
   // When sharing is enabled we need to restore the headers of the objects
   // in the readwrite space too.
@@ -2701,7 +2714,7 @@ class VM_HeapWalkOperation: public VM_Operation {
   bool _reporting_string_values;
 
   GrowableArray<oop>* create_visit_stack() {
-    return new (ResourceObj::C_HEAP) GrowableArray<oop>(initial_visit_stack_size, true);
+    return new (ResourceObj::C_HEAP, mtInternal) GrowableArray<oop>(initial_visit_stack_size, true);
   }
 
   // accessors
@@ -2912,7 +2925,8 @@ inline bool VM_HeapWalkOperation::iterate_over_class(klassOop k) {
           oop entry;
           if (tag.is_string()) {
             entry = pool->resolved_string_at(i);
-            assert(java_lang_String::is_instance(entry), "must be string");
+            assert(java_lang_String::is_instance(entry) ||
+                   pool->is_pseudo_string_at(i), "must be string");
           } else {
             entry = Klass::cast(pool->resolved_klass_at(i))->java_mirror();
           }
@@ -2988,7 +3002,8 @@ inline bool VM_HeapWalkOperation::iterate_over_object(oop o) {
     char type = field->field_type();
     if (!is_primitive_field_type(type)) {
       oop fld_o = o->obj_field(field->field_offset());
-      if (fld_o != NULL) {
+      // ignore any objects that aren't visible to profiler
+      if (fld_o != NULL && ServiceUtil::visible_oop(fld_o)) {
         // reflection code may have a reference to a klassOop.
         // - see sun.reflect.UnsafeStaticFieldAccessorImpl and sun.misc.Unsafe
         if (fld_o->is_klass()) {
@@ -3023,7 +3038,8 @@ inline bool VM_HeapWalkOperation::iterate_over_object(oop o) {
 }
 
 
-// collects all simple (non-stack) roots.
+// Collects all simple (non-stack) roots except for threads;
+// threads are handled in collect_stack_roots() as an optimization.
 // if there's a heap root callback provided then the callback is
 // invoked for each simple root.
 // if an object reference callback is provided then all simple
@@ -3054,16 +3070,7 @@ inline bool VM_HeapWalkOperation::collect_simple_roots() {
     return false;
   }
 
-  // Threads
-  for (JavaThread* thread = Threads::first(); thread != NULL ; thread = thread->next()) {
-    oop threadObj = thread->threadObj();
-    if (threadObj != NULL && !thread->is_exiting() && !thread->is_hidden_from_external_view()) {
-      bool cont = CallbackInvoker::report_simple_root(JVMTI_HEAP_REFERENCE_THREAD, threadObj);
-      if (!cont) {
-        return false;
-      }
-    }
-  }
+  // threads are now handled in collect_stack_roots()
 
   // Other kinds of roots maintained by HotSpot
   // Many of these won't be visible but others (such as instances of important
@@ -3158,9 +3165,6 @@ inline bool VM_HeapWalkOperation::collect_stack_roots(JavaThread* java_thread,
         if (fr->is_entry_frame()) {
           last_entry_frame = fr;
         }
-        if (fr->is_ricochet_frame()) {
-          fr->oops_ricochet_do(blk, vf->register_map());
-        }
       }
 
       vf = vf->sender();
@@ -3175,13 +3179,20 @@ inline bool VM_HeapWalkOperation::collect_stack_roots(JavaThread* java_thread,
 }
 
 
-// collects all stack roots - for each thread it walks the execution
+// Collects the simple roots for all threads and collects all
+// stack roots - for each thread it walks the execution
 // stack to find all references and local JNI refs.
 inline bool VM_HeapWalkOperation::collect_stack_roots() {
   JNILocalRootsClosure blk;
   for (JavaThread* thread = Threads::first(); thread != NULL ; thread = thread->next()) {
     oop threadObj = thread->threadObj();
     if (threadObj != NULL && !thread->is_exiting() && !thread->is_hidden_from_external_view()) {
+      // Collect the simple root for this thread before we
+      // collect its stack roots
+      if (!CallbackInvoker::report_simple_root(JVMTI_HEAP_REFERENCE_THREAD,
+                                               threadObj)) {
+        return false;
+      }
       if (!collect_stack_roots(thread, &blk)) {
         return false;
       }
@@ -3235,8 +3246,20 @@ void VM_HeapWalkOperation::doit() {
 
   // the heap walk starts with an initial object or the heap roots
   if (initial_object().is_null()) {
-    if (!collect_simple_roots()) return;
+    // If either collect_stack_roots() or collect_simple_roots()
+    // returns false at this point, then there are no mark bits
+    // to reset.
+    ObjectMarker::set_needs_reset(false);
+
+    // Calling collect_stack_roots() before collect_simple_roots()
+    // can result in a big performance boost for an agent that is
+    // focused on analyzing references in the thread stacks.
     if (!collect_stack_roots()) return;
+
+    if (!collect_simple_roots()) return;
+
+    // no early return so enable heap traversal to reset the mark bits
+    ObjectMarker::set_needs_reset(true);
   } else {
     visit_stack()->push(initial_object()());
   }

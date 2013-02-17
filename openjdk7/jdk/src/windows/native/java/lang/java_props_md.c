@@ -389,6 +389,8 @@ GetJavaProperties(JNIEnv* env)
          * Windows Server 2008          6               0  (!VER_NT_WORKSTATION)
          * Windows 7                    6               1  (VER_NT_WORKSTATION)
          * Windows Server 2008 R2       6               1  (!VER_NT_WORKSTATION)
+         * Windows 8                    6               2  (VER_NT_WORKSTATION)
+         * Windows Server 2012          6               2  (!VER_NT_WORKSTATION)
          *
          * This mapping will presumably be augmented as new Windows
          * versions are released.
@@ -445,12 +447,14 @@ GetJavaProperties(JNIEnv* env)
                     switch (ver.dwMinorVersion) {
                     case  0: sprops.os_name = "Windows Vista";        break;
                     case  1: sprops.os_name = "Windows 7";            break;
+                    case  2: sprops.os_name = "Windows 8";            break;
                     default: sprops.os_name = "Windows NT (unknown)";
                     }
                 } else {
                     switch (ver.dwMinorVersion) {
                     case  0: sprops.os_name = "Windows Server 2008";    break;
                     case  1: sprops.os_name = "Windows Server 2008 R2"; break;
+                    case  2: sprops.os_name = "Windows Server 2012";    break;
                     default: sprops.os_name = "Windows NT (unknown)";
                     }
                 }
@@ -562,6 +566,18 @@ GetJavaProperties(JNIEnv* env)
 
         {
             char * display_encoding;
+
+            // Windows UI Language selection list only cares "language"
+            // information of the UI Language. For example, the list
+            // just lists "English" but it actually means "en_US", and
+            // the user cannot select "en_GB" (if exists) in the list.
+            // So, this hack is to use the user LCID region information
+            // for the UI Language, if the "language" portion of those
+            // two locales are the same.
+            if (PRIMARYLANGID(LANGIDFROMLCID(userDefaultLCID)) ==
+                PRIMARYLANGID(LANGIDFROMLCID(userDefaultUILang))) {
+                userDefaultUILang = userDefaultLCID;
+            }
 
             SetupI18nProps(userDefaultUILang,
                            &sprops.language,

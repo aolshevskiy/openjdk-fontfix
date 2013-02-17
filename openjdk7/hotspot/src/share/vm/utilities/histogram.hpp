@@ -37,6 +37,9 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "os_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "os_bsd.inline.hpp"
+#endif
 
 // This class provides a framework for collecting various statistics.
 // The current implementation is oriented towards counting invocations
@@ -74,7 +77,7 @@
 
 #ifdef ASSERT
 
-class HistogramElement : public CHeapObj {
+class HistogramElement : public CHeapObj<mtInternal> {
  protected:
   jint _count;
   const char* _name;
@@ -88,7 +91,7 @@ class HistogramElement : public CHeapObj {
   virtual int compare(HistogramElement* e1,HistogramElement* e2);
 };
 
-class Histogram : public CHeapObj {
+class Histogram : public CHeapObj<mtInternal> {
  protected:
   GrowableArray<HistogramElement*>* _elements;
   GrowableArray<HistogramElement*>* elements() { return _elements; }

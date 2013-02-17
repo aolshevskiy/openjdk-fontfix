@@ -454,6 +454,10 @@ public class Krb5LoginModule implements LoginModule {
         useKeyTab = "true".equalsIgnoreCase((String)options.get("useKeyTab"));
         ticketCacheName = (String)options.get("ticketCache");
         keyTabName = (String)options.get("keyTab");
+        if (keyTabName != null) {
+            keyTabName = sun.security.krb5.internal.ktab.KeyTab.normalize(
+                         keyTabName);
+        }
         princName = (String)options.get("principal");
         refreshKrb5Config =
             "true".equalsIgnoreCase((String)options.get("refreshKrb5Config"));
@@ -721,7 +725,7 @@ public class Krb5LoginModule implements LoginModule {
                         cred = builder.action().getCreds();
                     }
                     if (storeKey) {
-                        encKeys = builder.getKeys();
+                        encKeys = builder.getKeys(isInitiator);
                         // When encKeys is empty, the login actually fails.
                         // For compatibility, exception is thrown in commit().
                     }
@@ -1056,12 +1060,17 @@ public class Krb5LoginModule implements LoginModule {
 
             if (storeKey) {
                 if (encKeys == null) {
-                    if (!privCredSet.contains(ktab)) {
-                        privCredSet.add(ktab);
-                        // Compatibility; also add keys to privCredSet
-                        for (KerberosKey key: ktab.getKeys(kerbClientPrinc)) {
-                            privCredSet.add(new Krb5Util.KeysFromKeyTab(key));
+                    if (ktab != null) {
+                        if (!privCredSet.contains(ktab)) {
+                            privCredSet.add(ktab);
+                            // Compatibility; also add keys to privCredSet
+                            for (KerberosKey key: ktab.getKeys(kerbClientPrinc)) {
+                                privCredSet.add(new Krb5Util.KeysFromKeyTab(key));
+                            }
                         }
+                    } else {
+                        succeeded = false;
+                        throw new LoginException("No key to store");
                     }
                 } else {
                     for (int i = 0; i < kerbKeys.length; i ++) {

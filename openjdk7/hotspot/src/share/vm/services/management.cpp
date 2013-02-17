@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,7 @@
 #include "oops/objArrayKlass.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/arguments.hpp"
+#include "runtime/globals.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/interfaceSupport.hpp"
 #include "runtime/javaCalls.hpp"
@@ -40,9 +41,13 @@
 #include "runtime/os.hpp"
 #include "runtime/serviceThread.hpp"
 #include "services/classLoadingService.hpp"
+#include "services/diagnosticCommand.hpp"
+#include "services/diagnosticFramework.hpp"
 #include "services/heapDumper.hpp"
+#include "services/jmm.h"
 #include "services/lowMemoryDetector.hpp"
 #include "services/gcNotifier.hpp"
+#include "services/nmtDCmd.hpp"
 #include "services/management.hpp"
 #include "services/memoryManager.hpp"
 #include "services/memoryPool.hpp"
@@ -108,11 +113,14 @@ void Management::init() {
 
   _optional_support.isBootClassPathSupported = 1;
   _optional_support.isObjectMonitorUsageSupported = 1;
-#ifndef SERVICES_KERNEL
   // This depends on the heap inspector
   _optional_support.isSynchronizerUsageSupported = 1;
-#endif // SERVICES_KERNEL
   _optional_support.isThreadAllocatedMemorySupported = 1;
+
+  // Registration of the diagnostic commands
+  DCmdRegistrant::register_dcmds();
+  DCmdRegistrant::register_dcmds_ext();
+  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<NMTDCmd>(true, false));
 }
 
 void Management::initialize(TRAPS) {
@@ -1802,31 +1810,37 @@ JVM_END
 
 class ThreadTimesClosure: public ThreadClosure {
  private:
-  objArrayOop _names;
+  objArrayHandle _names_strings;
+  char **_names_chars;
   typeArrayOop _times;
   int _names_len;
   int _times_len;
   int _count;
 
  public:
-  ThreadTimesClosure(objArrayOop names, typeArrayOop times);
+  ThreadTimesClosure(objArrayHandle names, typeArrayOop times);
+  ~ThreadTimesClosure();
   virtual void do_thread(Thread* thread);
+  void do_unlocked();
   int count() { return _count; }
 };
 
-ThreadTimesClosure::ThreadTimesClosure(objArrayOop names,
+ThreadTimesClosure::ThreadTimesClosure(objArrayHandle names,
                                        typeArrayOop times) {
-  assert(names != NULL, "names was NULL");
+  assert(names() != NULL, "names was NULL");
   assert(times != NULL, "times was NULL");
-  _names = names;
+  _names_strings = names;
   _names_len = names->length();
+  _names_chars = NEW_C_HEAP_ARRAY(char*, _names_len, mtInternal);
   _times = times;
   _times_len = times->length();
   _count = 0;
 }
 
+//
+// Called with Threads_lock held
+//
 void ThreadTimesClosure::do_thread(Thread* thread) {
-  Handle s;
   assert(thread != NULL, "thread was NULL");
 
   // exclude externally visible JavaThreads
@@ -1840,14 +1854,30 @@ void ThreadTimesClosure::do_thread(Thread* thread) {
   }
 
   EXCEPTION_MARK;
+  ResourceMark rm(THREAD); // thread->name() uses ResourceArea
 
   assert(thread->name() != NULL, "All threads should have a name");
-  s = java_lang_String::create_from_str(thread->name(), CHECK);
-  _names->obj_at_put(_count, s());
-
+  _names_chars[_count] = strdup(thread->name());
   _times->long_at_put(_count, os::is_thread_cpu_time_supported() ?
                         os::thread_cpu_time(thread) : -1);
   _count++;
+}
+
+// Called without Threads_lock, we can allocate String objects.
+void ThreadTimesClosure::do_unlocked() {
+
+  EXCEPTION_MARK;
+  for (int i = 0; i < _count; i++) {
+    Handle s = java_lang_String::create_from_str(_names_chars[i],  CHECK);
+    _names_strings->obj_at_put(i, s());
+  }
+}
+
+ThreadTimesClosure::~ThreadTimesClosure() {
+  for (int i = 0; i < _count; i++) {
+    free(_names_chars[i]);
+  }
+  FREE_C_HEAP_ARRAY(char *, _names_chars, mtInternal);
 }
 
 // Fills names with VM internal thread names and times with the corresponding
@@ -1876,12 +1906,12 @@ JVM_ENTRY(jint, jmm_GetInternalThreadTimes(JNIEnv *env,
   typeArrayOop ta = typeArrayOop(JNIHandles::resolve_non_null(times));
   typeArrayHandle times_ah(THREAD, ta);
 
-  ThreadTimesClosure ttc(names_ah(), times_ah());
+  ThreadTimesClosure ttc(names_ah, times_ah());
   {
     MutexLockerEx ml(Threads_lock);
     Threads::threads_do(&ttc);
   }
-
+  ttc.do_unlocked();
   return ttc.count();
 JVM_END
 
@@ -2026,15 +2056,15 @@ JVM_ENTRY(void, jmm_GetLastGCStat(JNIEnv *env, jobject obj, jmmGCStat *gc_stat))
   // Make a copy of the last GC statistics
   // GC may occur while constructing the last GC information
   int num_pools = MemoryService::num_memory_pools();
-  GCStatInfo* stat = new GCStatInfo(num_pools);
-  if (mgr->get_last_gc_stat(stat) == 0) {
+  GCStatInfo stat(num_pools);
+  if (mgr->get_last_gc_stat(&stat) == 0) {
     gc_stat->gc_index = 0;
     return;
   }
 
-  gc_stat->gc_index = stat->gc_index();
-  gc_stat->start_time = Management::ticks_to_ms(stat->start_time());
-  gc_stat->end_time = Management::ticks_to_ms(stat->end_time());
+  gc_stat->gc_index = stat.gc_index();
+  gc_stat->start_time = Management::ticks_to_ms(stat.start_time());
+  gc_stat->end_time = Management::ticks_to_ms(stat.end_time());
 
   // Current implementation does not have GC extension attributes
   gc_stat->num_gc_ext_attributes = 0;
@@ -2052,17 +2082,17 @@ JVM_ENTRY(void, jmm_GetLastGCStat(JNIEnv *env, jobject obj, jmmGCStat *gc_stat))
   objArrayHandle usage_after_gc_ah(THREAD, au);
 
   for (int i = 0; i < num_pools; i++) {
-    Handle before_usage = MemoryService::create_MemoryUsage_obj(stat->before_gc_usage_for_pool(i), CHECK);
+    Handle before_usage = MemoryService::create_MemoryUsage_obj(stat.before_gc_usage_for_pool(i), CHECK);
     Handle after_usage;
 
-    MemoryUsage u = stat->after_gc_usage_for_pool(i);
+    MemoryUsage u = stat.after_gc_usage_for_pool(i);
     if (u.max_size() == 0 && u.used() > 0) {
       // If max size == 0, this pool is a survivor space.
       // Set max size = -1 since the pools will be swapped after GC.
       MemoryUsage usage(u.init_size(), u.used(), u.committed(), (size_t)-1);
       after_usage = MemoryService::create_MemoryUsage_obj(usage, CHECK);
     } else {
-      after_usage = MemoryService::create_MemoryUsage_obj(stat->after_gc_usage_for_pool(i), CHECK);
+      after_usage = MemoryService::create_MemoryUsage_obj(stat.after_gc_usage_for_pool(i), CHECK);
     }
     usage_before_gc_ah->obj_at_put(i, before_usage());
     usage_after_gc_ah->obj_at_put(i, after_usage());
@@ -2084,7 +2114,6 @@ JVM_END
 
 // Dump heap - Returns 0 if succeeds.
 JVM_ENTRY(jint, jmm_DumpHeap0(JNIEnv *env, jstring outputfile, jboolean live))
-#ifndef SERVICES_KERNEL
   ResourceMark rm(THREAD);
   oop on = JNIHandles::resolve_external_guard(outputfile);
   if (on == NULL) {
@@ -2102,9 +2131,122 @@ JVM_ENTRY(jint, jmm_DumpHeap0(JNIEnv *env, jstring outputfile, jboolean live))
     THROW_MSG_(vmSymbols::java_io_IOException(), errmsg, -1);
   }
   return 0;
-#else  // SERVICES_KERNEL
-  return -1;
-#endif // SERVICES_KERNEL
+JVM_END
+
+JVM_ENTRY(jobjectArray, jmm_GetDiagnosticCommands(JNIEnv *env))
+  ResourceMark rm(THREAD);
+  GrowableArray<const char *>* dcmd_list = DCmdFactory::DCmd_list();
+  objArrayOop cmd_array_oop = oopFactory::new_objArray(SystemDictionary::String_klass(),
+          dcmd_list->length(), CHECK_NULL);
+  objArrayHandle cmd_array(THREAD, cmd_array_oop);
+  for (int i = 0; i < dcmd_list->length(); i++) {
+    oop cmd_name = java_lang_String::create_oop_from_str(dcmd_list->at(i), CHECK_NULL);
+    cmd_array->obj_at_put(i, cmd_name);
+  }
+  return (jobjectArray) JNIHandles::make_local(env, cmd_array());
+JVM_END
+
+JVM_ENTRY(void, jmm_GetDiagnosticCommandInfo(JNIEnv *env, jobjectArray cmds,
+          dcmdInfo* infoArray))
+  if (cmds == NULL || infoArray == NULL) {
+    THROW(vmSymbols::java_lang_NullPointerException());
+  }
+
+  ResourceMark rm(THREAD);
+
+  objArrayOop ca = objArrayOop(JNIHandles::resolve_non_null(cmds));
+  objArrayHandle cmds_ah(THREAD, ca);
+
+  // Make sure we have a String array
+  klassOop element_klass = objArrayKlass::cast(cmds_ah->klass())->element_klass();
+  if (element_klass != SystemDictionary::String_klass()) {
+    THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
+               "Array element type is not String class");
+  }
+
+  GrowableArray<DCmdInfo *>* info_list = DCmdFactory::DCmdInfo_list();
+
+  int num_cmds = cmds_ah->length();
+  for (int i = 0; i < num_cmds; i++) {
+    oop cmd = cmds_ah->obj_at(i);
+    if (cmd == NULL) {
+        THROW_MSG(vmSymbols::java_lang_NullPointerException(),
+                "Command name cannot be null.");
+    }
+    char* cmd_name = java_lang_String::as_utf8_string(cmd);
+    if (cmd_name == NULL) {
+        THROW_MSG(vmSymbols::java_lang_NullPointerException(),
+                "Command name cannot be null.");
+    }
+    int pos = info_list->find((void*)cmd_name,DCmdInfo::by_name);
+    if (pos == -1) {
+        THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
+             "Unknown diagnostic command");
+    }
+    DCmdInfo* info = info_list->at(pos);
+    infoArray[i].name = info->name();
+    infoArray[i].description = info->description();
+    infoArray[i].impact = info->impact();
+    infoArray[i].num_arguments = info->num_arguments();
+    infoArray[i].enabled = info->is_enabled();
+  }
+JVM_END
+
+JVM_ENTRY(void, jmm_GetDiagnosticCommandArgumentsInfo(JNIEnv *env,
+          jstring command, dcmdArgInfo* infoArray))
+  ResourceMark rm(THREAD);
+  oop cmd = JNIHandles::resolve_external_guard(command);
+  if (cmd == NULL) {
+    THROW_MSG(vmSymbols::java_lang_NullPointerException(),
+              "Command line cannot be null.");
+  }
+  char* cmd_name = java_lang_String::as_utf8_string(cmd);
+  if (cmd_name == NULL) {
+    THROW_MSG(vmSymbols::java_lang_NullPointerException(),
+              "Command line content cannot be null.");
+  }
+  DCmd* dcmd = NULL;
+  DCmdFactory*factory = DCmdFactory::factory(cmd_name, strlen(cmd_name));
+  if (factory != NULL) {
+    dcmd = factory->create_resource_instance(NULL);
+  }
+  if (dcmd == NULL) {
+    THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
+              "Unknown diagnostic command");
+  }
+  DCmdMark mark(dcmd);
+  GrowableArray<DCmdArgumentInfo*>* array = dcmd->argument_info_array();
+  if (array->length() == 0) {
+    return;
+  }
+  for (int i = 0; i < array->length(); i++) {
+    infoArray[i].name = array->at(i)->name();
+    infoArray[i].description = array->at(i)->description();
+    infoArray[i].type = array->at(i)->type();
+    infoArray[i].default_string = array->at(i)->default_string();
+    infoArray[i].mandatory = array->at(i)->is_mandatory();
+    infoArray[i].option = array->at(i)->is_option();
+    infoArray[i].position = array->at(i)->position();
+  }
+  return;
+JVM_END
+
+JVM_ENTRY(jstring, jmm_ExecuteDiagnosticCommand(JNIEnv *env, jstring commandline))
+  ResourceMark rm(THREAD);
+  oop cmd = JNIHandles::resolve_external_guard(commandline);
+  if (cmd == NULL) {
+    THROW_MSG_NULL(vmSymbols::java_lang_NullPointerException(),
+                   "Command line cannot be null.");
+  }
+  char* cmdline = java_lang_String::as_utf8_string(cmd);
+  if (cmdline == NULL) {
+    THROW_MSG_NULL(vmSymbols::java_lang_NullPointerException(),
+                   "Command line content cannot be null.");
+  }
+  bufferedStream output;
+  DCmd::parse_and_execute(&output, cmdline, ' ', CHECK_NULL);
+  oop result = java_lang_String::create_oop_from_str(output.as_string(), CHECK_NULL);
+  return (jstring) JNIHandles::make_local(env, result);
 JVM_END
 
 jlong Management::ticks_to_ms(jlong ticks) {
@@ -2149,7 +2291,11 @@ const struct jmmInterface_1_ jmm_interface = {
   jmm_SetVMGlobal,
   NULL,
   jmm_DumpThreads,
-  jmm_SetGCNotificationEnabled
+  jmm_SetGCNotificationEnabled,
+  jmm_GetDiagnosticCommands,
+  jmm_GetDiagnosticCommandInfo,
+  jmm_GetDiagnosticCommandArgumentsInfo,
+  jmm_ExecuteDiagnosticCommand
 };
 
 void* Management::get_jmm_interface(int version) {

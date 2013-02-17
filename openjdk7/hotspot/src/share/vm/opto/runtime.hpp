@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,7 +55,7 @@ class CallInfo;
 // code in various ways.  Currently they are used by the lock coarsening code
 //
 
-class NamedCounter : public CHeapObj {
+class NamedCounter : public CHeapObj<mtCompiler> {
 public:
     enum CounterTag {
     NoTag,
@@ -114,10 +114,12 @@ class OptoRuntime : public AllStatic {
   // References to generated stubs
   static address _new_instance_Java;
   static address _new_array_Java;
+  static address _new_array_nozero_Java;
   static address _multianewarray2_Java;
   static address _multianewarray3_Java;
   static address _multianewarray4_Java;
   static address _multianewarray5_Java;
+  static address _multianewarrayN_Java;
   static address _g1_wb_pre_Java;
   static address _g1_wb_post_Java;
   static address _vtable_must_compile_Java;
@@ -142,6 +144,7 @@ class OptoRuntime : public AllStatic {
 
   // Allocate storage for a objArray or typeArray
   static void new_array_C(klassOopDesc* array_klass, int len, JavaThread *thread);
+  static void new_array_nozero_C(klassOopDesc* array_klass, int len, JavaThread *thread);
 
   // Post-slow-path-allocation, pre-initializing-stores step for
   // implementing ReduceInitialCardMarks
@@ -153,6 +156,7 @@ class OptoRuntime : public AllStatic {
   static void multianewarray3_C(klassOopDesc* klass, int len1, int len2, int len3, JavaThread *thread);
   static void multianewarray4_C(klassOopDesc* klass, int len1, int len2, int len3, int len4, JavaThread *thread);
   static void multianewarray5_C(klassOopDesc* klass, int len1, int len2, int len3, int len4, int len5, JavaThread *thread);
+  static void multianewarrayN_C(klassOopDesc* klass, arrayOopDesc* dims, JavaThread *thread);
   static void g1_wb_pre_C(oopDesc* orig, JavaThread* thread);
   static void g1_wb_post_C(void* card_addr, JavaThread* thread);
 
@@ -170,7 +174,9 @@ private:
   static address handle_exception_C       (JavaThread* thread);
   static address handle_exception_C_helper(JavaThread* thread, nmethod*& nm);
   static address rethrow_C                (oopDesc* exception, JavaThread *thread, address return_pc );
+  static void deoptimize_caller_frame     (JavaThread *thread);
   static void deoptimize_caller_frame     (JavaThread *thread, bool doit);
+  static bool is_deoptimized_caller_frame (JavaThread *thread);
 
   // CodeBlob support
   // ===================================================================
@@ -206,10 +212,12 @@ private:
   // access to runtime stubs entry points for java code
   static address new_instance_Java()                     { return _new_instance_Java; }
   static address new_array_Java()                        { return _new_array_Java; }
+  static address new_array_nozero_Java()                 { return _new_array_nozero_Java; }
   static address multianewarray2_Java()                  { return _multianewarray2_Java; }
   static address multianewarray3_Java()                  { return _multianewarray3_Java; }
   static address multianewarray4_Java()                  { return _multianewarray4_Java; }
   static address multianewarray5_Java()                  { return _multianewarray5_Java; }
+  static address multianewarrayN_Java()                  { return _multianewarrayN_Java; }
   static address g1_wb_pre_Java()                        { return _g1_wb_pre_Java; }
   static address g1_wb_post_Java()                       { return _g1_wb_post_Java; }
   static address vtable_must_compile_stub()              { return _vtable_must_compile_Java; }
@@ -249,6 +257,7 @@ private:
   static const TypeFunc* multianewarray3_Type(); // multianewarray
   static const TypeFunc* multianewarray4_Type(); // multianewarray
   static const TypeFunc* multianewarray5_Type(); // multianewarray
+  static const TypeFunc* multianewarrayN_Type(); // multianewarray
   static const TypeFunc* g1_wb_pre_Type();
   static const TypeFunc* g1_wb_post_Type();
   static const TypeFunc* complete_monitor_enter_Type();
@@ -260,7 +269,7 @@ private:
   static const TypeFunc* Math_DD_D_Type(); // mod,pow & friends
   static const TypeFunc* modf_Type();
   static const TypeFunc* l2f_Type();
-  static const TypeFunc* current_time_millis_Type();
+  static const TypeFunc* void_long_Type();
 
   static const TypeFunc* flush_windows_Type();
 
@@ -271,6 +280,9 @@ private:
   static const TypeFunc* slow_arraycopy_Type();   // the full routine
 
   static const TypeFunc* array_fill_Type();
+
+  static const TypeFunc* aescrypt_block_Type();
+  static const TypeFunc* cipherBlockChaining_aescrypt_Type();
 
   // leaf on stack replacement interpreter accessor types
   static const TypeFunc* osr_end_Type();

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004, 2005, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 4906940
+# @bug 4906940 7083664
 # @summary Add -providerPath option for keytool allowing one to specify
 #          an additional classpath to search for providers.
 # @author Andrew Fan
@@ -46,23 +46,20 @@ fi
 # set platform-dependent variables
 OS=`uname -s`
 case "$OS" in
-  SunOS | Linux )
+  SunOS | Linux | Darwin )
     NULL=/dev/null
     PS=":"
     FS="/"
-    TMP=/tmp
     ;;
   CYGWIN* )
     NULL=/dev/null
     PS=";"
     FS="/"
-    TMP=/tmp
     ;;
   Windows_* )
     NULL=NUL
     PS=";"
     FS="\\"
-    TMP="c:/temp"
     ;;
   * )
     echo "Unrecognized operating system!"
@@ -79,7 +76,7 @@ ${TESTJAVA}${FS}bin${FS}keytool -genkey -v -alias dummyTestCA \
     -storetype "dks" -provider "org.test.dummy.DummyProvider" \
     -providerPath ${TESTCLASSES}
 
-if [ $? -ne 0 ]; then 
+if [ $? -ne 0 ]; then
     exit 1
 fi
 
@@ -88,7 +85,7 @@ ${TESTJAVA}${FS}bin${FS}keytool -storepasswd -new storepass2 \
     -keystore keystoreCA.dks -storetype "dks" -storepass storepass \
     -provider "org.test.dummy.DummyProvider" -providerPath ${TESTCLASSES}
 
-if [ $? -ne 0 ]; then 
+if [ $? -ne 0 ]; then
     exit 1
 fi
 
@@ -99,7 +96,7 @@ ${TESTJAVA}${FS}bin${FS}keytool -keypasswd -alias "dummyTestCA" \
     -storetype "dks" -storepass storepass2 \
     -provider "org.test.dummy.DummyProvider" -providerPath ${TESTCLASSES}
 
-if [ $? -ne 0 ]; then 
+if [ $? -ne 0 ]; then
     exit 1
 fi
 
@@ -109,7 +106,7 @@ ${TESTJAVA}${FS}bin${FS}keytool -v -export -rfc -alias "dummyTestCA" \
     -storepass storepass2 -provider "org.test.dummy.DummyProvider" \
     -providerPath ${TESTCLASSES}
 
-if [ $? -ne 0 ]; then 
+if [ $? -ne 0 ]; then
     exit 1
 fi
 
@@ -118,7 +115,7 @@ ${TESTJAVA}${FS}bin${FS}keytool -v -list -keystore keystoreCA.dks \
     -storetype "dks" -storepass storepass2 \
     -provider "org.test.dummy.DummyProvider" -providerPath ${TESTCLASSES}
 
-if [ $? -ne 0 ]; then 
+if [ $? -ne 0 ]; then
     exit 1
 fi
 

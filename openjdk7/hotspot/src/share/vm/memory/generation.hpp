@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -86,7 +86,7 @@ struct ScratchBlock {
 };
 
 
-class Generation: public CHeapObj {
+class Generation: public CHeapObj<mtGC> {
   friend class VMStructs;
  private:
   jlong _time_of_last_gc; // time when last gc on this generation happened (ms)
@@ -220,7 +220,7 @@ class Generation: public CHeapObj {
   MemRegion prev_used_region() const { return _prev_used_region; }
   virtual void  save_used_region()   { _prev_used_region = used_region(); }
 
-  // Returns "TRUE" iff "p" points into an allocated object in the generation.
+  // Returns "TRUE" iff "p" points into the committed areas in the generation.
   // For some kinds of generations, this may be an expensive operation.
   // To avoid performance problems stemming from its inadvertent use in
   // product jvm's, we restrict its use to assertion checking or
@@ -413,10 +413,13 @@ class Generation: public CHeapObj {
   // Time (in ms) when we were last collected or now if a collection is
   // in progress.
   virtual jlong time_of_last_gc(jlong now) {
-    // XXX See note in genCollectedHeap::millis_since_last_gc()
+    // Both _time_of_last_gc and now are set using a time source
+    // that guarantees monotonically non-decreasing values provided
+    // the underlying platform provides such a source. So we still
+    // have to guard against non-monotonicity.
     NOT_PRODUCT(
       if (now < _time_of_last_gc) {
-        warning("time warp: %d to %d", _time_of_last_gc, now);
+        warning("time warp: "INT64_FORMAT" to "INT64_FORMAT, _time_of_last_gc, now);
       }
     )
     return _time_of_last_gc;
@@ -596,7 +599,7 @@ class Generation: public CHeapObj {
   virtual void print() const;
   virtual void print_on(outputStream* st) const;
 
-  virtual void verify(bool allow_dirty) = 0;
+  virtual void verify() = 0;
 
   struct StatRecord {
     int invocations;
@@ -750,7 +753,7 @@ class OneContigSpaceCardGeneration: public CardGeneration {
 
   virtual void record_spaces_top();
 
-  virtual void verify(bool allow_dirty);
+  virtual void verify();
   virtual void print_on(outputStream* st) const;
 };
 

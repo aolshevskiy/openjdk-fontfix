@@ -21,13 +21,10 @@
  * questions.
  */
 
-/**
- *
- */
-
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Arrays;
-import java.util.Properties;
 import java.util.StringTokenizer;
 
 /**
@@ -36,7 +33,6 @@ import java.util.StringTokenizer;
  */
 public class JavaVM {
 
-    // need to
     protected Process vm = null;
 
     private String classname = "";
@@ -79,6 +75,7 @@ public class JavaVM {
         this.errorStream = err;
     }
 
+    // Prepends passed opts array to current options
     public void addOptions(String[] opts) {
         String newOpts = "";
         for (int i = 0 ; i < opts.length ; i ++) {
@@ -87,6 +84,8 @@ public class JavaVM {
         newOpts += " ";
         options = newOpts + options;
     }
+
+    // Prepends passed arguments array to current args
     public void addArguments(String[] arguments) {
         String newArgs = "";
         for (int i = 0 ; i < arguments.length ; i ++) {
@@ -115,7 +114,8 @@ public class JavaVM {
      */
     public void start() throws IOException {
 
-        if (vm != null) return;
+        if (vm != null)
+            throw new IllegalStateException("JavaVM already started");
 
         /*
          * If specified, add option for policy file
@@ -152,13 +152,6 @@ public class JavaVM {
         /* output from the execed process may optionally be captured. */
         StreamPipe.plugTogether(vm.getInputStream(), this.outputStream);
         StreamPipe.plugTogether(vm.getErrorStream(), this.errorStream);
-
-        try {
-            Thread.sleep(2000);
-        } catch (Exception ignore) {
-        }
-
-        mesg("finished starting vm.");
     }
 
     public void destroy() {

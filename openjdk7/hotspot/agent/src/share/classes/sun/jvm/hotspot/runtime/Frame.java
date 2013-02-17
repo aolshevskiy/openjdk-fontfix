@@ -33,6 +33,7 @@ import sun.jvm.hotspot.c1.*;
 import sun.jvm.hotspot.debugger.*;
 import sun.jvm.hotspot.interpreter.*;
 import sun.jvm.hotspot.oops.*;
+import sun.jvm.hotspot.runtime.sparc.SPARCFrame;
 import sun.jvm.hotspot.types.*;
 import sun.jvm.hotspot.utilities.*;
 
@@ -74,11 +75,19 @@ public abstract class Frame implements Cloneable {
   /** Size of constMethodOopDesc for computing BCI from BCP (FIXME: hack) */
   private static long    constMethodOopDescSize;
 
+  private static int pcReturnOffset;
+
+  public static int pcReturnOffset() {
+    return pcReturnOffset;
+  }
+
   private static synchronized void initialize(TypeDataBase db) {
     Type constMethodOopType = db.lookupType("constMethodOopDesc");
     // FIXME: not sure whether alignment here is correct or how to
     // force it (round up to address size?)
     constMethodOopDescSize = constMethodOopType.getSize();
+
+    pcReturnOffset = db.lookupIntConstant("frame::pc_return_offset").intValue();
   }
 
   protected int bcpToBci(Address bcp, ConstMethod cm) {
@@ -105,6 +114,10 @@ public abstract class Frame implements Cloneable {
   public Address getPC()              { return pc; }
   public void    setPC(Address newpc) { pc = newpc; }
   public boolean isDeoptimized()      { return deoptimized; }
+
+  public CodeBlob cb() {
+    return VM.getVM().getCodeCache().findBlob(getPC());
+  }
 
   public abstract Address getSP();
   public abstract Address getID();
@@ -142,7 +155,7 @@ public abstract class Frame implements Cloneable {
     return (cb != null && cb.isJavaMethod());
   }
 
-  public boolean isGlueFrame() {
+  public boolean isRuntimeFrame() {
     if (Assert.ASSERTS_ENABLED) {
       Assert.that(!VM.getVM().isCore(), "noncore builds only");
     }
@@ -197,7 +210,7 @@ public abstract class Frame implements Cloneable {
   public Frame realSender(RegisterMap map) {
     if (!VM.getVM().isCore()) {
       Frame result = sender(map);
-      while (result.isGlueFrame()) {
+      while (result.isRuntimeFrame()) {
         result = result.sender(map);
       }
       return result;

@@ -41,6 +41,9 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
+#endif
 
 // The InterpreterRuntime is called by the interpreter for everything
 // that cannot/should not be dealt with in assembly and needs C support.
@@ -68,6 +71,8 @@ class InterpreterRuntime: AllStatic {
                                                         { return bytecode(thread).get_index_u2(bc); }
   static int       get_index_u2_cpcache(JavaThread *thread, Bytecodes::Code bc)
                                                         { return bytecode(thread).get_index_u2_cpcache(bc); }
+  static int       get_index_u4(JavaThread *thread, Bytecodes::Code bc)
+                                                        { return bytecode(thread).get_index_u4(bc); }
   static int       number_of_dimensions(JavaThread *thread)  { return bcp(thread)[3]; }
 
   static ConstantPoolCacheEntry* cache_entry_at(JavaThread *thread, int i)  { return method(thread)->constants()->cache()->entry_at(i); }
@@ -98,7 +103,6 @@ class InterpreterRuntime: AllStatic {
   static void    throw_StackOverflowError(JavaThread* thread);
   static void    throw_ArrayIndexOutOfBoundsException(JavaThread* thread, char* name, jint index);
   static void    throw_ClassCastException(JavaThread* thread, oopDesc* obj);
-  static void    throw_WrongMethodTypeException(JavaThread* thread, oopDesc* mtype = NULL, oopDesc* mhandle = NULL);
   static void    create_exception(JavaThread* thread, char* name, char* message);
   static void    create_klass_exception(JavaThread* thread, char* name, oopDesc* obj);
   static address exception_handler_for_exception(JavaThread* thread, oopDesc* exception);
@@ -116,6 +120,7 @@ class InterpreterRuntime: AllStatic {
 
   // Calls
   static void    resolve_invoke       (JavaThread* thread, Bytecodes::Code bytecode);
+  static void    resolve_invokehandle (JavaThread* thread);
   static void    resolve_invokedynamic(JavaThread* thread);
 
   // Breakpoints
@@ -142,8 +147,8 @@ class InterpreterRuntime: AllStatic {
                                         methodOopDesc* method,
                                         intptr_t* from, intptr_t* to);
 
-#if defined(IA32) || defined(AMD64)
-  // Popframe support (only needed on x86 and AMD64)
+#if defined(IA32) || defined(AMD64) || defined(ARM)
+  // Popframe support (only needed on x86, AMD64 and ARM)
   static void popframe_move_outgoing_args(JavaThread* thread, void* src_address, void* dest_address);
 #endif
 

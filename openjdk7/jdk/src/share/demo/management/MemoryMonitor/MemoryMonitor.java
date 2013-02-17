@@ -30,6 +30,15 @@
  */
 
 /*
+ * This source code is provided to illustrate the usage of a given feature
+ * or technique and has been deliberately simplified. Additional steps
+ * required for a production-quality application, such as security checks,
+ * input validation and proper error handling, might not be present in
+ * this sample code.
+ */
+
+
+/*
  */
 
 import java.awt.*;
@@ -113,6 +122,7 @@ public class MemoryMonitor extends JPanel {
         private Font font = new Font("Times New Roman", Font.PLAIN, 11);
         private int columnInc;
         private float usedMem[][];
+        private float usedMemMax[]; // Used when max pool size is undefined
         private int ptNum[];
         private int ascent, descent;
         private Rectangle graphOutlineRect = new Rectangle();
@@ -133,6 +143,10 @@ public class MemoryMonitor extends JPanel {
                 }
             });
             usedMem = new float[numPools][];
+            usedMemMax = new float[numPools];
+            for (int i = 0; i < numPools; i++) {
+                usedMemMax[i] = 1024f * 1024f ;
+            }
             ptNum = new int[numPools];
         }
 
@@ -185,6 +199,12 @@ public class MemoryMonitor extends JPanel {
             MemoryPoolMXBean mp = mpools.get(npool);
             float usedMemory =  mp.getUsage().getUsed();
             float totalMemory =  mp.getUsage().getMax();
+            if (totalMemory < 0) { // Max is undefined for this pool
+                if (usedMemory > usedMemMax[npool]) {
+                    usedMemMax[npool] = usedMemory;
+                }
+                totalMemory = usedMemMax[npool];
+            }
 
             // .. Draw allocated and used strings ..
             big.setColor(Color.green);

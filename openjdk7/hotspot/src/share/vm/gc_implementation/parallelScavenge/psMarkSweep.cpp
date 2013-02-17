@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,10 @@
 #include "gc_implementation/parallelScavenge/psPermGen.hpp"
 #include "gc_implementation/parallelScavenge/psScavenge.hpp"
 #include "gc_implementation/parallelScavenge/psYoungGen.hpp"
+#include "gc_implementation/shared/gcHeapSummary.hpp"
+#include "gc_implementation/shared/gcTimer.hpp"
+#include "gc_implementation/shared/gcTrace.hpp"
+#include "gc_implementation/shared/gcTraceTime.hpp"
 #include "gc_implementation/shared/isGCActiveMark.hpp"
 #include "gc_implementation/shared/spaceDecorator.hpp"
 #include "gc_interface/gcCause.hpp"
@@ -100,17 +104,21 @@ void PSMarkSweep::invoke(bool maximum_heap_compaction) {
 
 // This method contains no policy. You should probably
 // be calling invoke() instead.
-void PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
+bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
   assert(SafepointSynchronize::is_at_safepoint(), "must be at a safepoint");
   assert(ref_processor() != NULL, "Sanity");
 
   if (GC_locker::check_active_before_gc()) {
-    return;
+    return false;
   }
 
   ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
-  GCCause::Cause gc_cause = heap->gc_cause();
   assert(heap->kind() == CollectedHeap::ParallelScavengeHeap, "Sanity");
+  GCCause::Cause gc_cause = heap->gc_cause();
+
+  _gc_timer->register_gc_start(os::elapsed_counter());
+  _gc_tracer->report_gc_start(gc_cause, _gc_timer->gc_start());
+
   PSAdaptiveSizePolicy* size_policy = heap->size_policy();
 
   // The scope of casr should end after code that can change
@@ -132,9 +140,8 @@ void PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
 
   AdaptiveSizePolicyOutput(size_policy, heap->total_collections());
 
-  if (PrintHeapAtGC) {
-    Universe::print_heap_before_gc();
-  }
+  heap->print_heap_before_gc();
+  heap->trace_heap_before_gc(_gc_tracer);
 
   // Fill in TLABs
   heap->accumulate_statistics_all_tlabs();
@@ -143,7 +150,7 @@ void PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
   if (VerifyBeforeGC && heap->total_collections() >= VerifyGCStartAt) {
     HandleMark hm;  // Discard invalid handles created during verification
     gclog_or_tty->print(" VerifyBeforeGC:");
-    Universe::verify(true);
+    Universe::verify();
   }
 
   // Verify object start arrays
@@ -153,7 +160,7 @@ void PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
     perm_gen->verify_object_start_array();
   }
 
-  heap->pre_full_gc_dump();
+  heap->pre_full_gc_dump(_gc_timer);
 
   // Filled in below to track the state of the young gen after the collection.
   bool eden_empty;
@@ -162,16 +169,10 @@ void PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
 
   {
     HandleMark hm;
-    const bool is_system_gc = gc_cause == GCCause::_java_lang_system_gc;
-    // This is useful for debugging but don't change the output the
-    // the customer sees.
-    const char* gc_cause_str = "Full GC";
-    if (is_system_gc && PrintGCDetails) {
-      gc_cause_str = "Full GC (System)";
-    }
+
     gclog_or_tty->date_stamp(PrintGC && PrintGCDateStamps);
     TraceCPUTime tcpu(PrintGCDetails, true, gclog_or_tty);
-    TraceTime t1(gc_cause_str, PrintGC, !PrintGCDetails, gclog_or_tty);
+    GCTraceTime t1(GCCauseString("Full GC", gc_cause), PrintGC, !PrintGCDetails, NULL);
     TraceCollectorStats tcs(counters());
     TraceMemoryManagerStats tms(true /* Full GC */,gc_cause);
 
@@ -198,10 +199,9 @@ void PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
 
     allocate_stacks();
 
-    NOT_PRODUCT(ref_processor()->verify_no_references_recorded());
     COMPILER2_PRESENT(DerivedPointerTable::clear());
 
-    ref_processor()->enable_discovery();
+    ref_processor()->enable_discovery(true /*verify_disabled*/, true /*verify_no_refs*/);
     ref_processor()->setup_policy(clear_all_softrefs);
 
     mark_sweep_phase1(clear_all_softrefs);
@@ -361,7 +361,7 @@ void PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
   if (VerifyAfterGC && heap->total_collections() >= VerifyGCStartAt) {
     HandleMark hm;  // Discard invalid handles created during verification
     gclog_or_tty->print(" VerifyAfterGC:");
-    Universe::verify(false);
+    Universe::verify();
   }
 
   // Re-verify object start arrays
@@ -378,15 +378,20 @@ void PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
 
   NOT_PRODUCT(ref_processor()->verify_no_references_recorded());
 
-  if (PrintHeapAtGC) {
-    Universe::print_heap_after_gc();
-  }
+  heap->print_heap_after_gc();
+  heap->trace_heap_after_gc(_gc_tracer);
 
-  heap->post_full_gc_dump();
+  heap->post_full_gc_dump(_gc_timer);
 
 #ifdef TRACESPINNING
   ParallelTaskTerminator::print_termination_counts();
 #endif
+
+  _gc_timer->register_gc_end(os::elapsed_counter());
+
+  _gc_tracer->report_gc_end(_gc_timer->gc_end(), _gc_timer->time_partitions());
+
+  return true;
 }
 
 bool PSMarkSweep::absorb_live_data_from_eden(PSAdaptiveSizePolicy* size_policy,
@@ -505,8 +510,7 @@ void PSMarkSweep::deallocate_stacks() {
 
 void PSMarkSweep::mark_sweep_phase1(bool clear_all_softrefs) {
   // Recursively traverse all live objects and mark them
-  EventMark m("1 mark object");
-  TraceTime tm("phase 1", PrintGCDetails && Verbose, true, gclog_or_tty);
+  GCTraceTime tm("phase 1", PrintGCDetails && Verbose, true, _gc_timer);
   trace(" 1");
 
   ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
@@ -516,7 +520,6 @@ void PSMarkSweep::mark_sweep_phase1(bool clear_all_softrefs) {
   {
     ParallelScavengeHeap::ParStrongRootsScope psrs;
     Universe::oops_do(mark_and_push_closure());
-    ReferenceProcessor::oops_do(mark_and_push_closure());
     JNIHandles::oops_do(mark_and_push_closure());   // Global (strong) JNI handles
     CodeBlobToOopClosure each_active_code_blob(mark_and_push_closure(), /*do_marking=*/ true);
     Threads::oops_do(mark_and_push_closure(), &each_active_code_blob);
@@ -536,7 +539,7 @@ void PSMarkSweep::mark_sweep_phase1(bool clear_all_softrefs) {
   {
     ref_processor()->setup_policy(clear_all_softrefs);
     ref_processor()->process_discovered_references(
-      is_alive_closure(), mark_and_push_closure(), follow_stack_closure(), NULL);
+      is_alive_closure(), mark_and_push_closure(), follow_stack_closure(), NULL, _gc_timer);
   }
 
   // Follow system dictionary roots and unload classes
@@ -565,8 +568,7 @@ void PSMarkSweep::mark_sweep_phase1(bool clear_all_softrefs) {
 
 
 void PSMarkSweep::mark_sweep_phase2() {
-  EventMark m("2 compute new addresses");
-  TraceTime tm("phase 2", PrintGCDetails && Verbose, true, gclog_or_tty);
+  GCTraceTime tm("phase 2", PrintGCDetails && Verbose, true, _gc_timer);
   trace("2");
 
   // Now all live objects are marked, compute the new object addresses.
@@ -610,8 +612,7 @@ static PSAlwaysTrueClosure always_true;
 
 void PSMarkSweep::mark_sweep_phase3() {
   // Adjust the pointers to reflect the new locations
-  EventMark m("3 adjust pointers");
-  TraceTime tm("phase 3", PrintGCDetails && Verbose, true, gclog_or_tty);
+  GCTraceTime tm("phase 3", PrintGCDetails && Verbose, true, _gc_timer);
   trace("3");
 
   ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
@@ -623,7 +624,6 @@ void PSMarkSweep::mark_sweep_phase3() {
 
   // General strong roots.
   Universe::oops_do(adjust_root_pointer_closure());
-  ReferenceProcessor::oops_do(adjust_root_pointer_closure());
   JNIHandles::oops_do(adjust_root_pointer_closure());   // Global (strong) JNI handles
   Threads::oops_do(adjust_root_pointer_closure(), NULL);
   ObjectSynchronizer::oops_do(adjust_root_pointer_closure());
@@ -653,7 +653,7 @@ void PSMarkSweep::mark_sweep_phase3() {
 
 void PSMarkSweep::mark_sweep_phase4() {
   EventMark m("4 compact heap");
-  TraceTime tm("phase 4", PrintGCDetails && Verbose, true, gclog_or_tty);
+  GCTraceTime tm("phase 4", PrintGCDetails && Verbose, true, _gc_timer);
   trace("4");
 
   // All pointers are now adjusted, move objects accordingly
@@ -675,15 +675,20 @@ void PSMarkSweep::mark_sweep_phase4() {
 }
 
 jlong PSMarkSweep::millis_since_last_gc() {
-  jlong ret_val = os::javaTimeMillis() - _time_of_last_gc;
+  // We need a monotonically non-deccreasing time in ms but
+  // os::javaTimeMillis() does not guarantee monotonicity.
+  jlong now = os::javaTimeNanos() / NANOSECS_PER_MILLISEC;
+  jlong ret_val = now - _time_of_last_gc;
   // XXX See note in genCollectedHeap::millis_since_last_gc().
   if (ret_val < 0) {
-    NOT_PRODUCT(warning("time warp: %d", ret_val);)
+    NOT_PRODUCT(warning("time warp: "INT64_FORMAT, ret_val);)
     return 0;
   }
   return ret_val;
 }
 
 void PSMarkSweep::reset_millis_since_last_gc() {
-  _time_of_last_gc = os::javaTimeMillis();
+  // We need a monotonically non-deccreasing time in ms but
+  // os::javaTimeMillis() does not guarantee monotonicity.
+  _time_of_last_gc = os::javaTimeNanos() / NANOSECS_PER_MILLISEC;
 }

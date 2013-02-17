@@ -78,21 +78,46 @@ bool Disassembler::load_library() {
   char buf[JVM_MAXPATHLEN];
   os::jvm_path(buf, sizeof(buf));
   int jvm_offset = -1;
+  int lib_offset = -1;
   {
     // Match "jvm[^/]*" in jvm_path.
     const char* base = buf;
     const char* p = strrchr(buf, '/');
+    if (p != NULL) lib_offset = p - base + 1;
     p = strstr(p ? p : base, "jvm");
     if (p != NULL)  jvm_offset = p - base;
   }
+  // Find the disassembler shared library.
+  // Search for several paths derived from libjvm, in this order:
+  // 1. <home>/jre/lib/<arch>/<vm>/libhsdis-<arch>.so  (for compatibility)
+  // 2. <home>/jre/lib/<arch>/<vm>/hsdis-<arch>.so
+  // 3. <home>/jre/lib/<arch>/hsdis-<arch>.so
+  // 4. hsdis-<arch>.so  (using LD_LIBRARY_PATH)
   if (jvm_offset >= 0) {
-    // Find the disassembler next to libjvm.so.
+    // 1. <home>/jre/lib/<arch>/<vm>/libhsdis-<arch>.so
     strcpy(&buf[jvm_offset], hsdis_library_name);
     strcat(&buf[jvm_offset], os::dll_file_extension());
     _library = os::dll_load(buf, ebuf, sizeof ebuf);
+    if (_library == NULL) {
+      // 2. <home>/jre/lib/<arch>/<vm>/hsdis-<arch>.so
+      strcpy(&buf[lib_offset], hsdis_library_name);
+      strcat(&buf[lib_offset], os::dll_file_extension());
+      _library = os::dll_load(buf, ebuf, sizeof ebuf);
+    }
+    if (_library == NULL) {
+      // 3. <home>/jre/lib/<arch>/hsdis-<arch>.so
+      buf[lib_offset - 1] = '\0';
+      const char* p = strrchr(buf, '/');
+      if (p != NULL) {
+        lib_offset = p - buf + 1;
+        strcpy(&buf[lib_offset], hsdis_library_name);
+        strcat(&buf[lib_offset], os::dll_file_extension());
+        _library = os::dll_load(buf, ebuf, sizeof ebuf);
+      }
+    }
   }
   if (_library == NULL) {
-    // Try a free-floating lookup.
+    // 4. hsdis-<arch>.so  (using LD_LIBRARY_PATH)
     strcpy(&buf[0], hsdis_library_name);
     strcat(&buf[0], os::dll_file_extension());
     _library = os::dll_load(buf, ebuf, sizeof ebuf);
@@ -123,6 +148,7 @@ class decode_env {
  private:
   nmethod*      _nm;
   CodeBlob*     _code;
+  CodeComments  _comments;
   outputStream* _output;
   address       _start, _end;
 
@@ -162,7 +188,7 @@ class decode_env {
   void print_address(address value);
 
  public:
-  decode_env(CodeBlob* code, outputStream* output);
+  decode_env(CodeBlob* code, outputStream* output, CodeComments c = CodeComments());
 
   address decode_instructions(address start, address end);
 
@@ -204,12 +230,13 @@ class decode_env {
   const char* options() { return _option_buf; }
 };
 
-decode_env::decode_env(CodeBlob* code, outputStream* output) {
+decode_env::decode_env(CodeBlob* code, outputStream* output, CodeComments c) {
   memset(this, 0, sizeof(*this));
   _output = output ? output : tty;
   _code = code;
   if (code != NULL && code->is_nmethod())
     _nm = (nmethod*) code;
+  _comments.assign(c);
 
   // by default, output pc but not bytes:
   _print_pc       = true;
@@ -249,7 +276,13 @@ address decode_env::handle_event(const char* event, address arg) {
       return arg;
     }
   } else if (match(event, "mach")) {
-   output()->print_cr("[Disassembling for mach='%s']", arg);
+    static char buffer[32] = { 0, };
+    if (strcmp(buffer, (const char*)arg) != 0 ||
+        strlen((const char*)arg) > sizeof(buffer) - 1) {
+      // Only print this when the mach changes
+      strncpy(buffer, (const char*)arg, sizeof(buffer) - 1);
+      output()->print_cr("[Disassembling for mach='%s']", arg);
+    }
   } else if (match(event, "format bytes-per-line")) {
     _bytes_per_line = (int) (intptr_t) arg;
   } else {
@@ -325,6 +358,7 @@ void decode_env::print_insn_labels() {
   if (cb != NULL) {
     cb->print_block_comment(st, p);
   }
+  _comments.print_block_comment(st, (intptr_t)(p - _start));
   if (_print_pc) {
     st->print("  " PTR_FORMAT ": ", p);
   }
@@ -436,10 +470,9 @@ void Disassembler::decode(CodeBlob* cb, outputStream* st) {
   env.decode_instructions(cb->code_begin(), cb->code_end());
 }
 
-
-void Disassembler::decode(address start, address end, outputStream* st) {
+void Disassembler::decode(address start, address end, outputStream* st, CodeComments c) {
   if (!load_library())  return;
-  decode_env env(CodeCache::find_blob_unsafe(start), st);
+  decode_env env(CodeCache::find_blob_unsafe(start), st, c);
   env.decode_instructions(start, end);
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,12 @@
 #include "classfile/vmSymbols.hpp"
 #include "code/codeCache.hpp"
 #include "code/icBuffer.hpp"
+#include "gc_implementation/g1/g1Log.hpp"
 #include "gc_implementation/g1/g1MarkSweep.hpp"
+#include "gc_implementation/shared/gcHeapSummary.hpp"
+#include "gc_implementation/shared/gcTimer.hpp"
+#include "gc_implementation/shared/gcTrace.hpp"
+#include "gc_implementation/shared/gcTraceTime.hpp"
 #include "memory/gcLocker.hpp"
 #include "memory/genCollectedHeap.hpp"
 #include "memory/modRefBarrierSet.hpp"
@@ -62,6 +67,8 @@ void G1MarkSweep::invoke_at_safepoint(ReferenceProcessor* rp,
   // hook up weak ref data so it can be used during Mark-Sweep
   assert(GenMarkSweep::ref_processor() == NULL, "no stomping");
   assert(rp != NULL, "should be non-NULL");
+  assert(rp == G1CollectedHeap::heap()->ref_processor_stw(), "Precondition");
+
   GenMarkSweep::_ref_processor = rp;
   rp->setup_policy(clear_all_softrefs);
 
@@ -83,11 +90,6 @@ void G1MarkSweep::invoke_at_safepoint(ReferenceProcessor* rp,
   BiasedLocking::preserve_marks();
 
   mark_sweep_phase1(marked_for_unloading, clear_all_softrefs);
-
-  if (VerifyDuringGC) {
-      G1CollectedHeap* g1h = G1CollectedHeap::heap();
-      g1h->checkConcurrentMark();
-  }
 
   mark_sweep_phase2();
 
@@ -129,8 +131,7 @@ void G1MarkSweep::allocate_stacks() {
 void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
                                     bool clear_all_softrefs) {
   // Recursively traverse all live objects and mark them
-  EventMark m("1 mark object");
-  TraceTime tm("phase 1", PrintGC && Verbose, true, gclog_or_tty);
+  GCTraceTime tm("phase 1", G1Log::fine() && Verbose, true, gc_timer());
   GenMarkSweep::trace(" 1");
 
   SharedHeap* sh = SharedHeap::heap();
@@ -144,11 +145,14 @@ void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
 
   // Process reference objects found during marking
   ReferenceProcessor* rp = GenMarkSweep::ref_processor();
+  assert(rp == G1CollectedHeap::heap()->ref_processor_stw(), "Sanity");
+
   rp->setup_policy(clear_all_softrefs);
   rp->process_discovered_references(&GenMarkSweep::is_alive,
                                     &GenMarkSweep::keep_alive,
                                     &GenMarkSweep::follow_stack_closure,
-                                    NULL);
+                                    NULL,
+                                    gc_timer());
 
   // Follow system dictionary roots and unload classes
   bool purged_class = SystemDictionary::do_unloading(&GenMarkSweep::is_alive);
@@ -171,7 +175,6 @@ void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
   GenMarkSweep::follow_mdo_weak_refs();
   assert(GenMarkSweep::_marking_stack.is_empty(), "just drained");
 
-
   // Visit interned string tables and delete unmarked oops
   StringTable::unlink(&GenMarkSweep::is_alive);
   // Clean up unreferenced symbols in symbol table.
@@ -179,6 +182,28 @@ void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
 
   assert(GenMarkSweep::_marking_stack.is_empty(),
          "stack should be empty by now");
+
+  if (VerifyDuringGC) {
+    HandleMark hm;  // handle scope
+    COMPILER2_PRESENT(DerivedPointerTableDeactivate dpt_deact);
+    gclog_or_tty->print(" VerifyDuringGC:(full)[Verifying ");
+    Universe::heap()->prepare_for_verify();
+    // Note: we can verify only the heap here. When an object is
+    // marked, the previous value of the mark word (including
+    // identity hash values, ages, etc) is preserved, and the mark
+    // word is set to markOop::marked_value - effectively removing
+    // any hash values from the mark word. These hash values are
+    // used when verifying the dictionaries and so removing them
+    // from the mark word can make verification of the dictionaries
+    // fail. At the end of the GC, the orginal mark word values
+    // (including hash values) are restored to the appropriate
+    // objects.
+    Universe::heap()->verify(/* silent      */ false,
+                             /* option      */ VerifyOption_G1UseMarkWord);
+
+    G1CollectedHeap* g1h = G1CollectedHeap::heap();
+    gclog_or_tty->print_cr("]");
+  }
 }
 
 class G1PrepareCompactClosure: public HeapRegionClosure {
@@ -215,6 +240,7 @@ public:
     // at the end of the GC, so no point in updating those values here.
     _g1h->update_sets_after_freeing_regions(0, /* pre_used */
                                             NULL, /* free_list */
+                                            NULL, /* old_proxy_set */
                                             &_humongous_proxy_set,
                                             false /* par */);
   }
@@ -241,18 +267,6 @@ public:
   }
 };
 
-// Finds the first HeapRegion.
-class FindFirstRegionClosure: public HeapRegionClosure {
-  HeapRegion* _a_region;
-public:
-  FindFirstRegionClosure() : _a_region(NULL) {}
-  bool doHeapRegion(HeapRegion* r) {
-    _a_region = r;
-    return true;
-  }
-  HeapRegion* result() { return _a_region; }
-};
-
 void G1MarkSweep::mark_sweep_phase2() {
   // Now all live objects are marked, compute the new object addresses.
 
@@ -270,13 +284,11 @@ void G1MarkSweep::mark_sweep_phase2() {
   G1CollectedHeap* g1h = G1CollectedHeap::heap();
   Generation* pg = g1h->perm_gen();
 
-  EventMark m("2 compute new addresses");
-  TraceTime tm("phase 2", PrintGC && Verbose, true, gclog_or_tty);
+  GCTraceTime tm("phase 2", G1Log::fine() && Verbose, true, gc_timer());
   GenMarkSweep::trace("2");
 
-  FindFirstRegionClosure cl;
-  g1h->heap_region_iterate(&cl);
-  HeapRegion *r = cl.result();
+  // find the first region
+  HeapRegion* r = g1h->region_at(0);
   CompactibleSpace* sp = r;
   if (r->isHumongous() && oop(r->bottom())->is_gc_marked()) {
     sp = r->next_compaction_space();
@@ -315,8 +327,7 @@ void G1MarkSweep::mark_sweep_phase3() {
   Generation* pg = g1h->perm_gen();
 
   // Adjust the pointers to reflect the new locations
-  EventMark m("3 adjust pointers");
-  TraceTime tm("phase 3", PrintGC && Verbose, true, gclog_or_tty);
+  GCTraceTime tm("phase 3", G1Log::fine() && Verbose, true, gc_timer());
   GenMarkSweep::trace("3");
 
   SharedHeap* sh = SharedHeap::heap();
@@ -328,7 +339,8 @@ void G1MarkSweep::mark_sweep_phase3() {
                            NULL,  // do not touch code cache here
                            &GenMarkSweep::adjust_pointer_closure);
 
-  g1h->ref_processor()->weak_oops_do(&GenMarkSweep::adjust_root_pointer_closure);
+  assert(GenMarkSweep::ref_processor() == g1h->ref_processor_stw(), "Sanity");
+  g1h->ref_processor_stw()->weak_oops_do(&GenMarkSweep::adjust_root_pointer_closure);
 
   // Now adjust pointers in remaining weak roots.  (All of which should
   // have been cleared if they pointed to non-surviving objects.)
@@ -379,8 +391,7 @@ void G1MarkSweep::mark_sweep_phase4() {
   G1CollectedHeap* g1h = G1CollectedHeap::heap();
   Generation* pg = g1h->perm_gen();
 
-  EventMark m("4 compact heap");
-  TraceTime tm("phase 4", PrintGC && Verbose, true, gclog_or_tty);
+  GCTraceTime tm("phase 4", G1Log::fine() && Verbose, true, gc_timer());
   GenMarkSweep::trace("4");
 
   pg->compact();
@@ -389,7 +400,3 @@ void G1MarkSweep::mark_sweep_phase4() {
   g1h->heap_region_iterate(&blk);
 
 }
-
-// Local Variables: ***
-// c-indentation-style: gnu ***
-// End: ***

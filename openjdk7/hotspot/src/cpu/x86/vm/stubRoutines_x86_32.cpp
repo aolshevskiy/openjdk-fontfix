@@ -35,9 +35,13 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
+#endif
 
 // Implementation of the platform-specific part of StubRoutines - for
 // a description of how to extend it, see the stubRoutines.hpp file.
 
 address StubRoutines::x86::_verify_mxcsr_entry         = NULL;
 address StubRoutines::x86::_verify_fpu_cntrl_wrd_entry = NULL;
+address StubRoutines::x86::_key_shuffle_mask_addr = NULL;

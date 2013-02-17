@@ -377,7 +377,7 @@ DeadlockCycle* ThreadService::find_deadlocks_at_safepoint(bool concurrent_locks)
     }
 
   }
-
+  delete cycle;
   return deadlocks;
 }
 
@@ -437,7 +437,7 @@ StackFrameInfo::StackFrameInfo(javaVFrame* jvf, bool with_lock_info) {
     GrowableArray<MonitorInfo*>* list = jvf->locked_monitors();
     int length = list->length();
     if (length > 0) {
-      _locked_monitors = new (ResourceObj::C_HEAP) GrowableArray<oop>(length, true);
+      _locked_monitors = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<oop>(length, true);
       for (int i = 0; i < length; i++) {
         MonitorInfo* monitor = list->at(i);
         assert(monitor->owner(), "This monitor must have an owning object");
@@ -491,11 +491,11 @@ public:
 
 ThreadStackTrace::ThreadStackTrace(JavaThread* t, bool with_locked_monitors) {
   _thread = t;
-  _frames = new (ResourceObj::C_HEAP) GrowableArray<StackFrameInfo*>(INITIAL_ARRAY_SIZE, true);
+  _frames = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<StackFrameInfo*>(INITIAL_ARRAY_SIZE, true);
   _depth = 0;
   _with_locked_monitors = with_locked_monitors;
   if (_with_locked_monitors) {
-    _jni_locked_monitors = new (ResourceObj::C_HEAP) GrowableArray<oop>(INITIAL_ARRAY_SIZE, true);
+    _jni_locked_monitors = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<oop>(INITIAL_ARRAY_SIZE, true);
   } else {
     _jni_locked_monitors = NULL;
   }
@@ -689,7 +689,7 @@ void ConcurrentLocksDump::print_locks_on(JavaThread* t, outputStream* st) {
 
 ThreadConcurrentLocks::ThreadConcurrentLocks(JavaThread* thread) {
   _thread = thread;
-  _owned_locks = new (ResourceObj::C_HEAP) GrowableArray<instanceOop>(INITIAL_ARRAY_SIZE, true);
+  _owned_locks = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<instanceOop>(INITIAL_ARRAY_SIZE, true);
   _next = NULL;
 }
 
@@ -751,7 +751,7 @@ ThreadSnapshot::ThreadSnapshot(JavaThread* thread) {
       _blocker_object = obj();
       JavaThread* owner = ObjectSynchronizer::get_lock_owner(obj, false);
       if ((owner == NULL && _thread_status == java_lang_Thread::BLOCKED_ON_MONITOR_ENTER)
-          || (owner != NULL && owner->is_attaching())) {
+          || (owner != NULL && owner->is_attaching_via_jni())) {
         // ownership information of the monitor is not available
         // (may no longer be owned or releasing to some other thread)
         // make this thread in RUNNABLE state.
@@ -803,7 +803,7 @@ void ThreadSnapshot::oops_do(OopClosure* f) {
 
 DeadlockCycle::DeadlockCycle() {
   _is_deadlock = false;
-  _threads = new (ResourceObj::C_HEAP) GrowableArray<JavaThread*>(INITIAL_ARRAY_SIZE, true);
+  _threads = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<JavaThread*>(INITIAL_ARRAY_SIZE, true);
   _next = NULL;
 }
 
@@ -899,7 +899,7 @@ ThreadsListEnumerator::ThreadsListEnumerator(Thread* cur_thread,
     }
 
     // skip jni threads in the process of attaching
-    if (!include_jni_attaching_threads && jt->is_attaching()) {
+    if (!include_jni_attaching_threads && jt->is_attaching_via_jni()) {
       continue;
     }
 

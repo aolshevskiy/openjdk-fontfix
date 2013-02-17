@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,21 +24,24 @@
 
 #include "precompiled.hpp"
 #include "prims/jvm.h"
-#include "utilities/decoder.hpp"
+#include "decoder_windows.hpp"
 
-HMODULE                   Decoder::_dbghelp_handle = NULL;
-bool                      Decoder::_can_decode_in_vm = false;
-pfn_SymGetSymFromAddr64   Decoder::_pfnSymGetSymFromAddr64 = NULL;
-pfn_UndecorateSymbolName  Decoder::_pfnUndecorateSymbolName = NULL;
+WindowsDecoder::WindowsDecoder() {
+  _dbghelp_handle = NULL;
+  _can_decode_in_vm = false;
+  _pfnSymGetSymFromAddr64 = NULL;
+  _pfnUndecorateSymbolName = NULL;
 
-void Decoder::initialize() {
-  if (!_initialized) {
-    _initialized = true;
+  _decoder_status = no_error;
+  initialize();
+}
 
+void WindowsDecoder::initialize() {
+  if (!has_error() && _dbghelp_handle == NULL) {
     HMODULE handle = ::LoadLibrary("dbghelp.dll");
     if (!handle) {
       _decoder_status = helper_not_found;
-        return;
+      return;
     }
 
     _dbghelp_handle = handle;
@@ -46,7 +49,7 @@ void Decoder::initialize() {
     pfn_SymSetOptions _pfnSymSetOptions = (pfn_SymSetOptions)::GetProcAddress(handle, "SymSetOptions");
     pfn_SymInitialize _pfnSymInitialize = (pfn_SymInitialize)::GetProcAddress(handle, "SymInitialize");
     _pfnSymGetSymFromAddr64 = (pfn_SymGetSymFromAddr64)::GetProcAddress(handle, "SymGetSymFromAddr64");
-    _pfnUndecorateSymbolName = (pfn_UndecorateSymbolName)GetProcAddress(handle, "UnDecorateSymbolName");
+    _pfnUndecorateSymbolName = (pfn_UndecorateSymbolName)::GetProcAddress(handle, "UnDecorateSymbolName");
 
     if (_pfnSymSetOptions == NULL || _pfnSymInitialize == NULL || _pfnSymGetSymFromAddr64 == NULL) {
       _pfnSymGetSymFromAddr64 = NULL;
@@ -57,8 +60,9 @@ void Decoder::initialize() {
       return;
     }
 
-    _pfnSymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
-    if (!_pfnSymInitialize(GetCurrentProcess(), NULL, TRUE)) {
+    HANDLE hProcess = ::GetCurrentProcess();
+    _pfnSymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_EXACT_SYMBOLS);
+    if (!_pfnSymInitialize(hProcess, NULL, TRUE)) {
       _pfnSymGetSymFromAddr64 = NULL;
       _pfnUndecorateSymbolName = NULL;
       ::FreeLibrary(handle);
@@ -67,34 +71,102 @@ void Decoder::initialize() {
       return;
     }
 
+    // set pdb search paths
+    pfn_SymSetSearchPath  _pfn_SymSetSearchPath =
+      (pfn_SymSetSearchPath)::GetProcAddress(handle, "SymSetSearchPath");
+    pfn_SymGetSearchPath  _pfn_SymGetSearchPath =
+      (pfn_SymGetSearchPath)::GetProcAddress(handle, "SymGetSearchPath");
+    if (_pfn_SymSetSearchPath != NULL && _pfn_SymGetSearchPath != NULL) {
+      char paths[MAX_PATH];
+      int  len = sizeof(paths);
+      if (!_pfn_SymGetSearchPath(hProcess, paths, len)) {
+        paths[0] = '\0';
+      } else {
+        // available spaces in path buffer
+        len -= (int)strlen(paths);
+      }
+
+      char tmp_path[MAX_PATH];
+      DWORD dwSize;
+      HMODULE hJVM = ::GetModuleHandle("jvm.dll");
+      tmp_path[0] = '\0';
+      // append the path where jvm.dll is located
+      if (hJVM != NULL && (dwSize = ::GetModuleFileName(hJVM, tmp_path, sizeof(tmp_path))) > 0) {
+        while (dwSize > 0 && tmp_path[dwSize] != '\\') {
+          dwSize --;
+        }
+
+        tmp_path[dwSize] = '\0';
+
+        if (dwSize > 0 && len > (int)dwSize + 1) {
+          strncat(paths, os::path_separator(), 1);
+          strncat(paths, tmp_path, dwSize);
+          len -= dwSize + 1;
+        }
+      }
+
+      // append $JRE/bin. Arguments::get_java_home actually returns $JRE
+      // path
+      char *p = Arguments::get_java_home();
+      assert(p != NULL, "empty java home");
+      size_t java_home_len = strlen(p);
+      if (len > (int)java_home_len + 5) {
+        strncat(paths, os::path_separator(), 1);
+        strncat(paths, p, java_home_len);
+        strncat(paths, "\\bin", 4);
+        len -= (int)(java_home_len + 5);
+      }
+
+      // append $JDK/bin path if it exists
+      assert(java_home_len < MAX_PATH, "Invalid path length");
+      // assume $JRE is under $JDK, construct $JDK/bin path and
+      // see if it exists or not
+      if (strncmp(&p[java_home_len - 3], "jre", 3) == 0) {
+        strncpy(tmp_path, p, java_home_len - 3);
+        tmp_path[java_home_len - 3] = '\0';
+        strncat(tmp_path, "bin", 3);
+
+        // if the directory exists
+        DWORD dwAttrib = GetFileAttributes(tmp_path);
+        if (dwAttrib != INVALID_FILE_ATTRIBUTES &&
+            (dwAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
+          // tmp_path should have the same length as java_home_len, since we only
+          // replaced 'jre' with 'bin'
+          if (len > (int)java_home_len + 1) {
+            strncat(paths, os::path_separator(), 1);
+            strncat(paths, tmp_path, java_home_len);
+          }
+        }
+      }
+
+      _pfn_SymSetSearchPath(hProcess, paths);
+    }
+
      // find out if jvm.dll contains private symbols, by decoding
      // current function and comparing the result
-     address addr = (address)Decoder::initialize;
+     address addr = (address)Decoder::demangle;
      char buf[MAX_PATH];
-     if (decode(addr, buf, sizeof(buf), NULL) == no_error) {
-       _can_decode_in_vm = !strcmp(buf, "Decoder::initialize");
+     if (decode(addr, buf, sizeof(buf), NULL)) {
+       _can_decode_in_vm = !strcmp(buf, "Decoder::demangle");
      }
   }
 }
 
-void Decoder::uninitialize() {
-  assert(_initialized, "Decoder not yet initialized");
+void WindowsDecoder::uninitialize() {
   _pfnSymGetSymFromAddr64 = NULL;
   _pfnUndecorateSymbolName = NULL;
   if (_dbghelp_handle != NULL) {
     ::FreeLibrary(_dbghelp_handle);
   }
-  _initialized = false;
+  _dbghelp_handle = NULL;
 }
 
-bool Decoder::can_decode_C_frame_in_vm() {
-  initialize();
-  return  _can_decode_in_vm;
+bool WindowsDecoder::can_decode_C_frame_in_vm() const {
+  return  (!has_error() && _can_decode_in_vm);
 }
 
 
-Decoder::decoder_status Decoder::decode(address addr, char *buf, int buflen, int *offset) {
-  assert(_initialized, "Decoder not yet initialized");
+bool WindowsDecoder::decode(address addr, char *buf, int buflen, int* offset, const char* modulepath)  {
   if (_pfnSymGetSymFromAddr64 != NULL) {
     PIMAGEHLP_SYMBOL64 pSymbol;
     char symbolInfo[MAX_PATH + sizeof(IMAGEHLP_SYMBOL64)];
@@ -104,19 +176,20 @@ Decoder::decoder_status Decoder::decode(address addr, char *buf, int buflen, int
     DWORD64 displacement;
     if (_pfnSymGetSymFromAddr64(::GetCurrentProcess(), (DWORD64)addr, &displacement, pSymbol)) {
       if (buf != NULL) {
-        if (!demangle(pSymbol->Name, buf, buflen)) {
+        if (demangle(pSymbol->Name, buf, buflen)) {
           jio_snprintf(buf, buflen, "%s", pSymbol->Name);
         }
       }
-      if (offset != NULL) *offset = (int)displacement;
-      return no_error;
+      if(offset != NULL) *offset = (int)displacement;
+      return true;
     }
   }
-  return helper_not_found;
+  if (buf != NULL && buflen > 0) buf[0] = '\0';
+  if (offset != NULL) *offset = -1;
+  return false;
 }
 
-bool Decoder::demangle(const char* symbol, char *buf, int buflen) {
-  assert(_initialized, "Decoder not yet initialized");
+bool WindowsDecoder::demangle(const char* symbol, char *buf, int buflen) {
   return _pfnUndecorateSymbolName != NULL &&
          _pfnUndecorateSymbolName(symbol, buf, buflen, UNDNAME_COMPLETE);
 }

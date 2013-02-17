@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,7 @@
 #include "runtime/javaCalls.hpp"
 #include "runtime/os.hpp"
 #include "services/attachListener.hpp"
+#include "services/diagnosticCommand.hpp"
 #include "services/heapDumper.hpp"
 
 volatile bool AttachListener::_initialized;
@@ -98,6 +99,7 @@ static jint get_properties(AttachOperation* op, outputStream* out, Symbol* seria
 }
 
 // Implementation of "properties" command.
+// See also: PrintSystemPropertiesDCmd class
 static jint get_system_properties(AttachOperation* op, outputStream* out) {
   return get_properties(op, out, vmSymbols::serializePropertiesToByteArray_name());
 }
@@ -126,6 +128,7 @@ static jint data_dump(AttachOperation* op, outputStream* out) {
 }
 
 // Implementation of "threaddump" command - essentially a remote ctrl-break
+// See also: ThreadDumpDCmd class
 //
 static jint thread_dump(AttachOperation* op, outputStream* out) {
   bool print_concurrent_locks = false;
@@ -148,8 +151,27 @@ static jint thread_dump(AttachOperation* op, outputStream* out) {
   return JNI_OK;
 }
 
-#ifndef SERVICES_KERNEL   // Heap dumping not supported
+// A jcmd attach operation request was received, which will now
+// dispatch to the diagnostic commands used for serviceability functions.
+static jint jcmd(AttachOperation* op, outputStream* out) {
+  Thread* THREAD = Thread::current();
+  // All the supplied jcmd arguments are stored as a single
+  // string (op->arg(0)). This is parsed by the Dcmd framework.
+  DCmd::parse_and_execute(out, op->arg(0), ' ', THREAD);
+  if (HAS_PENDING_EXCEPTION) {
+    java_lang_Throwable::print(PENDING_EXCEPTION, out);
+    out->cr();
+    CLEAR_PENDING_EXCEPTION;
+    // The exception has been printed on the output stream
+    // If the JVM returns JNI_ERR, the attachAPI throws a generic I/O
+    // exception and the content of the output stream is not processed.
+    // By returning JNI_OK, the exception will be displayed on the client side
+  }
+  return JNI_OK;
+}
+
 // Implementation of "dumpheap" command.
+// See also: HeapDumpDCmd class
 //
 // Input arguments :-
 //   arg0: Name of the dump file
@@ -189,9 +211,9 @@ jint dump_heap(AttachOperation* op, outputStream* out) {
   }
   return JNI_OK;
 }
-#endif // SERVICES_KERNEL
 
 // Implementation of "inspectheap" command
+// See also: ClassHistogramDCmd class
 //
 // Input arguments :-
 //   arg0: "-live" or "-all"
@@ -296,7 +318,7 @@ static jint set_ccstr_flag(const char* name, AttachOperation* op, outputStream* 
   }
   bool res = CommandLineFlags::ccstrAtPut((char*)name, &value, ATTACH_ON_DEMAND);
   if (res) {
-    FREE_C_HEAP_ARRAY(char, value);
+    FREE_C_HEAP_ARRAY(char, value, mtInternal);
   } else {
     out->print_cr("setting flag %s failed", name);
   }
@@ -335,6 +357,7 @@ static jint set_flag(AttachOperation* op, outputStream* out) {
 }
 
 // Implementation of "printflag" command
+// See also: PrintVMFlagsDCmd class
 static jint print_flag(AttachOperation* op, outputStream* out) {
   const char* name = NULL;
   if ((name = op->arg(0)) == NULL) {
@@ -357,15 +380,14 @@ static jint print_flag(AttachOperation* op, outputStream* out) {
 static AttachOperationFunctionInfo funcs[] = {
   { "agentProperties",  get_agent_properties },
   { "datadump",         data_dump },
-#ifndef SERVICES_KERNEL
   { "dumpheap",         dump_heap },
-#endif  // SERVICES_KERNEL
   { "load",             JvmtiExport::load_agent_library },
   { "properties",       get_system_properties },
   { "threaddump",       thread_dump },
   { "inspectheap",      heap_inspection },
   { "setflag",          set_flag },
   { "printflag",        print_flag },
+  { "jcmd",             jcmd },
   { NULL,               NULL }
 };
 
@@ -377,6 +399,8 @@ static AttachOperationFunctionInfo funcs[] = {
 
 static void attach_listener_thread_entry(JavaThread* thread, TRAPS) {
   os::set_priority(thread, NearMaxPriority);
+
+  thread->record_stack_base_and_size();
 
   if (AttachListener::pd_init() != 0) {
     return;

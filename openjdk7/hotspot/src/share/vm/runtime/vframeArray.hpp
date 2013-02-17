@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,6 +47,8 @@ class StackValueCollection;
 // represent an interpreter frame which will eventually be created.
 
 class vframeArrayElement : public _ValueObj {
+  friend class VMStructs;
+
   private:
 
     frame _frame;                                                // the interpreter frame we will unpack into
@@ -106,7 +108,9 @@ class vframeArrayElement : public _ValueObj {
 // but it does make debugging easier even if we can't look
 // at the data in each vframeElement
 
-class vframeArray: public CHeapObj {
+class vframeArray: public CHeapObj<mtCompiler> {
+  friend class VMStructs;
+
  private:
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@
 #include "gc_implementation/parallelScavenge/cardTableExtension.hpp"
 #include "gc_implementation/parallelScavenge/psVirtualspace.hpp"
 #include "gc_implementation/shared/collectorCounters.hpp"
+#include "gc_implementation/shared/gcTrace.hpp"
 #include "memory/allocation.hpp"
 #include "oops/oop.hpp"
 #include "utilities/stack.hpp"
@@ -37,8 +38,10 @@ class GCTaskQueue;
 class OopStack;
 class ReferenceProcessor;
 class ParallelScavengeHeap;
+class ParallelScavengeTracer;
 class PSIsAliveClosure;
 class PSRefProcTaskExecutor;
+class STWGCTimer;
 
 class PSScavenge: AllStatic {
   friend class PSIsAliveClosure;
@@ -68,13 +71,14 @@ class PSScavenge: AllStatic {
   static bool                _survivor_overflow;    // Overflow this collection
   static int                 _tenuring_threshold;   // tenuring threshold for next scavenge
   static elapsedTimer        _accumulated_time;     // total time spent on scavenge
+  static STWGCTimer          _gc_timer;             // GC time book keeper
+  static ParallelScavengeTracer _gc_tracer;         // GC tracing
   static HeapWord*           _young_generation_boundary; // The lowest address possible for the young_gen.
                                                          // This is used to decide if an oop should be scavenged,
                                                          // cards should be marked, etc.
-  static Stack<markOop>          _preserved_mark_stack; // List of marks to be restored after failed promotion
-  static Stack<oop>              _preserved_oop_stack;  // List of oops that need their mark restored.
+  static Stack<markOop, mtGC> _preserved_mark_stack; // List of marks to be restored after failed promotion
+  static Stack<oop, mtGC>     _preserved_oop_stack;  // List of oops that need their mark restored.
   static CollectorCounters*      _counters;         // collector performance counters
-  static bool                    _promotion_failed;
 
   static void clean_up_failed_promotion();
 
@@ -90,7 +94,6 @@ class PSScavenge: AllStatic {
   // Accessors
   static int              tenuring_threshold()  { return _tenuring_threshold; }
   static elapsedTimer*    accumulated_time()    { return &_accumulated_time; }
-  static bool             promotion_failed()    { return _promotion_failed; }
   static int              consecutive_skipped_scavenges()
     { return _consecutive_skipped_scavenges; }
 
@@ -117,10 +120,9 @@ class PSScavenge: AllStatic {
   // Called by parallelScavengeHeap to init the tenuring threshold
   static void initialize();
 
-  // Scavenge entry point
-  static void invoke();
-  // Return true is a collection was done.  Return
-  // false if the collection was skipped.
+  // Scavenge entry point.  This may invoke a full gc; return true if so.
+  static bool invoke();
+  // Return true if a collection was done; false otherwise.
   static bool invoke_no_policy();
 
   // If an attempt to promote fails, this method is invoked
@@ -135,7 +137,8 @@ class PSScavenge: AllStatic {
   template <class T> static inline bool should_scavenge(T* p, MutableSpace* to_space);
   template <class T> static inline bool should_scavenge(T* p, bool check_to_space);
 
-  template <class T> inline static void copy_and_push_safe_barrier(PSPromotionManager* pm, T* p);
+  template <class T, bool promote_immediately>
+    inline static void copy_and_push_safe_barrier(PSPromotionManager* pm, T* p);
 
   // Is an object in the young generation
   // This assumes that the HeapWord argument is in the heap,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,6 +67,23 @@ interface Record {
                                     + maxPadding        // padding
                                     + trailerSize;      // MAC
 
+    static final boolean enableCBCProtection =
+            Debug.getBooleanProperty("jsse.enableCBCProtection", true);
+
+    /*
+     * For CBC protection in SSL3/TLS1, we break some plaintext into two
+     * packets.  Max application data size for the second packet.
+     */
+    static final int    maxDataSizeMinusOneByteRecord =
+                                  maxDataSize       // max data size
+                                - (                 // max one byte record size
+                                      headerSize    // header
+                                    + maxIVLength   // iv
+                                    + 1             // one byte data
+                                    + maxPadding    // padding
+                                    + trailerSize   // MAC
+                                  );
+
     /*
      * The maximum large record size.
      *
@@ -93,4 +110,10 @@ interface Record {
                                     + maxPadding        // padding
                                     + trailerSize;      // MAC
 
+    /*
+     * The overflow values of integers of 8, 16 and 24 bits.
+     */
+    static final int OVERFLOW_OF_INT08 = (1 << 8);
+    static final int OVERFLOW_OF_INT16 = (1 << 16);
+    static final int OVERFLOW_OF_INT24 = (1 << 24);
 }

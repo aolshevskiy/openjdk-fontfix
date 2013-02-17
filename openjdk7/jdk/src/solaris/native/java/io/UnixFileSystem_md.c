@@ -38,9 +38,16 @@
 #include "jlong.h"
 #include "jvm.h"
 #include "io_util.h"
+#include "io_util_md.h"
 #include "java_io_FileSystem.h"
 #include "java_io_UnixFileSystem.h"
 
+#if defined(_ALLBSD_SOURCE)
+#define dirent64 dirent
+#define readdir64_r readdir_r
+#define stat64 stat
+#define statvfs64 statvfs
+#endif
 
 /* -- Field IDs -- */
 
@@ -74,7 +81,11 @@ Java_java_io_UnixFileSystem_canonicalize0(JNIEnv *env, jobject this,
                          canonicalPath, JVM_MAXPATHLEN) < 0) {
             JNU_ThrowIOExceptionWithLastError(env, "Bad pathname");
         } else {
+#ifdef MACOSX
+            rv = newStringPlatform(env, canonicalPath);
+#else
             rv = JNU_NewStringPlatform(env, canonicalPath);
+#endif
         }
     } END_PLATFORM_STRING(env, path);
     return rv;
@@ -305,7 +316,11 @@ Java_java_io_UnixFileSystem_list(JNIEnv *env, jobject this,
             if (JNU_CopyObjectArray(env, rv, old, len) < 0) goto error;
             (*env)->DeleteLocalRef(env, old);
         }
+#ifdef MACOSX
+        name = newStringPlatform(env, ptr->d_name);
+#else
         name = JNU_NewStringPlatform(env, ptr->d_name);
+#endif
         if (name == NULL) goto error;
         (*env)->SetObjectArrayElement(env, rv, len++, name);
         (*env)->DeleteLocalRef(env, name);

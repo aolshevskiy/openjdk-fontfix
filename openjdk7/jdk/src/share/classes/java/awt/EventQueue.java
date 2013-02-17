@@ -36,6 +36,8 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 
 import java.util.EmptyStackException;
+
+import sun.awt.dnd.SunDropTargetEvent;
 import sun.util.logging.PlatformLogger;
 
 import sun.awt.AppContext;
@@ -47,9 +49,9 @@ import sun.awt.AWTAccessor;
 
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import java.security.AccessControlContext;
-import java.security.ProtectionDomain;
 
 import sun.misc.SharedSecrets;
 import sun.misc.JavaSecurityAccess;
@@ -99,12 +101,7 @@ import sun.misc.JavaSecurityAccess;
  * @since       1.1
  */
 public class EventQueue {
-
-    // From Thread.java
-    private static int threadInitNumber;
-    private static synchronized int nextThreadNum() {
-        return threadInitNumber++;
-    }
+    private static final AtomicInteger threadInitNumber = new AtomicInteger(0);
 
     private static final int LOW_PRIORITY = 0;
     private static final int NORM_PRIORITY = 1;
@@ -175,9 +172,9 @@ public class EventQueue {
      * Non-zero if a thread is waiting in getNextEvent(int) for an event of
      * a particular ID to be posted to the queue.
      */
-    private int waitForID;
+    private volatile int waitForID;
 
-    private final String name = "AWT-EventQueue-" + nextThreadNum();
+    private final String name = "AWT-EventQueue-" + threadInitNumber.getAndIncrement();
 
     private static final PlatformLogger eventLog = PlatformLogger.getLogger("java.awt.event.EventQueue");
 
@@ -189,6 +186,17 @@ public class EventQueue {
                 }
                 public boolean isDispatchThreadImpl(EventQueue eventQueue) {
                     return eventQueue.isDispatchThreadImpl();
+                }
+                public void removeSourceEvents(EventQueue eventQueue,
+                                               Object source,
+                                               boolean removeAllEvents) {
+                    eventQueue.removeSourceEvents(source, removeAllEvents);
+                }
+                public boolean noEvents(EventQueue eventQueue) {
+                    return eventQueue.noEvents();
+                }
+                public void wakeup(EventQueue eventQueue, boolean isShutdown) {
+                    eventQueue.wakeup(isShutdown);
                 }
             });
     }
@@ -352,6 +360,10 @@ public class EventQueue {
     }
 
     private boolean coalesceMouseEvent(MouseEvent e) {
+        if (e instanceof SunDropTargetEvent) {
+            // SunDropTargetEvent should not coalesce with MouseEvent
+            return false;
+        }
         EventQueueItem[] cache = ((Component)e.getSource()).eventCache;
         if (cache == null) {
             return false;
@@ -431,6 +443,10 @@ public class EventQueue {
     }
 
     private void cacheEQItem(EventQueueItem entry) {
+        if(entry.event instanceof SunDropTargetEvent) {
+            // Do not cache SunDropTargetEvent, it should not coalesce
+            return;
+        }
         int index = eventToCacheIndex(entry.event);
         if (index != -1 && entry.event.getSource() instanceof Component) {
             Component source = (Component)entry.event.getSource();
@@ -1030,7 +1046,7 @@ public class EventQueue {
         }
     }
 
-    final boolean detachDispatchThread(EventDispatchThread edt) {
+    final boolean detachDispatchThread(EventDispatchThread edt, boolean forceDetach) {
         /*
          * This synchronized block is to secure that the event dispatch
          * thread won't die in the middle of posting a new event to the
@@ -1049,7 +1065,7 @@ public class EventQueue {
                  * Fix for 4648733. Check both the associated java event
                  * queue and the PostEventQueue.
                  */
-                if ((peekEvent() != null) || !SunToolkit.isPostEventQueueEmpty()) {
+                if (!forceDetach && (peekEvent() != null) || !SunToolkit.isPostEventQueueEmpty()) {
                     return false;
                 }
                 dispatchThread = null;
