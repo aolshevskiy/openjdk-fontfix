@@ -2,7 +2,7 @@
 
 ## system-dependent local folders
 ## path to installed Sun JDK 6:
-ALT_BOOTDIR=/opt/jdk1.6.0_26
+ALT_BOOTDIR=/opt/java6
 
 #########################################################################################
 #      DO NOT EDIT
