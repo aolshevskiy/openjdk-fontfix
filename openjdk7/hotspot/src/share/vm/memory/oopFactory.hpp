@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@
 
 #include "classfile/symbolTable.hpp"
 #include "classfile/systemDictionary.hpp"
+#include "memory/referenceType.hpp"
 #include "memory/universe.hpp"
 #include "oops/klassOop.hpp"
 #include "oops/objArrayKlass.hpp"
@@ -63,6 +64,7 @@ class oopFactory: AllStatic {
   static typeArrayOop    new_permanent_intArray  (int length, TRAPS);  // used for class file structures
 
   static typeArrayOop    new_typeArray(BasicType type, int length, TRAPS);
+  static typeArrayOop    new_typeArray_nozero(BasicType type, int length, TRAPS);
 
   // Constant pools
   static constantPoolOop      new_constantPool     (int length,
@@ -76,13 +78,16 @@ class oopFactory: AllStatic {
                                            int vtable_len, int itable_len,
                                            int static_field_size,
                                            unsigned int nonstatic_oop_map_count,
-                                           ReferenceType rt, TRAPS);
+                                           AccessFlags access_flags,
+                                           ReferenceType rt,
+                                           KlassHandle host_klass, TRAPS);
 
   // Methods
 private:
   static constMethodOop  new_constMethod(int byte_code_size,
                                          int compressed_line_number_size,
                                          int localvariable_table_length,
+                                         int exception_table_length,
                                          int checked_exceptions_length,
                                          bool is_conc_safe,
                                          TRAPS);
@@ -94,6 +99,7 @@ public:
                                     AccessFlags access_flags,
                                     int compressed_line_number_size,
                                     int localvariable_table_length,
+                                    int exception_table_length,
                                     int checked_exceptions_length,
                                     bool is_conc_safe,
                                     TRAPS);

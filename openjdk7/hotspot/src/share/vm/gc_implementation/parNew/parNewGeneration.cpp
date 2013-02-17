@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,11 +24,15 @@
 
 #include "precompiled.hpp"
 #include "gc_implementation/concurrentMarkSweep/concurrentMarkSweepGeneration.hpp"
-#include "gc_implementation/parNew/parGCAllocBuffer.hpp"
 #include "gc_implementation/parNew/parNewGeneration.hpp"
 #include "gc_implementation/parNew/parOopClosures.inline.hpp"
 #include "gc_implementation/shared/adaptiveSizePolicy.hpp"
 #include "gc_implementation/shared/ageTable.hpp"
+#include "gc_implementation/shared/parGCAllocBuffer.hpp"
+#include "gc_implementation/shared/gcHeapSummary.hpp"
+#include "gc_implementation/shared/gcTimer.hpp"
+#include "gc_implementation/shared/gcTrace.hpp"
+#include "gc_implementation/shared/gcTraceTime.hpp"
 #include "gc_implementation/shared/spaceDecorator.hpp"
 #include "memory/defNewGeneration.inline.hpp"
 #include "memory/genCollectedHeap.hpp"
@@ -59,7 +63,7 @@ ParScanThreadState::ParScanThreadState(Space* to_space_,
                                        Generation* old_gen_,
                                        int thread_num_,
                                        ObjToScanQueueSet* work_queue_set_,
-                                       Stack<oop>* overflow_stacks_,
+                                       Stack<oop, mtGC>* overflow_stacks_,
                                        size_t desired_plab_sz_,
                                        ParallelTaskTerminator& term_) :
   _to_space(to_space_), _old_gen(old_gen_), _young_gen(gen_), _thread_num(thread_num_),
@@ -184,7 +188,7 @@ bool ParScanThreadState::take_from_overflow_stack() {
   assert(ParGCUseLocalOverflow, "Else should not call");
   assert(young_gen()->overflow_list() == NULL, "Error");
   ObjToScanQueue* queue = work_queue();
-  Stack<oop>* const of_stack = overflow_stack();
+  Stack<oop, mtGC>* const of_stack = overflow_stack();
   const size_t num_overflow_elems = of_stack->size();
   const size_t space_available = queue->max_elems() - queue->size();
   const size_t num_take_elems = MIN3(space_available / 4,
@@ -297,7 +301,7 @@ public:
                         ParNewGeneration&       gen,
                         Generation&             old_gen,
                         ObjToScanQueueSet&      queue_set,
-                        Stack<oop>*             overflow_stacks_,
+                        Stack<oop, mtGC>*       overflow_stacks_,
                         size_t                  desired_plab_sz,
                         ParallelTaskTerminator& term);
 
@@ -305,7 +309,7 @@ public:
 
   inline ParScanThreadState& thread_state(int i);
 
-  void reset(bool promotion_failed);
+  void reset(int active_workers, bool promotion_failed);
   void flush();
 
   #if TASKQUEUE_STATS
@@ -322,13 +326,16 @@ private:
   ParallelTaskTerminator& _term;
   ParNewGeneration&       _gen;
   Generation&             _next_gen;
+ public:
+  bool is_valid(int id) const { return id < length(); }
+  ParallelTaskTerminator* terminator() { return &_term; }
 };
 
 
 ParScanThreadStateSet::ParScanThreadStateSet(
   int num_threads, Space& to_space, ParNewGeneration& gen,
   Generation& old_gen, ObjToScanQueueSet& queue_set,
-  Stack<oop>* overflow_stacks,
+  Stack<oop, mtGC>* overflow_stacks,
   size_t desired_plab_sz, ParallelTaskTerminator& term)
   : ResourceArray(sizeof(ParScanThreadState), num_threads),
     _gen(gen), _next_gen(old_gen), _term(term)
@@ -351,9 +358,9 @@ inline ParScanThreadState& ParScanThreadStateSet::thread_state(int i)
 }
 
 
-void ParScanThreadStateSet::reset(bool promotion_failed)
+void ParScanThreadStateSet::reset(int active_threads, bool promotion_failed)
 {
-  _term.reset_for_reuse();
+  _term.reset_for_reuse(active_threads);
   if (promotion_failed) {
     for (int i = 0; i < length(); ++i) {
       thread_state(i).print_and_clear_promotion_failure_size();
@@ -450,7 +457,8 @@ void ParScanThreadStateSet::flush()
     // retire the last buffer.
     par_scan_state.to_space_alloc_buffer()->
       flush_stats_and_retire(_gen.plab_stats(),
-                             false /* !retain */);
+                             true /* end_of_gc */,
+                             false /* retain */);
 
     // Every thread has its own age table.  We need to merge
     // them all into one.
@@ -569,7 +577,25 @@ ParNewGenTask::ParNewGenTask(ParNewGeneration* gen, Generation* next_gen,
     _state_set(state_set)
   {}
 
-void ParNewGenTask::work(int i) {
+// Reset the terminator for the given number of
+// active threads.
+void ParNewGenTask::set_for_termination(int active_workers) {
+  _state_set->reset(active_workers, _gen->promotion_failed());
+  // Should the heap be passed in?  There's only 1 for now so
+  // grab it instead.
+  GenCollectedHeap* gch = GenCollectedHeap::heap();
+  gch->set_n_termination(active_workers);
+}
+
+// The "i" passed to this method is the part of the work for
+// this thread.  It is not the worker ID.  The "i" is derived
+// from _started_workers which is incremented in internal_note_start()
+// called in GangWorker loop() and which is called under the
+// which is  called under the protection of the gang monitor and is
+// called after a task is started.  So "i" is based on
+// first-come-first-served.
+
+void ParNewGenTask::work(uint worker_id) {
   GenCollectedHeap* gch = GenCollectedHeap::heap();
   // Since this is being done in a separate thread, need new resource
   // and handle marks.
@@ -580,7 +606,9 @@ void ParNewGenTask::work(int i) {
 
   Generation* old_gen = gch->next_gen(_gen);
 
-  ParScanThreadState& par_scan_state = _state_set->thread_state(i);
+  ParScanThreadState& par_scan_state = _state_set->thread_state(worker_id);
+  assert(_state_set->is_valid(worker_id), "Should not have been called");
+
   par_scan_state.set_young_old_boundary(_young_old_boundary);
 
   par_scan_state.start_strong_roots();
@@ -626,9 +654,14 @@ ParNewGeneration(ReservedSpace rs, size_t initial_byte_size, int level)
 
   _overflow_stacks = NULL;
   if (ParGCUseLocalOverflow) {
-    _overflow_stacks = NEW_C_HEAP_ARRAY(Stack<oop>, ParallelGCThreads);
+
+    // typedef to workaround NEW_C_HEAP_ARRAY macro, which can not deal
+    // with ','
+    typedef Stack<oop, mtGC> GCOopStack;
+
+    _overflow_stacks = NEW_C_HEAP_ARRAY(GCOopStack, ParallelGCThreads, mtGC);
     for (size_t i = 0; i < ParallelGCThreads; ++i) {
-      new (_overflow_stacks + i) Stack<oop>();
+      new (_overflow_stacks + i) Stack<oop, mtGC>();
     }
   }
 
@@ -732,8 +765,10 @@ public:
                          ParScanThreadStateSet& state_set);
 
 private:
-  virtual void work(int i);
-
+  virtual void work(uint worker_id);
+  virtual void set_for_termination(int active_workers) {
+    _state_set.terminator()->reset_for_reuse(active_workers);
+  }
 private:
   ParNewGeneration&      _gen;
   ProcessTask&           _task;
@@ -756,13 +791,13 @@ ParNewRefProcTaskProxy::ParNewRefProcTaskProxy(
 {
 }
 
-void ParNewRefProcTaskProxy::work(int i)
+void ParNewRefProcTaskProxy::work(uint worker_id)
 {
   ResourceMark rm;
   HandleMark hm;
-  ParScanThreadState& par_scan_state = _state_set.thread_state(i);
+  ParScanThreadState& par_scan_state = _state_set.thread_state(worker_id);
   par_scan_state.set_young_old_boundary(_young_old_boundary);
-  _task.work(i, par_scan_state.is_alive_closure(),
+  _task.work(worker_id, par_scan_state.is_alive_closure(),
              par_scan_state.keep_alive_closure(),
              par_scan_state.evacuate_followers_closure());
 }
@@ -777,9 +812,9 @@ public:
       _task(task)
   { }
 
-  virtual void work(int i)
+  virtual void work(uint worker_id)
   {
-    _task.work(i);
+    _task.work(worker_id);
   }
 };
 
@@ -789,18 +824,20 @@ void ParNewRefProcTaskExecutor::execute(ProcessTask& task)
   GenCollectedHeap* gch = GenCollectedHeap::heap();
   assert(gch->kind() == CollectedHeap::GenCollectedHeap,
          "not a generational heap");
-  WorkGang* workers = gch->workers();
+  FlexibleWorkGang* workers = gch->workers();
   assert(workers != NULL, "Need parallel worker threads.");
+  _state_set.reset(workers->active_workers(), _generation.promotion_failed());
   ParNewRefProcTaskProxy rp_task(task, _generation, *_generation.next_gen(),
                                  _generation.reserved().end(), _state_set);
   workers->run_task(&rp_task);
-  _state_set.reset(_generation.promotion_failed());
+  _state_set.reset(0 /* bad value in debug if not reset */,
+                   _generation.promotion_failed());
 }
 
 void ParNewRefProcTaskExecutor::execute(EnqueueTask& task)
 {
   GenCollectedHeap* gch = GenCollectedHeap::heap();
-  WorkGang* workers = gch->workers();
+  FlexibleWorkGang* workers = gch->workers();
   assert(workers != NULL, "Need parallel worker threads.");
   ParNewRefEnqueueTaskProxy enq_task(task);
   workers->run_task(&enq_task);
@@ -852,11 +889,25 @@ void ParNewGeneration::collect(bool   full,
                                size_t size,
                                bool   is_tlab) {
   assert(full || size > 0, "otherwise we don't want to collect");
+
   GenCollectedHeap* gch = GenCollectedHeap::heap();
+
+  _gc_timer->register_gc_start(os::elapsed_counter());
+  ParNewTracer gc_tracer;
+  gc_tracer.report_gc_start(gch->gc_cause(), _gc_timer->gc_start());
+
+  gch->trace_heap_before_gc(&gc_tracer);
+
   assert(gch->kind() == CollectedHeap::GenCollectedHeap,
     "not a CMS generational heap");
   AdaptiveSizePolicy* size_policy = gch->gen_policy()->size_policy();
-  WorkGang* workers = gch->workers();
+  FlexibleWorkGang* workers = gch->workers();
+  assert(workers != NULL, "Need workgang for parallel work");
+  int active_workers =
+      AdaptiveSizePolicy::calc_active_workers(workers->total_workers(),
+                                   workers->active_workers(),
+                                   Threads::number_of_non_daemon_threads());
+  workers->set_active_workers(active_workers);
   _next_gen = gch->next_gen(this);
   assert(_next_gen != NULL,
     "This must be the youngest gen, and not the only gen");
@@ -883,7 +934,7 @@ void ParNewGeneration::collect(bool   full,
     size_policy->minor_collection_begin();
   }
 
-  TraceTime t1("GC", PrintGC && !PrintGCDetails, true, gclog_or_tty);
+  GCTraceTime t1(GCCauseString("GC", gch->gc_cause()), PrintGC && !PrintGCDetails, true, NULL);
   // Capture heap used before collection (for printing).
   size_t gch_prev_used = gch->used();
 
@@ -894,13 +945,19 @@ void ParNewGeneration::collect(bool   full,
 
   gch->save_marks();
   assert(workers != NULL, "Need parallel worker threads.");
-  ParallelTaskTerminator _term(workers->total_workers(), task_queues());
-  ParScanThreadStateSet thread_state_set(workers->total_workers(),
+  int n_workers = active_workers;
+
+  // Set the correct parallelism (number of queues) in the reference processor
+  ref_processor()->set_active_mt_degree(n_workers);
+
+  // Always set the terminator for the active number of workers
+  // because only those workers go through the termination protocol.
+  ParallelTaskTerminator _term(n_workers, task_queues());
+  ParScanThreadStateSet thread_state_set(workers->active_workers(),
                                          *to(), *this, *_next_gen, *task_queues(),
                                          _overflow_stacks, desired_plab_sz(), _term);
 
   ParNewGenTask tsk(this, _next_gen, reserved().end(), &thread_state_set);
-  int n_workers = workers->total_workers();
   gch->set_par_threads(n_workers);
   gch->rem_set()->prepare_for_younger_refs_iterate(true);
   // It turns out that even when we're using 1 thread, doing the work in a
@@ -914,7 +971,8 @@ void ParNewGeneration::collect(bool   full,
     GenCollectedHeap::StrongRootsScope srs(gch);
     tsk.work(0);
   }
-  thread_state_set.reset(promotion_failed());
+  thread_state_set.reset(0 /* Bad value in debug if not reset */,
+                         promotion_failed());
 
   // Process (weak) reference objects found during scavenge.
   ReferenceProcessor* rp = ref_processor();
@@ -927,16 +985,20 @@ void ParNewGeneration::collect(bool   full,
   EvacuateFollowersClosureGeneral evacuate_followers(gch, _level,
     &scan_without_gc_barrier, &scan_with_gc_barrier);
   rp->setup_policy(clear_all_soft_refs);
+  // Can  the mt_degree be set later (at run_task() time would be best)?
+  rp->set_active_mt_degree(active_workers);
   if (rp->processing_is_mt()) {
     ParNewRefProcTaskExecutor task_executor(*this, thread_state_set);
     rp->process_discovered_references(&is_alive, &keep_alive,
-                                      &evacuate_followers, &task_executor);
+                                      &evacuate_followers, &task_executor,
+                                      _gc_timer);
   } else {
     thread_state_set.flush();
     gch->set_par_threads(0);  // 0 ==> non-parallel.
     gch->save_marks();
     rp->process_discovered_references(&is_alive, &keep_alive,
-                                      &evacuate_followers, NULL);
+                                      &evacuate_followers, NULL,
+                                      _gc_timer);
   }
   if (!promotion_failed()) {
     // Swap the survivor spaces.
@@ -983,7 +1045,7 @@ void ParNewGeneration::collect(bool   full,
 
   adjust_desired_tenuring_threshold();
   if (ResizePLAB) {
-    plab_stats()->adjust_desired_plab_sz();
+    plab_stats()->adjust_desired_plab_sz(n_workers);
   }
 
   if (PrintGC && !PrintGCDetails) {
@@ -1000,7 +1062,11 @@ void ParNewGeneration::collect(bool   full,
     size_policy->avg_survived()->sample(from()->used());
   }
 
-  update_time_of_last_gc(os::javaTimeMillis());
+  // We need to use a monotonically non-deccreasing time in ms
+  // or we will see time-warp warnings and os::javaTimeMillis()
+  // does not guarantee monotonicity.
+  jlong now = os::javaTimeNanos() / NANOSECS_PER_MILLISEC;
+  update_time_of_last_gc(now);
 
   SpecializationStats::print();
 
@@ -1012,6 +1078,12 @@ void ParNewGeneration::collect(bool   full,
     rp->enqueue_discovered_references(NULL);
   }
   rp->verify_no_references_recorded();
+
+  gch->trace_heap_after_gc(&gc_tracer);
+
+  _gc_timer->register_gc_end(os::elapsed_counter());
+
+  gc_tracer.report_gc_end(_gc_timer->gc_end(), _gc_timer->time_partitions());
 }
 
 static int sum;
@@ -1355,7 +1427,7 @@ void ParNewGeneration::push_on_overflow_list(oop from_space_obj, ParScanThreadSt
     assert(_num_par_pushes > 0, "Tautology");
 #endif
     if (from_space_obj->forwardee() == from_space_obj) {
-      oopDesc* listhead = NEW_C_HEAP_ARRAY(oopDesc, 1);
+      oopDesc* listhead = NEW_C_HEAP_ARRAY(oopDesc, 1, mtGC);
       listhead->forward_to(from_space_obj);
       from_space_obj = listhead;
     }
@@ -1507,7 +1579,7 @@ bool ParNewGeneration::take_from_overflow_list_work(ParScanThreadState* par_scan
       // This can become a scaling bottleneck when there is work queue overflow coincident
       // with promotion failure.
       oopDesc* f = cur;
-      FREE_C_HEAP_ARRAY(oopDesc, f);
+      FREE_C_HEAP_ARRAY(oopDesc, f, mtGC);
     } else if (par_scan_state->should_be_partially_scanned(obj_to_push, cur)) {
       assert(arrayOop(cur)->length() == 0, "entire array remaining to be scanned");
       obj_to_push = cur;
@@ -1526,8 +1598,7 @@ bool ParNewGeneration::take_from_overflow_list_work(ParScanThreadState* par_scan
 }
 #undef BUSY
 
-void ParNewGeneration::ref_processor_init()
-{
+void ParNewGeneration::ref_processor_init() {
   if (_ref_processor == NULL) {
     // Allocate and initialize a reference processor
     _ref_processor =

@@ -30,13 +30,45 @@
 #include "io_util_md.h"
 #include <string.h>
 
+#ifdef MACOSX
+
+#include <CoreFoundation/CoreFoundation.h>
+
+__private_extern__
+jstring newStringPlatform(JNIEnv *env, const char* str)
+{
+    jstring rv = NULL;
+    CFMutableStringRef csref = CFStringCreateMutable(NULL, 0);
+    if (csref == NULL) {
+        JNU_ThrowOutOfMemoryError(env, "native heap");
+    } else {
+        CFStringAppendCString(csref, str, kCFStringEncodingUTF8);
+        CFStringNormalize(csref, kCFStringNormalizationFormC);
+        int clen = CFStringGetLength(csref);
+        int ulen = (clen + 1) * 2;        // utf16 + zero padding
+        char* chars = malloc(ulen);
+        if (chars == NULL) {
+            CFRelease(csref);
+            JNU_ThrowOutOfMemoryError(env, "native heap");
+        } else {
+            if (CFStringGetCString(csref, chars, ulen, kCFStringEncodingUTF16)) {
+                rv = (*env)->NewString(env, (jchar*)chars, clen);
+            }
+            free(chars);
+            CFRelease(csref);
+        }
+    }
+    return rv;
+}
+#endif
+
 void
 fileOpen(JNIEnv *env, jobject this, jstring path, jfieldID fid, int flags)
 {
     WITH_PLATFORM_STRING(env, path, ps) {
         FD fd;
 
-#ifdef __linux__
+#if defined(__linux__) || defined(_ALLBSD_SOURCE)
         /* Remove trailing slashes, since the kernel won't */
         char *p = (char *)ps + strlen(ps) - 1;
         while ((p > ps) && (*p == '/'))

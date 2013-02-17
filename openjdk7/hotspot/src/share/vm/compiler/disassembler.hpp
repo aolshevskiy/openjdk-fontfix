@@ -25,6 +25,7 @@
 #ifndef SHARE_VM_COMPILER_DISASSEMBLER_HPP
 #define SHARE_VM_COMPILER_DISASSEMBLER_HPP
 
+#include "asm/codeBuffer.hpp"
 #include "runtime/globals.hpp"
 #ifdef TARGET_OS_FAMILY_linux
 # include "os_linux.inline.hpp"
@@ -34,6 +35,9 @@
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "os_windows.inline.hpp"
+#endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "os_bsd.inline.hpp"
 #endif
 
 class decode_env;
@@ -84,7 +88,7 @@ class Disassembler {
   }
   static void decode(CodeBlob *cb,               outputStream* st = NULL);
   static void decode(nmethod* nm,                outputStream* st = NULL);
-  static void decode(address begin, address end, outputStream* st = NULL);
+  static void decode(address begin, address end, outputStream* st = NULL, CodeComments c = CodeComments());
 };
 
 #endif // SHARE_VM_COMPILER_DISASSEMBLER_HPP

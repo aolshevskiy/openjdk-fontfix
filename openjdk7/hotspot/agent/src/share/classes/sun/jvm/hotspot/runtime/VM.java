@@ -30,6 +30,7 @@ import java.util.*;
 import java.util.regex.*;
 import sun.jvm.hotspot.code.*;
 import sun.jvm.hotspot.c1.*;
+import sun.jvm.hotspot.code.*;
 import sun.jvm.hotspot.debugger.*;
 import sun.jvm.hotspot.interpreter.*;
 import sun.jvm.hotspot.memory.*;
@@ -85,11 +86,14 @@ public class VM {
   private Interpreter  interpreter;
   private StubRoutines stubRoutines;
   private Bytes        bytes;
+
   /** Flags indicating whether we are attached to a core, C1, or C2 build */
   private boolean      usingClientCompiler;
   private boolean      usingServerCompiler;
   /** Flag indicating whether UseTLAB is turned on */
   private boolean      useTLAB;
+  /** Flag indicating whether invokedynamic support is on */
+  private boolean      enableInvokeDynamic;
   /** alignment constants */
   private boolean      isLP64;
   private int          bytesPerLong;
@@ -131,12 +135,14 @@ public class VM {
      private String name;
      private Address addr;
      private String kind;
+     private int origin;
 
-     private Flag(String type, String name, Address addr, String kind) {
+     private Flag(String type, String name, Address addr, String kind, int origin) {
         this.type = type;
         this.name = name;
         this.addr = addr;
         this.kind = kind;
+        this.origin = origin;
      }
 
      public String getType() {
@@ -153,6 +159,10 @@ public class VM {
 
      public String getKind() {
         return kind;
+     }
+
+     public int getOrigin() {
+        return origin;
      }
 
      public boolean isBool() {
@@ -300,7 +310,7 @@ public class VM {
         usingServerCompiler = false;
       } else {
         // Determine whether C2 is present
-        if (type.getField("_interpreter_invocation_count", false, false) != null) {
+        if (db.lookupType("Matcher", false) != null) {
           usingServerCompiler = true;
         } else {
           usingClientCompiler = true;
@@ -309,6 +319,7 @@ public class VM {
     }
 
     useTLAB = (db.lookupIntConstant("UseTLAB").intValue() != 0);
+    enableInvokeDynamic = (db.lookupIntConstant("EnableInvokeDynamic").intValue() != 0);
 
     if (debugger != null) {
       isLP64 = debugger.getMachineDescription().isLP64();
@@ -542,6 +553,10 @@ public class VM {
   /** Indicates whether Thread-Local Allocation Buffers are used */
   public boolean getUseTLAB() {
     return useTLAB;
+  }
+
+  public boolean getEnableInvokeDynamic() {
+    return enableInvokeDynamic;
   }
 
   public TypeDataBase getTypeDataBase() {
@@ -788,42 +803,40 @@ public class VM {
   private void readCommandLineFlags() {
     // get command line flags
     TypeDataBase db = getTypeDataBase();
-    try {
-       Type flagType = db.lookupType("Flag");
-       int numFlags = (int) flagType.getCIntegerField("numFlags").getValue();
-       // NOTE: last flag contains null values.
-       commandLineFlags = new Flag[numFlags - 1];
+    Type flagType = db.lookupType("Flag");
+    int numFlags = (int) flagType.getCIntegerField("numFlags").getValue();
+    // NOTE: last flag contains null values.
+    commandLineFlags = new Flag[numFlags - 1];
 
-       Address flagAddr = flagType.getAddressField("flags").getValue();
+    Address flagAddr = flagType.getAddressField("flags").getValue();
 
-       AddressField typeFld = flagType.getAddressField("type");
-       AddressField nameFld = flagType.getAddressField("name");
-       AddressField addrFld = flagType.getAddressField("addr");
-       AddressField kindFld = flagType.getAddressField("kind");
+    AddressField typeFld = flagType.getAddressField("type");
+    AddressField nameFld = flagType.getAddressField("name");
+    AddressField addrFld = flagType.getAddressField("addr");
+    AddressField kindFld = flagType.getAddressField("kind");
+    CIntField originFld = new CIntField(flagType.getCIntegerField("origin"), 0);
 
-       long flagSize = flagType.getSize(); // sizeof(Flag)
+    long flagSize = flagType.getSize(); // sizeof(Flag)
 
-       // NOTE: last flag contains null values.
-       for (int f = 0; f < numFlags - 1; f++) {
-          String type = CStringUtilities.getString(typeFld.getValue(flagAddr));
-          String name = CStringUtilities.getString(nameFld.getValue(flagAddr));
-          Address addr = addrFld.getValue(flagAddr);
-          String kind = CStringUtilities.getString(kindFld.getValue(flagAddr));
-          commandLineFlags[f] = new Flag(type, name, addr, kind);
-          flagAddr = flagAddr.addOffsetTo(flagSize);
-       }
-
-       // sort flags by name
-       Arrays.sort(commandLineFlags, new Comparator() {
-                                        public int compare(Object o1, Object o2) {
-                                           Flag f1 = (Flag) o1;
-                                           Flag f2 = (Flag) o2;
-                                           return f1.getName().compareTo(f2.getName());
-                                        }
-                                     });
-    } catch (Exception exp) {
-       // ignore. may be older version. command line flags not available.
+    // NOTE: last flag contains null values.
+    for (int f = 0; f < numFlags - 1; f++) {
+      String type = CStringUtilities.getString(typeFld.getValue(flagAddr));
+      String name = CStringUtilities.getString(nameFld.getValue(flagAddr));
+      Address addr = addrFld.getValue(flagAddr);
+      String kind = CStringUtilities.getString(kindFld.getValue(flagAddr));
+      int origin = (int)originFld.getValue(flagAddr);
+      commandLineFlags[f] = new Flag(type, name, addr, kind, origin);
+      flagAddr = flagAddr.addOffsetTo(flagSize);
     }
+
+    // sort flags by name
+    Arrays.sort(commandLineFlags, new Comparator() {
+        public int compare(Object o1, Object o2) {
+          Flag f1 = (Flag) o1;
+          Flag f2 = (Flag) o2;
+          return f1.getName().compareTo(f2.getName());
+        }
+      });
   }
 
   public String getSystemProperty(String key) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,6 +56,9 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
+#endif
 
 // This file contains the platform-independent parts
 // of the abstract interpreter and the abstract interpreter generator.
@@ -96,7 +99,10 @@ class AbstractInterpreter: AllStatic {
     empty,                                                      // empty method (code: _return)
     accessor,                                                   // accessor method (code: _aload_0, _getfield, _(a|i)return)
     abstract,                                                   // abstract method (throws an AbstractMethodException)
-    method_handle,                                              // java.lang.invoke.MethodHandles::invoke
+    method_handle_invoke_FIRST,                                 // java.lang.invoke.MethodHandles::invokeExact, etc.
+    method_handle_invoke_LAST                                   = (method_handle_invoke_FIRST
+                                                                   + (vmIntrinsics::LAST_MH_SIG_POLY
+                                                                      - vmIntrinsics::FIRST_MH_SIG_POLY)),
     java_lang_math_sin,                                         // implementation of java.lang.Math.sin   (x)
     java_lang_math_cos,                                         // implementation of java.lang.Math.cos   (x)
     java_lang_math_tan,                                         // implementation of java.lang.Math.tan   (x)
@@ -104,10 +110,20 @@ class AbstractInterpreter: AllStatic {
     java_lang_math_sqrt,                                        // implementation of java.lang.Math.sqrt  (x)
     java_lang_math_log,                                         // implementation of java.lang.Math.log   (x)
     java_lang_math_log10,                                       // implementation of java.lang.Math.log10 (x)
+    java_lang_math_pow,                                         // implementation of java.lang.Math.pow   (x,y)
+    java_lang_math_exp,                                         // implementation of java.lang.Math.exp   (x)
     java_lang_ref_reference_get,                                // implementation of java.lang.ref.Reference.get()
     number_of_method_entries,
     invalid = -1
   };
+
+  // Conversion from the part of the above enum to vmIntrinsics::_invokeExact, etc.
+  static vmIntrinsics::ID method_handle_intrinsic(MethodKind kind) {
+    if (kind >= method_handle_invoke_FIRST && kind <= method_handle_invoke_LAST)
+      return (vmIntrinsics::ID)( vmIntrinsics::FIRST_MH_SIG_POLY + (kind - method_handle_invoke_FIRST) );
+    else
+      return vmIntrinsics::_none;
+  }
 
   enum SomeConstants {
     number_of_result_handlers = 10                              // number of result handlers for native calls
@@ -142,6 +158,9 @@ class AbstractInterpreter: AllStatic {
   static MethodKind method_kind(methodHandle m);
   static address    entry_for_kind(MethodKind k)                { assert(0 <= k && k < number_of_method_entries, "illegal kind"); return _entry_table[k]; }
   static address    entry_for_method(methodHandle m)            { return entry_for_kind(method_kind(m)); }
+
+  // used for bootstrapping method handles:
+  static void       set_entry_for_kind(MethodKind k, address e);
 
   static void       print_method_kind(MethodKind kind)          PRODUCT_RETURN;
 
@@ -301,6 +320,7 @@ class AbstractInterpreterGenerator: public StackObj {
   void bang_stack_shadow_pages(bool native_call);
 
   void generate_all();
+  void initialize_method_handle_entries();
 
  public:
   AbstractInterpreterGenerator(StubQueue* _code);

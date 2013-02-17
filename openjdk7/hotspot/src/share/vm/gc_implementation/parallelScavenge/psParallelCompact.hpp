@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,6 +47,8 @@ class GCTaskQueue;
 class PreGCValues;
 class MoveAndUpdateClosure;
 class RefProcTaskExecutor;
+class ParallelOldTracer;
+class STWGCTimer;
 
 // The SplitInfo class holds the information needed to 'split' a source region
 // so that the live data can be copied to two destination *spaces*.  Normally,
@@ -832,31 +834,6 @@ class PSParallelCompact : AllStatic {
     virtual void do_code_blob(CodeBlob* cb) const { }
   };
 
-  // Closure for verifying update of pointers.  Does not
-  // have any side effects.
-  class VerifyUpdateClosure: public ParMarkBitMapClosure {
-    const MutableSpace* _space; // Is this ever used?
-
-   public:
-    VerifyUpdateClosure(ParCompactionManager* cm, const MutableSpace* sp) :
-      ParMarkBitMapClosure(PSParallelCompact::mark_bitmap(), cm), _space(sp)
-    { }
-
-    virtual IterationStatus do_addr(HeapWord* addr, size_t words);
-
-    const MutableSpace* space() { return _space; }
-  };
-
-  // Closure for updating objects altered for debug checking
-  class ResetObjectsClosure: public ParMarkBitMapClosure {
-   public:
-    ResetObjectsClosure(ParCompactionManager* cm):
-      ParMarkBitMapClosure(PSParallelCompact::mark_bitmap(), cm)
-    { }
-
-    virtual IterationStatus do_addr(HeapWord* addr, size_t words);
-  };
-
   friend class KeepAliveClosure;
   friend class FollowStackClosure;
   friend class AdjustPointerClosure;
@@ -865,6 +842,8 @@ class PSParallelCompact : AllStatic {
   friend class RefProcTaskProxy;
 
  private:
+  static STWGCTimer           _gc_timer;
+  static ParallelOldTracer    _gc_tracer;
   static elapsedTimer         _accumulated_time;
   static unsigned int         _total_invocations;
   static unsigned int         _maximum_compaction_gc_num;
@@ -912,7 +891,8 @@ class PSParallelCompact : AllStatic {
 
   // Mark live objects
   static void marking_phase(ParCompactionManager* cm,
-                            bool maximum_heap_compaction);
+                            bool maximum_heap_compaction,
+                            ParallelOldTracer *gc_tracer);
   static void follow_weak_klass_links();
   static void follow_mdo_weak_refs();
 
@@ -1082,7 +1062,7 @@ class PSParallelCompact : AllStatic {
   }
 
   static void invoke(bool maximum_heap_compaction);
-  static void invoke_no_policy(bool maximum_heap_compaction);
+  static bool invoke_no_policy(bool maximum_heap_compaction);
 
   static void post_initialize();
   // Perform initialization for PSParallelCompact that requires
@@ -1183,10 +1163,6 @@ class PSParallelCompact : AllStatic {
   // Update the deferred objects in the space.
   static void update_deferred_objects(ParCompactionManager* cm, SpaceId id);
 
-  // Mark pointer and follow contents.
-  template <class T>
-  static inline void mark_and_follow(ParCompactionManager* cm, T* p);
-
   static ParMarkBitMap* mark_bitmap() { return &_mark_bitmap; }
   static ParallelCompactData& summary_data() { return _summary_data; }
 
@@ -1195,6 +1171,8 @@ class PSParallelCompact : AllStatic {
 
   // Reference Processing
   static ReferenceProcessor* const ref_processor() { return _ref_processor; }
+
+  static STWGCTimer* gc_timer() { return &_gc_timer; }
 
   // Return the SpaceId for the given address.
   static SpaceId space_id(HeapWord* addr);
@@ -1280,20 +1258,6 @@ inline void PSParallelCompact::follow_root(ParCompactionManager* cm, T* p) {
     }
   }
   cm->follow_marking_stacks();
-}
-
-template <class T>
-inline void PSParallelCompact::mark_and_follow(ParCompactionManager* cm,
-                                               T* p) {
-  T heap_oop = oopDesc::load_heap_oop(p);
-  if (!oopDesc::is_null(heap_oop)) {
-    oop obj = oopDesc::decode_heap_oop_not_null(heap_oop);
-    if (mark_bitmap()->is_unmarked(obj)) {
-      if (mark_obj(obj)) {
-        obj->follow_contents(cm);
-      }
-    }
-  }
 }
 
 template <class T>

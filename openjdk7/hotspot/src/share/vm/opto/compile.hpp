@@ -30,15 +30,18 @@
 #include "code/debugInfoRec.hpp"
 #include "code/exceptionHandlerTable.hpp"
 #include "compiler/compilerOracle.hpp"
+#include "compiler/compileBroker.hpp"
 #include "libadt/dict.hpp"
 #include "libadt/port.hpp"
 #include "libadt/vectset.hpp"
 #include "memory/resourceArea.hpp"
 #include "opto/idealGraphPrinter.hpp"
+#include "opto/phasetype.hpp"
 #include "opto/phase.hpp"
 #include "opto/regmask.hpp"
 #include "runtime/deoptimization.hpp"
 #include "runtime/vmThread.hpp"
+#include "trace/tracing.hpp"
 
 class Block;
 class Bundle;
@@ -71,15 +74,20 @@ class SafePointNode;
 class JVMState;
 class TypeData;
 class TypePtr;
+class TypeOopPtr;
 class TypeFunc;
 class Unique_Node_List;
 class nmethod;
 class WarmCallInfo;
+class Node_Stack;
+struct Final_Reshape_Counts;
 
 //------------------------------Compile----------------------------------------
 // This class defines a top-level Compiler invocation.
 
 class Compile : public Phase {
+  friend class VMStructs;
+
  public:
   // Fixed alias indexes.  (See also MergeMemNode.)
   enum {
@@ -96,6 +104,8 @@ class Compile : public Phase {
    private:
     Compile*    C;
     CompileLog* _log;
+    const char* _phase_name;
+    bool _dolog;
    public:
     TracePhase(const char* name, elapsedTimer* accumulator, bool dolog);
     ~TracePhase();
@@ -148,14 +158,16 @@ class Compile : public Phase {
     BasicType _type;
     jvalue    _value;
     int       _offset;         // offset of this constant (in bytes) relative to the constant table base.
+    float     _freq;
     bool      _can_be_reused;  // true (default) if the value can be shared with other users.
 
   public:
-    Constant() : _type(T_ILLEGAL), _offset(-1), _can_be_reused(true) { _value.l = 0; }
-    Constant(BasicType type, jvalue value, bool can_be_reused = true) :
+    Constant() : _type(T_ILLEGAL), _offset(-1), _freq(0.0f), _can_be_reused(true) { _value.l = 0; }
+    Constant(BasicType type, jvalue value, float freq = 0.0f, bool can_be_reused = true) :
       _type(type),
       _value(value),
       _offset(-1),
+      _freq(freq),
       _can_be_reused(can_be_reused)
     {}
 
@@ -171,6 +183,9 @@ class Compile : public Phase {
     int         offset()  const    { return _offset; }
     void    set_offset(int offset) {        _offset = offset; }
 
+    float       freq()    const    { return _freq;         }
+    void    inc_freq(float freq)   {        _freq += freq; }
+
     bool    can_be_reused() const  { return _can_be_reused; }
   };
 
@@ -180,41 +195,51 @@ class Compile : public Phase {
     GrowableArray<Constant> _constants;          // Constants of this table.
     int                     _size;               // Size in bytes the emitted constant table takes (including padding).
     int                     _table_base_offset;  // Offset of the table base that gets added to the constant offsets.
+    int                     _nof_jump_tables;    // Number of jump-tables in this constant table.
+
+    static int qsort_comparator(Constant* a, Constant* b);
+
+    // We use negative frequencies to keep the order of the
+    // jump-tables in which they were added.  Otherwise we get into
+    // trouble with relocation.
+    float next_jump_table_freq() { return -1.0f * (++_nof_jump_tables); }
 
   public:
     ConstantTable() :
       _size(-1),
-      _table_base_offset(-1)  // We can use -1 here since the constant table is always bigger than 2 bytes (-(size / 2), see MachConstantBaseNode::emit).
+      _table_base_offset(-1),  // We can use -1 here since the constant table is always bigger than 2 bytes (-(size / 2), see MachConstantBaseNode::emit).
+      _nof_jump_tables(0)
     {}
 
-    int size() const { assert(_size != -1, "size not yet calculated"); return _size; }
+    int size() const { assert(_size != -1, "not calculated yet"); return _size; }
 
-    void set_table_base_offset(int x)  { assert(_table_base_offset == -1, "set only once");                        _table_base_offset = x; }
-    int      table_base_offset() const { assert(_table_base_offset != -1, "table base offset not yet set"); return _table_base_offset; }
+    int calculate_table_base_offset() const;  // AD specific
+    void set_table_base_offset(int x)  { assert(_table_base_offset == -1 || x == _table_base_offset, "can't change"); _table_base_offset = x; }
+    int      table_base_offset() const { assert(_table_base_offset != -1, "not set yet");                      return _table_base_offset; }
 
     void emit(CodeBuffer& cb);
 
     // Returns the offset of the last entry (the top) of the constant table.
-    int  top_offset() const { assert(_constants.top().offset() != -1, "constant not yet bound"); return _constants.top().offset(); }
+    int  top_offset() const { assert(_constants.top().offset() != -1, "not bound yet"); return _constants.top().offset(); }
 
     void calculate_offsets_and_size();
     int  find_offset(Constant& con) const;
 
     void     add(Constant& con);
-    Constant add(BasicType type, jvalue value);
-    Constant add(MachOper* oper);
-    Constant add(jfloat f) {
+    Constant add(MachConstantNode* n, BasicType type, jvalue value);
+    Constant add(MachConstantNode* n, MachOper* oper);
+    Constant add(MachConstantNode* n, jfloat f) {
       jvalue value; value.f = f;
-      return add(T_FLOAT, value);
+      return add(n, T_FLOAT, value);
     }
-    Constant add(jdouble d) {
+    Constant add(MachConstantNode* n, jdouble d) {
       jvalue value; value.d = d;
-      return add(T_DOUBLE, value);
+      return add(n, T_DOUBLE, value);
     }
 
-    // Jump table
-    Constant allocate_jump_table(MachConstantNode* n);
-    void         fill_jump_table(CodeBuffer& cb, MachConstantNode* n, GrowableArray<Label*> labels) const;
+    // Jump-table
+    Constant  add_jump_table(MachConstantNode* n);
+    void     fill_jump_table(CodeBuffer& cb, MachConstantNode* n, GrowableArray<Label*> labels) const;
   };
 
  private:
@@ -242,10 +267,13 @@ class Compile : public Phase {
   int                   _orig_pc_slot_offset_in_bytes;
 
   int                   _major_progress;        // Count of something big happening
+  bool                  _inlining_progress;     // progress doing incremental inlining?
+  bool                  _inlining_incrementally;// Are we doing incremental inlining (post parse)
   bool                  _has_loops;             // True if the method _may_ have some loops
   bool                  _has_split_ifs;         // True if the method _may_ have some split-if
   bool                  _has_unsafe_access;     // True if the method _may_ produce faults in unsafe loads or stores.
   bool                  _has_stringbuilder;     // True StringBuffers or StringBuilders are allocated
+  int                   _max_vector_size;       // Maximum size of generated vectors
   uint                  _trap_hist[trapHistLength];  // Cumulative traps
   bool                  _trap_can_recompile;    // Have we emitted a recompiling trap?
   uint                  _decompile_count;       // Cumulative decompilation counts.
@@ -277,8 +305,12 @@ class Compile : public Phase {
   IdealGraphPrinter*    _printer;
 #endif
 
+
   // Node management
   uint                  _unique;                // Counter for unique Node indices
+  VectorSet             _dead_node_list;        // Set of dead nodes
+  uint                  _dead_node_count;       // Number of dead nodes; VectorSet::Size() is O(N).
+                                                // So use this to keep count and make the call O(1).
   debug_only(static int _debug_idx;)            // Monotonic counter (not reset), use -XX:BreakAtNode=<idx>
   Arena                 _node_arena;            // Arena for new-space Nodes
   Arena                 _old_arena;             // Arena for old-space Nodes, lifetime during xform
@@ -325,9 +357,69 @@ class Compile : public Phase {
   Unique_Node_List*     _for_igvn;              // Initial work-list for next round of Iterative GVN
   WarmCallInfo*         _warm_calls;            // Sorted work-list for heat-based inlining.
 
-  GrowableArray<CallGenerator*> _late_inlines;  // List of CallGenerators to be revisited after
-                                                // main parsing has finished.
+  GrowableArray<CallGenerator*> _late_inlines;        // List of CallGenerators to be revisited after
+                                                      // main parsing has finished.
+  GrowableArray<CallGenerator*> _string_late_inlines; // same but for string operations
 
+  int                           _late_inlines_pos;    // Where in the queue should the next late inlining candidate go (emulate depth first inlining)
+  uint                          _number_of_mh_late_inlines; // number of method handle late inlining still pending
+
+
+  // Inlining may not happen in parse order which would make
+  // PrintInlining output confusing. Keep track of PrintInlining
+  // pieces in order.
+  class PrintInliningBuffer : public ResourceObj {
+   private:
+    CallGenerator* _cg;
+    stringStream* _ss;
+
+   public:
+    PrintInliningBuffer()
+      : _cg(NULL) { _ss = new stringStream(); }
+
+    stringStream* ss() const { return _ss; }
+    CallGenerator* cg() const { return _cg; }
+    void set_cg(CallGenerator* cg) { _cg = cg; }
+  };
+
+  GrowableArray<PrintInliningBuffer>* _print_inlining_list;
+  int _print_inlining;
+
+ public:
+
+  outputStream* print_inlining_stream() const {
+    return _print_inlining_list->at(_print_inlining).ss();
+  }
+
+  void print_inlining_skip(CallGenerator* cg) {
+    if (PrintInlining) {
+      _print_inlining_list->at(_print_inlining).set_cg(cg);
+      _print_inlining++;
+      _print_inlining_list->insert_before(_print_inlining, PrintInliningBuffer());
+    }
+  }
+
+  void print_inlining_insert(CallGenerator* cg) {
+    if (PrintInlining) {
+      for (int i = 0; i < _print_inlining_list->length(); i++) {
+        if (_print_inlining_list->at(i).cg() == cg) {
+          _print_inlining_list->insert_before(i+1, PrintInliningBuffer());
+          _print_inlining = i+1;
+          _print_inlining_list->at(i).set_cg(NULL);
+          return;
+        }
+      }
+      ShouldNotReachHere();
+    }
+  }
+
+  void print_inlining(ciMethod* method, int inline_level, int bci, const char* msg = NULL) {
+    stringStream ss;
+    CompileTask::print_inlining(&ss, method, inline_level, bci, msg);
+    print_inlining_stream()->print(ss.as_string());
+  }
+
+ private:
   // Matching, CFG layout, allocation, code generation
   PhaseCFG*             _cfg;                   // Results of CFG finding
   bool                  _select_24_bit_instr;   // We selected an instruction with a 24-bit result
@@ -394,6 +486,10 @@ class Compile : public Phase {
   int               fixed_slots() const         { assert(_fixed_slots >= 0, "");         return _fixed_slots; }
   void          set_fixed_slots(int n)          { _fixed_slots = n; }
   int               major_progress() const      { return _major_progress; }
+  void          set_inlining_progress(bool z)   { _inlining_progress = z; }
+  int               inlining_progress() const   { return _inlining_progress; }
+  void          set_inlining_incrementally(bool z) { _inlining_incrementally = z; }
+  int               inlining_incrementally() const { return _inlining_incrementally; }
   void          set_major_progress()            { _major_progress++; }
   void        clear_major_progress()            { _major_progress = 0; }
   int               num_loop_opts() const       { return _num_loop_opts; }
@@ -410,6 +506,8 @@ class Compile : public Phase {
   void          set_has_unsafe_access(bool z)   { _has_unsafe_access = z; }
   bool              has_stringbuilder() const   { return _has_stringbuilder; }
   void          set_has_stringbuilder(bool z)   { _has_stringbuilder = z; }
+  int               max_vector_size() const     { return _max_vector_size; }
+  void          set_max_vector_size(int s)      { _max_vector_size = s; }
   void          set_trap_count(uint r, uint c)  { assert(r < trapHistLength, "oob");        _trap_hist[r] = c; }
   uint              trap_count(uint r) const    { assert(r < trapHistLength, "oob"); return _trap_hist[r]; }
   bool              trap_can_recompile() const  { return _trap_can_recompile; }
@@ -444,17 +542,43 @@ class Compile : public Phase {
   bool              has_method_handle_invokes() const { return _has_method_handle_invokes;     }
   void          set_has_method_handle_invokes(bool z) {        _has_method_handle_invokes = z; }
 
+  long _latest_stage_start_counter;
+
   void begin_method() {
 #ifndef PRODUCT
     if (_printer) _printer->begin_method(this);
 #endif
+    C->_latest_stage_start_counter = os::elapsed_counter();
   }
-  void print_method(const char * name, int level = 1) {
+
+  void print_method(CompilerPhaseType cpt, int level = 1) {
+    EventCompilerPhase event(UNTIMED);
+    if (event.should_commit()) {
+      event.set_starttime(C->_latest_stage_start_counter);
+      event.set_endtime(os::elapsed_counter());
+      event.set_phase((u1) cpt);
+      event.set_compileID(C->_compile_id);
+      event.set_phaseLevel(level);
+      event.commit();
+    }
+
+
 #ifndef PRODUCT
-    if (_printer) _printer->print_method(this, name, level);
+    if (_printer) _printer->print_method(this, CompilerPhaseTypeHelper::to_string(cpt), level);
 #endif
+    C->_latest_stage_start_counter = os::elapsed_counter();
   }
-  void end_method() {
+
+  void end_method(int level = 1) {
+    EventCompilerPhase event(UNTIMED);
+    if (event.should_commit()) {
+      event.set_starttime(C->_latest_stage_start_counter);
+      event.set_endtime(os::elapsed_counter());
+      event.set_phase((u1) PHASE_END);
+      event.set_compileID(C->_compile_id);
+      event.set_phaseLevel(level);
+      event.commit();
+    }
 #ifndef PRODUCT
     if (_printer) _printer->end_method();
 #endif
@@ -498,7 +622,7 @@ class Compile : public Phase {
   ciEnv*            env() const                 { return _env; }
   CompileLog*       log() const                 { return _log; }
   bool              failing() const             { return _env->failing() || _failure_reason != NULL; }
-  const char* failure_reason() { return _failure_reason; }
+  const char*       failure_reason() { return _failure_reason; }
   bool              failure_reason_is(const char* r) { return (r==_failure_reason) || (r!=NULL && _failure_reason!=NULL && strcmp(r, _failure_reason)==0); }
 
   void record_failure(const char* reason);
@@ -513,7 +637,7 @@ class Compile : public Phase {
     record_method_not_compilable(reason, true);
   }
   bool check_node_count(uint margin, const char* reason) {
-    if (unique() + margin > (uint)MaxNodeLimit) {
+    if (live_nodes() + margin > (uint)MaxNodeLimit) {
       record_method_not_compilable(reason);
       return true;
     } else {
@@ -522,25 +646,41 @@ class Compile : public Phase {
   }
 
   // Node management
-  uint              unique() const              { return _unique; }
-  uint         next_unique()                    { return _unique++; }
-  void          set_unique(uint i)              { _unique = i; }
-  static int        debug_idx()                 { return debug_only(_debug_idx)+0; }
-  static void   set_debug_idx(int i)            { debug_only(_debug_idx = i); }
-  Arena*            node_arena()                { return &_node_arena; }
-  Arena*            old_arena()                 { return &_old_arena; }
-  RootNode*         root() const                { return _root; }
-  void          set_root(RootNode* r)           { _root = r; }
-  StartNode*        start() const;              // (Derived from root.)
+  uint         unique() const              { return _unique; }
+  uint         next_unique()               { return _unique++; }
+  void         set_unique(uint i)          { _unique = i; }
+  static int   debug_idx()                 { return debug_only(_debug_idx)+0; }
+  static void  set_debug_idx(int i)        { debug_only(_debug_idx = i); }
+  Arena*       node_arena()                { return &_node_arena; }
+  Arena*       old_arena()                 { return &_old_arena; }
+  RootNode*    root() const                { return _root; }
+  void         set_root(RootNode* r)       { _root = r; }
+  StartNode*   start() const;              // (Derived from root.)
   void         init_start(StartNode* s);
-  Node*             immutable_memory();
+  Node*        immutable_memory();
 
-  Node*             recent_alloc_ctl() const    { return _recent_alloc_ctl; }
-  Node*             recent_alloc_obj() const    { return _recent_alloc_obj; }
-  void          set_recent_alloc(Node* ctl, Node* obj) {
+  Node*        recent_alloc_ctl() const    { return _recent_alloc_ctl; }
+  Node*        recent_alloc_obj() const    { return _recent_alloc_obj; }
+  void         set_recent_alloc(Node* ctl, Node* obj) {
                                                   _recent_alloc_ctl = ctl;
                                                   _recent_alloc_obj = obj;
-                                                }
+                                           }
+  void         record_dead_node(uint idx)  { if (_dead_node_list.test_set(idx)) return;
+                                             _dead_node_count++;
+                                           }
+  uint         dead_node_count()           { return _dead_node_count; }
+  void         reset_dead_node_list()      { _dead_node_list.Reset();
+                                             _dead_node_count = 0;
+                                           }
+  uint          live_nodes() const         {
+    int  val = _unique - _dead_node_count;
+    assert (val >= 0, err_msg_res("number of tracked dead nodes %d more than created nodes %d", _unique, _dead_node_count));
+            return (uint) val;
+                                           }
+#ifdef ASSERT
+  uint         count_live_nodes_by_graph_walk();
+  void         print_missing_nodes();
+#endif
 
   // Constant table
   ConstantTable&   constant_table() { return _constant_table; }
@@ -614,8 +754,16 @@ class Compile : public Phase {
 
   // Decide how to build a call.
   // The profile factor is a discount to apply to this site's interp. profile.
-  CallGenerator*    call_generator(ciMethod* call_method, int vtable_index, bool call_is_virtual, JVMState* jvms, bool allow_inline, float profile_factor);
+  CallGenerator*    call_generator(ciMethod* call_method, int vtable_index, bool call_does_dispatch, JVMState* jvms, bool allow_inline, float profile_factor, bool allow_intrinsics = true, bool delayed_forbidden = false);
   bool should_delay_inlining(ciMethod* call_method, JVMState* jvms);
+
+  // Helper functions to identify inlining potential at call-site
+  ciMethod* optimize_virtual_call(ciMethod* caller, int bci, ciInstanceKlass* klass,
+                                  ciMethod* callee, const TypeOopPtr* receiver_type,
+                                  bool is_virtual,
+                                  bool &call_does_dispatch, int &vtable_index);
+  ciMethod* optimize_inlining(ciMethod* caller, int bci, ciInstanceKlass* klass,
+                              ciMethod* callee, const TypeOopPtr* receiver_type);
 
   // Report if there were too many traps at a current method and bci.
   // Report if a trap was recorded, and/or PerMethodTrapLimit was exceeded.
@@ -642,14 +790,46 @@ class Compile : public Phase {
 
 
   void              identify_useful_nodes(Unique_Node_List &useful);
-  void              remove_useless_nodes  (Unique_Node_List &useful);
+  void              update_dead_node_list(Unique_Node_List &useful);
+  void              remove_useless_nodes (Unique_Node_List &useful);
 
   WarmCallInfo*     warm_calls() const          { return _warm_calls; }
   void          set_warm_calls(WarmCallInfo* l) { _warm_calls = l; }
   WarmCallInfo* pop_warm_call();
 
   // Record this CallGenerator for inlining at the end of parsing.
-  void              add_late_inline(CallGenerator* cg) { _late_inlines.push(cg); }
+  void              add_late_inline(CallGenerator* cg)        {
+    _late_inlines.insert_before(_late_inlines_pos, cg);
+    _late_inlines_pos++;
+  }
+
+  void              prepend_late_inline(CallGenerator* cg)    {
+    _late_inlines.insert_before(0, cg);
+  }
+
+  void              add_string_late_inline(CallGenerator* cg) {
+    _string_late_inlines.push(cg);
+  }
+
+  void remove_useless_late_inlines(GrowableArray<CallGenerator*>* inlines, Unique_Node_List &useful);
+
+  void dump_inlining();
+
+  bool over_inlining_cutoff() const {
+    if (!inlining_incrementally()) {
+      return unique() > (uint)NodeCountInliningCutoff;
+    } else {
+      return live_nodes() > (uint)LiveNodeCountInliningCutoff;
+    }
+  }
+
+  void inc_number_of_mh_late_inlines() { _number_of_mh_late_inlines++; }
+  void dec_number_of_mh_late_inlines() { assert(_number_of_mh_late_inlines > 0, "_number_of_mh_late_inlines < 0 !"); _number_of_mh_late_inlines--; }
+  bool has_mh_late_inlines() const     { return _number_of_mh_late_inlines > 0; }
+
+  void inline_incrementally_one(PhaseIterGVN& igvn);
+  void inline_incrementally(PhaseIterGVN& igvn);
+  void inline_string_calls(bool parse_time);
 
   // Matching, CFG layout, allocation, code generation
   PhaseCFG*         cfg()                       { return _cfg; }
@@ -785,11 +965,14 @@ class Compile : public Phase {
   // Process an OopMap Element while emitting nodes
   void Process_OopMap_Node(MachNode *mach, int code_offset);
 
+  // Initialize code buffer
+  CodeBuffer* init_buffer(uint* blk_starts);
+
   // Write out basic block data to code buffer
-  void Fill_buffer();
+  void fill_buffer(CodeBuffer* cb, uint* blk_starts);
 
   // Determine which variable sized branches can be shortened
-  void Shorten_branches(Label *labels, int& code_size, int& reloc_size, int& stub_size);
+  void shorten_branches(uint* blk_starts, int& code_size, int& reloc_size, int& stub_size);
 
   // Compute the size of first NumberOfLoopInstrToAlign instructions
   // at the head of a loop.
@@ -853,6 +1036,11 @@ class Compile : public Phase {
   static juint  _intrinsic_hist_count[vmIntrinsics::ID_LIMIT];
   static jubyte _intrinsic_hist_flags[vmIntrinsics::ID_LIMIT];
 #endif
+  // Function calls made by the public function final_graph_reshaping.
+  // No need to be made public as they are not called elsewhere.
+  void final_graph_reshaping_impl( Node *n, Final_Reshape_Counts &frc);
+  void final_graph_reshaping_walk( Node_Stack &nstack, Node *root, Final_Reshape_Counts &frc );
+  void eliminate_redundant_card_marks(Node* n);
 
  public:
 

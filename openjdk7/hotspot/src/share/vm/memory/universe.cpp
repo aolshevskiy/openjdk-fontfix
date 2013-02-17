@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -88,6 +88,9 @@
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
+#endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
 #endif
 #ifndef SERIALGC
 #include "gc_implementation/concurrentMarkSweep/cmsAdaptiveSizePolicy.hpp"
@@ -761,7 +764,7 @@ jint universe_init() {
 
   FileMapInfo* mapinfo = NULL;
   if (UseSharedSpaces) {
-    mapinfo = NEW_C_HEAP_OBJ(FileMapInfo);
+    mapinfo = NEW_C_HEAP_OBJ(FileMapInfo, mtInternal);
     memset(mapinfo, 0, sizeof(FileMapInfo));
 
     // Open the shared archive file, read and validate the header. If
@@ -890,7 +893,7 @@ jint Universe::initialize_heap() {
 
   } else if (UseG1GC) {
 #ifndef SERIALGC
-    G1CollectorPolicy* g1p = new G1CollectorPolicy_BestRegionsFirst();
+    G1CollectorPolicy* g1p = new G1CollectorPolicy();
     G1CollectedHeap* g1h = new G1CollectedHeap(g1p);
     Universe::_collectedHeap = g1h;
 #else  // SERIALGC
@@ -943,12 +946,14 @@ jint Universe::initialize_heap() {
       Universe::set_narrow_oop_base(Universe::heap()->base() - os::vm_page_size());
       Universe::set_narrow_oop_shift(LogMinObjAlignmentInBytes);
       if (verbose) {
-        tty->print(", Compressed Oops with base: "PTR_FORMAT, Universe::narrow_oop_base());
+        tty->print(", %s: "PTR_FORMAT,
+            narrow_oop_mode_to_string(HeapBasedNarrowOop),
+            Universe::narrow_oop_base());
       }
     } else {
       Universe::set_narrow_oop_base(0);
       if (verbose) {
-        tty->print(", zero based Compressed Oops");
+        tty->print(", %s", narrow_oop_mode_to_string(ZeroBasedNarrowOop));
       }
 #ifdef _WIN64
       if (!Universe::narrow_oop_use_implicit_null_checks()) {
@@ -963,7 +968,7 @@ jint Universe::initialize_heap() {
       } else {
         Universe::set_narrow_oop_shift(0);
         if (verbose) {
-          tty->print(", 32-bits Oops");
+          tty->print(", %s", narrow_oop_mode_to_string(UnscaledNarrowOop));
         }
       }
     }
@@ -996,6 +1001,33 @@ void Universe::update_heap_info_at_gc() {
   _heap_used_at_last_gc     = heap()->used();
 }
 
+
+const char* Universe::narrow_oop_mode_to_string(Universe::NARROW_OOP_MODE mode) {
+  switch (mode) {
+    case UnscaledNarrowOop:
+      return "32-bits Oops";
+    case ZeroBasedNarrowOop:
+      return "zero based Compressed Oops";
+    case HeapBasedNarrowOop:
+      return "Compressed Oops with base";
+  }
+
+  ShouldNotReachHere();
+  return "";
+}
+
+
+Universe::NARROW_OOP_MODE Universe::narrow_oop_mode() {
+  if (narrow_oop_base() != 0) {
+    return HeapBasedNarrowOop;
+  }
+
+  if (narrow_oop_shift() != 0) {
+    return ZeroBasedNarrowOop;
+  }
+
+  return UnscaledNarrowOop;
+}
 
 
 void universe2_init() {
@@ -1177,10 +1209,41 @@ void Universe::flush_dependents_on(instanceKlassHandle dependee) {
   // stopped dring the safepoint so CodeCache will be safe to update without
   // holding the CodeCache_lock.
 
-  DepChange changes(dependee);
+  KlassDepChange changes(dependee);
 
   // Compute the dependent nmethods
   if (CodeCache::mark_for_deoptimization(changes) > 0) {
+    // At least one nmethod has been marked for deoptimization
+    VM_Deoptimize op;
+    VMThread::execute(&op);
+  }
+}
+
+// Flushes compiled methods dependent on a particular CallSite
+// instance when its target is different than the given MethodHandle.
+void Universe::flush_dependents_on(Handle call_site, Handle method_handle) {
+  assert_lock_strong(Compile_lock);
+
+  if (CodeCache::number_of_nmethods_with_dependencies() == 0) return;
+
+  // CodeCache can only be updated by a thread_in_VM and they will all be
+  // stopped dring the safepoint so CodeCache will be safe to update without
+  // holding the CodeCache_lock.
+
+  CallSiteDepChange changes(call_site(), method_handle());
+
+  // Compute the dependent nmethods that have a reference to a
+  // CallSite object.  We use instanceKlass::mark_dependent_nmethod
+  // directly instead of CodeCache::mark_for_deoptimization because we
+  // want dependents on the call site class only not all classes in
+  // the ContextStream.
+  int marked = 0;
+  {
+    MutexLockerEx mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+    instanceKlass* call_site_klass = instanceKlass::cast(call_site->klass());
+    marked = call_site_klass->mark_dependent_nmethods(changes);
+  }
+  if (marked > 0) {
     // At least one nmethod has been marked for deoptimization
     VM_Deoptimize op;
     VMThread::execute(&op);
@@ -1247,11 +1310,17 @@ void Universe::flush_dependents_on_method(methodHandle m_h) {
   }
 }
 
-void Universe::print() { print_on(gclog_or_tty); }
+void Universe::print() {
+  print_on(gclog_or_tty);
+}
 
-void Universe::print_on(outputStream* st) {
+void Universe::print_on(outputStream* st, bool extended) {
   st->print_cr("Heap");
-  heap()->print_on(st);
+  if (!extended) {
+    heap()->print_on(st);
+  } else {
+    heap()->print_extended_on(st);
+  }
 }
 
 void Universe::print_heap_at_SIGBREAK() {
@@ -1263,22 +1332,30 @@ void Universe::print_heap_at_SIGBREAK() {
   }
 }
 
-void Universe::print_heap_before_gc(outputStream* st) {
+void Universe::print_heap_before_gc(outputStream* st, bool ignore_extended) {
   st->print_cr("{Heap before GC invocations=%u (full %u):",
                heap()->total_collections(),
                heap()->total_full_collections());
-  heap()->print_on(st);
+  if (!PrintHeapAtGCExtended || ignore_extended) {
+    heap()->print_on(st);
+  } else {
+    heap()->print_extended_on(st);
+  }
 }
 
-void Universe::print_heap_after_gc(outputStream* st) {
+void Universe::print_heap_after_gc(outputStream* st, bool ignore_extended) {
   st->print_cr("Heap after GC invocations=%u (full %u):",
                heap()->total_collections(),
                heap()->total_full_collections());
-  heap()->print_on(st);
+  if (!PrintHeapAtGCExtended || ignore_extended) {
+    heap()->print_on(st);
+  } else {
+    heap()->print_extended_on(st);
+  }
   st->print_cr("}");
 }
 
-void Universe::verify(bool allow_dirty, bool silent, bool option) {
+void Universe::verify(bool silent, VerifyOption option) {
   if (SharedSkipVerify) {
     return;
   }
@@ -1302,7 +1379,7 @@ void Universe::verify(bool allow_dirty, bool silent, bool option) {
   if (!silent) gclog_or_tty->print("[Verifying ");
   if (!silent) gclog_or_tty->print("threads ");
   Threads::verify();
-  heap()->verify(allow_dirty, silent, option);
+  heap()->verify(silent, option);
 
   if (!silent) gclog_or_tty->print("syms ");
   SymbolTable::verify();
@@ -1498,7 +1575,7 @@ void ActiveMethodOopsCache::add_previous_version(const methodOop method) {
     // This is the first previous version so make some space.
     // Start with 2 elements under the assumption that the class
     // won't be redefined much.
-    _prev_methods = new (ResourceObj::C_HEAP) GrowableArray<jweak>(2, true);
+    _prev_methods = new (ResourceObj::C_HEAP, mtClass) GrowableArray<jweak>(2, true);
   }
 
   // RC_TRACE macro has an embedded ResourceMark

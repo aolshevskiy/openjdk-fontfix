@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -189,6 +189,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
                                   setCCOrNot should_set_CC = dont_set_CC );
 
   void get_cache_and_index_at_bcp(Register cache, Register tmp, int bcp_offset, size_t index_size = sizeof(u2));
+  void get_cache_and_index_and_bytecode_at_bcp(Register cache, Register temp, Register bytecode, int byte_no, int bcp_offset, size_t index_size = sizeof(u2));
   void get_cache_entry_pointer_at_bcp(Register cache, Register tmp, int bcp_offset, size_t index_size = sizeof(u2));
   void get_cache_index_at_bcp(Register cache, Register tmp, int bcp_offset, size_t index_size = sizeof(u2));
 
@@ -204,6 +205,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void index_check(Register array, Register index, int index_shift, Register tmp, Register res);
   void index_check_without_pop(Register array, Register index, int index_shift, Register tmp, Register res);
 
+  void get_const(Register Rdst);
   void get_constant_pool(Register Rdst);
   void get_constant_pool_cache(Register Rdst);
   void get_cpool_and_tags(Register Rcpool, Register Rtags);

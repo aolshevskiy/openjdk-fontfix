@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -111,32 +111,6 @@ address TemplateInterpreterGenerator::generate_ClassCastException_handler() {
              rax);
   return entry;
 }
-
-// Arguments are: required type at TOS+4, failing object (or NULL) at TOS.
-address TemplateInterpreterGenerator::generate_WrongMethodType_handler() {
-  address entry = __ pc();
-
-  __ pop(rbx);                  // actual failing object is at TOS
-  __ pop(rax);                  // required type is at TOS+4
-
-  __ verify_oop(rbx);
-  __ verify_oop(rax);
-
-  // Various method handle types use interpreter registers as temps.
-  __ restore_bcp();
-  __ restore_locals();
-
-  // Expression stack must be empty before entering the VM for an exception.
-  __ empty_expression_stack();
-  __ empty_FPU_stack();
-  __ call_VM(noreg,
-             CAST_FROM_FN_PTR(address,
-                              InterpreterRuntime::throw_WrongMethodTypeException),
-             // pass required type, failing object (or NULL)
-             rax, rbx);
-  return entry;
-}
-
 
 address TemplateInterpreterGenerator::generate_exception_handler_common(const char* name, const char* message, bool pass_oop) {
   assert(!pass_oop || message == NULL, "either oop or message but not both");
@@ -548,9 +522,18 @@ void InterpreterGenerator::generate_stack_overflow_check(void) {
 
   __ pop(rsi);  // get saved bcp / (c++ prev state ).
 
-  __ pop(rax);  // get return address
-  __ jump(ExternalAddress(Interpreter::throw_StackOverflowError_entry()));
+  // Restore sender's sp as SP. This is necessary if the sender's
+  // frame is an extended compiled frame (see gen_c2i_adapter())
+  // and safer anyway in case of JSR292 adaptations.
 
+  __ pop(rax); // return address must be moved if SP is changed
+  __ mov(rsp, rsi);
+  __ push(rax);
+
+  // Note: the restored frame is not necessarily interpreted.
+  // Use the shared runtime version of the StackOverflowError.
+  assert(StubRoutines::throw_StackOverflowError_entry() != NULL, "stub not yet generated");
+  __ jump(ExternalAddress(StubRoutines::throw_StackOverflowError_entry()));
   // all done with frame size check
   __ bind(after_frame_check_pop);
   __ pop(rsi);
@@ -578,12 +561,13 @@ void InterpreterGenerator::lock_method(void) {
   #endif // ASSERT
   // get synchronization object
   { Label done;
-    const int mirror_offset = klassOopDesc::klass_part_offset_in_bytes() + Klass::java_mirror_offset_in_bytes();
+    const int mirror_offset = in_bytes(Klass::java_mirror_offset());
     __ movl(rax, access_flags);
     __ testl(rax, JVM_ACC_STATIC);
     __ movptr(rax, Address(rdi, Interpreter::local_offset_in_bytes(0)));  // get receiver (assume this is frequent case)
     __ jcc(Assembler::zero, done);
-    __ movptr(rax, Address(rbx, methodOopDesc::constants_offset()));
+    __ movptr(rax, Address(rbx, methodOopDesc::const_offset()));
+    __ movptr(rax, Address(rax, constMethodOopDesc::constants_offset()));
     __ movptr(rax, Address(rax, constantPoolOopDesc::pool_holder_offset_in_bytes()));
     __ movptr(rax, Address(rax, mirror_offset));
     __ bind(done);
@@ -623,7 +607,8 @@ void TemplateInterpreterGenerator::generate_fixed_frame(bool native_call) {
     __ push(0);
   }
 
-  __ movptr(rdx, Address(rbx, methodOopDesc::constants_offset()));
+  __ movptr(rdx, Address(rbx, methodOopDesc::const_offset()));
+  __ movptr(rdx, Address(rdx, constMethodOopDesc::constants_offset()));
   __ movptr(rdx, Address(rdx, constantPoolOopDesc::cache_offset_in_bytes()));
   __ push(rdx);                                       // set constant pool cache
   __ push(rdi);                                       // set locals pointer
@@ -678,9 +663,9 @@ address InterpreterGenerator::generate_accessor_entry(void) {
     __ testptr(rax, rax);
     __ jcc(Assembler::zero, slow_path);
 
-    __ movptr(rdi, Address(rbx, methodOopDesc::constants_offset()));
     // read first instruction word and extract bytecode @ 1 and index @ 2
     __ movptr(rdx, Address(rbx, methodOopDesc::const_offset()));
+    __ movptr(rdi, Address(rdx, constMethodOopDesc::constants_offset()));
     __ movl(rdx, Address(rdx, constMethodOopDesc::codes_offset()));
     // Shift codes right to get the index on the right.
     // The bytecode fetched looks like <index><0xb4><0x2a>
@@ -725,9 +710,9 @@ address InterpreterGenerator::generate_accessor_entry(void) {
     // Need to differentiate between igetfield, agetfield, bgetfield etc.
     // because they are different sizes.
     // Use the type from the constant pool cache
-    __ shrl(rdx, ConstantPoolCacheEntry::tosBits);
-    // Make sure we don't need to mask rdx for tosBits after the above shift
-    ConstantPoolCacheEntry::verify_tosBits();
+    __ shrl(rdx, ConstantPoolCacheEntry::tos_state_shift);
+    // Make sure we don't need to mask rdx after the above shift
+    ConstantPoolCacheEntry::verify_tos_state_shift();
     __ cmpl(rdx, btos);
     __ jcc(Assembler::notEqual, notByte);
     __ load_signed_byte(rax, field_address);
@@ -1038,12 +1023,13 @@ address InterpreterGenerator::generate_native_entry(bool synchronized) {
 
   // pass mirror handle if static call
   { Label L;
-    const int mirror_offset = klassOopDesc::klass_part_offset_in_bytes() + Klass::java_mirror_offset_in_bytes();
+    const int mirror_offset = in_bytes(Klass::java_mirror_offset());
     __ movl(t, Address(method, methodOopDesc::access_flags_offset()));
     __ testl(t, JVM_ACC_STATIC);
     __ jcc(Assembler::zero, L);
     // get mirror
-    __ movptr(t, Address(method, methodOopDesc:: constants_offset()));
+    __ movptr(t, Address(method, methodOopDesc:: const_offset()));
+    __ movptr(t, Address(t, constMethodOopDesc::constants_offset()));
     __ movptr(t, Address(t, constantPoolOopDesc::pool_holder_offset_in_bytes()));
     __ movptr(t, Address(t, mirror_offset));
     // copy mirror into activation frame
@@ -1527,7 +1513,6 @@ address AbstractInterpreterGenerator::generate_method_entry(AbstractInterpreter:
     case Interpreter::empty                  : entry_point = ((InterpreterGenerator*)this)->generate_empty_entry();        break;
     case Interpreter::accessor               : entry_point = ((InterpreterGenerator*)this)->generate_accessor_entry();     break;
     case Interpreter::abstract               : entry_point = ((InterpreterGenerator*)this)->generate_abstract_entry();     break;
-    case Interpreter::method_handle          : entry_point = ((InterpreterGenerator*)this)->generate_method_handle_entry(); break;
 
     case Interpreter::java_lang_math_sin     : // fall thru
     case Interpreter::java_lang_math_cos     : // fall thru
@@ -1535,10 +1520,14 @@ address AbstractInterpreterGenerator::generate_method_entry(AbstractInterpreter:
     case Interpreter::java_lang_math_abs     : // fall thru
     case Interpreter::java_lang_math_log     : // fall thru
     case Interpreter::java_lang_math_log10   : // fall thru
-    case Interpreter::java_lang_math_sqrt    : entry_point = ((InterpreterGenerator*)this)->generate_math_entry(kind);     break;
+    case Interpreter::java_lang_math_sqrt    : // fall thru
+    case Interpreter::java_lang_math_pow     : // fall thru
+    case Interpreter::java_lang_math_exp     : entry_point = ((InterpreterGenerator*)this)->generate_math_entry(kind);     break;
     case Interpreter::java_lang_ref_reference_get
                                              : entry_point = ((InterpreterGenerator*)this)->generate_Reference_get_entry(); break;
-    default                                  : ShouldNotReachHere();                                                       break;
+    default:
+      fatal(err_msg("unexpected method kind: %d", kind));
+      break;
   }
 
   if (entry_point) return entry_point;
@@ -1557,7 +1546,9 @@ bool AbstractInterpreter::can_be_compiled(methodHandle m) {
     case Interpreter::java_lang_math_abs     : // fall thru
     case Interpreter::java_lang_math_log     : // fall thru
     case Interpreter::java_lang_math_log10   : // fall thru
-    case Interpreter::java_lang_math_sqrt    :
+    case Interpreter::java_lang_math_sqrt    : // fall thru
+    case Interpreter::java_lang_math_pow     : // fall thru
+    case Interpreter::java_lang_math_exp     :
       return false;
     default:
       return true;
@@ -1634,6 +1625,12 @@ int AbstractInterpreter::layout_activation(methodOop method,
     // interpreter_frame_sender_sp is the original sp of the caller (the unextended_sp)
     // and sender_sp is fp+8
     intptr_t* locals = interpreter_frame->sender_sp() + max_locals - 1;
+
+#ifdef ASSERT
+    if (caller->is_interpreted_frame()) {
+      assert(locals < caller->fp() + frame::interpreter_frame_initial_sp_offset, "bad placement");
+    }
+#endif
 
     interpreter_frame->interpreter_frame_set_locals(locals);
     BasicObjectLock* montop = interpreter_frame->interpreter_frame_monitor_begin();

@@ -29,11 +29,20 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+ * This source code is provided to illustrate the usage of a given feature
+ * or technique and has been deliberately simplified. Additional steps
+ * required for a production-quality application, such as security checks,
+ * input validation and proper error handling, might not be present in
+ * this sample code.
+ */
+
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#ifndef LINUX
+#if !defined(LINUX) && !defined(_ALLBSD_SOURCE)
 #include <procfs.h>
 #endif
 
@@ -53,6 +62,7 @@
 #include <time.h>
 
 #include "jni.h"
+#include "jvm_md.h"
 #include "hprof.h"
 
 int
@@ -76,7 +86,7 @@ md_sleep(unsigned seconds)
 void
 md_init(void)
 {
-#ifdef LINUX
+#if defined(LINUX) || defined(_ALLBSD_SOURCE)
     /* No Hi-Res timer option? */
 #else
     if ( gdata->micro_state_accounting ) {
@@ -238,7 +248,7 @@ md_timeofday(void)
 jlong
 md_get_microsecs(void)
 {
-#ifdef LINUX
+#if defined(LINUX) || defined(_ALLBSD_SOURCE)
     return (jlong)(md_timeofday() * (jlong)1000); /* Milli to micro */
 #else
     return (jlong)(gethrtime()/(hrtime_t)1000); /* Nano seconds to micro seconds */
@@ -256,7 +266,7 @@ md_get_timemillis(void)
 jlong
 md_get_thread_cpu_timemillis(void)
 {
-#ifdef LINUX
+#if defined(LINUX) || defined(_ALLBSD_SOURCE)
     return md_timeofday();
 #else
     return (jlong)(gethrvtime()/1000); /* Nano seconds to milli seconds */
@@ -271,7 +281,7 @@ md_get_prelude_path(char *path, int path_len, char *filename)
     Dl_info dlinfo;
 
     libdir[0] = 0;
-#ifdef LINUX
+#if defined(LINUX) || defined(_ALLBSD_SOURCE)
     addr = (void*)&Agent_OnLoad;
 #else
     /* Just using &Agent_OnLoad will get the first external symbol with
@@ -299,10 +309,13 @@ md_get_prelude_path(char *path, int path_len, char *filename)
         if ( lastSlash != NULL ) {
             *lastSlash = '\0';
         }
+#ifndef __APPLE__
+        // not sure why other platforms have to go up two levels, but on macos we only need up one
         lastSlash = strrchr(libdir, '/');
         if ( lastSlash != NULL ) {
             *lastSlash = '\0';
         }
+#endif /* __APPLE__ */
     }
     (void)snprintf(path, path_len, "%s/%s", libdir, filename);
 }
@@ -362,6 +375,31 @@ md_ntohl(unsigned l)
     return ntohl(l);
 }
 
+static void dll_build_name(char* buffer, size_t buflen,
+                           const char* pname, const char* fname) {
+    // Loosely based on os_solaris.cpp
+
+      char *pathname = (char *)pname;
+      while (strlen(pathname) > 0) {
+          char *p = strchr(pathname, ':');
+          if (p == NULL) {
+              p = pathname + strlen(pathname);
+          }
+          /* check for NULL path */
+          if (p == pathname) {
+              continue;
+          }
+          (void)snprintf(buffer, buflen, "%.*s/lib%s" JNI_LIB_SUFFIX,
+                         (p - pathname), pathname, fname);
+
+          if (access(buffer, F_OK) == 0) {
+            break;
+          }
+          pathname = p + 1;
+          *buffer = '\0';
+      }
+}
+
 /* Create the actual fill filename for a dynamic library.  */
 void
 md_build_library_name(char *holder, int holderlen, char *pname, char *fname)
@@ -371,17 +409,17 @@ md_build_library_name(char *holder, int holderlen, char *pname, char *fname)
     /* Length of options directory location. */
     pnamelen = pname ? strlen(pname) : 0;
 
+    *holder = '\0';
     /* Quietly truncate on buffer overflow.  Should be an error. */
     if (pnamelen + (int)strlen(fname) + 10 > holderlen) {
-        *holder = '\0';
         return;
     }
 
     /* Construct path to library */
     if (pnamelen == 0) {
-        (void)snprintf(holder, holderlen, "lib%s.so", fname);
+        (void)snprintf(holder, holderlen, "lib%s" JNI_LIB_SUFFIX, fname);
     } else {
-        (void)snprintf(holder, holderlen, "%s/lib%s.so", pname, fname);
+      dll_build_name(holder, holderlen, pname, fname);
     }
 }
 

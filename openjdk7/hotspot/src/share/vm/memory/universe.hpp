@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,7 +43,7 @@ class DeferredObjAllocEvent;
 // Common parts of a methodOop cache. This cache safely interacts with
 // the RedefineClasses API.
 //
-class CommonMethodOopCache : public CHeapObj {
+class CommonMethodOopCache : public CHeapObj<mtClass> {
   // We save the klassOop and the idnum of methodOop in order to get
   // the current cached methodOop.
  private:
@@ -109,6 +109,14 @@ struct NarrowOopStruct {
   bool    _use_implicit_null_checks;
 };
 
+enum VerifyOption {
+      VerifyOption_Default = 0,
+
+      // G1
+      VerifyOption_G1UsePrevMarking = VerifyOption_Default,
+      VerifyOption_G1UseNextMarking = VerifyOption_G1UsePrevMarking + 1,
+      VerifyOption_G1UseMarkWord    = VerifyOption_G1UseNextMarking + 1
+};
 
 class Universe: AllStatic {
   // Ugh.  Universe is much too friendly.
@@ -265,7 +273,7 @@ class Universe: AllStatic {
   }
 
   static klassOop typeArrayKlassObj(BasicType t) {
-    assert((uint)t < T_VOID+1, "range check");
+    assert((uint)t < T_VOID+1, err_msg("range check for type: %s", type2name(t)));
     assert(_typeArrayKlassObjs[t] != NULL, "domain check");
     return _typeArrayKlassObjs[t];
   }
@@ -365,6 +373,11 @@ class Universe: AllStatic {
     ZeroBasedNarrowOop = 1,
     HeapBasedNarrowOop = 2
   };
+
+  static const char* narrow_oop_mode_to_string(NARROW_OOP_MODE mode);
+
+  static NARROW_OOP_MODE narrow_oop_mode();
+
   static char* preferred_heap_base(size_t heap_size, NARROW_OOP_MODE mode);
 
   // Historic gc information
@@ -404,15 +417,26 @@ class Universe: AllStatic {
 
   // Debugging
   static bool verify_in_progress() { return _verify_in_progress; }
-  static void verify(bool allow_dirty = true, bool silent = false, bool option = true);
-  static int  verify_count()                  { return _verify_count; }
+  static void verify(bool silent, VerifyOption option);
+  static void verify(bool silent) {
+    verify(silent, VerifyOption_Default /* option */);
+  }
+  static void verify() {
+    verify(false /* silent */);
+  }
+
+  static int  verify_count()       { return _verify_count; }
+  // The default behavior is to call print_on() on gclog_or_tty.
   static void print();
-  static void print_on(outputStream* st);
+  // The extended parameter determines which method on the heap will
+  // be called: print_on() (extended == false) or print_extended_on()
+  // (extended == true).
+  static void print_on(outputStream* st, bool extended = false);
   static void print_heap_at_SIGBREAK();
   static void print_heap_before_gc() { print_heap_before_gc(gclog_or_tty); }
   static void print_heap_after_gc()  { print_heap_after_gc(gclog_or_tty); }
-  static void print_heap_before_gc(outputStream* st);
-  static void print_heap_after_gc(outputStream* st);
+  static void print_heap_before_gc(outputStream* st, bool ignore_extended = false);
+  static void print_heap_after_gc(outputStream* st, bool ignore_extended = false);
 
   // Change the number of dummy objects kept reachable by the full gc dummy
   // array; this should trigger relocation in a sliding compaction collector.
@@ -430,6 +454,7 @@ class Universe: AllStatic {
 
   // Flushing and deoptimization
   static void flush_dependents_on(instanceKlassHandle dependee);
+  static void flush_dependents_on(Handle call_site, Handle method_handle);
 #ifdef HOTSWAP
   // Flushing and deoptimization in case of evolution
   static void flush_evol_dependents_on(instanceKlassHandle dependee);
@@ -441,7 +466,7 @@ class Universe: AllStatic {
   static int base_vtable_size()               { return _base_vtable_size; }
 };
 
-class DeferredObjAllocEvent : public CHeapObj {
+class DeferredObjAllocEvent : public CHeapObj<mtInternal> {
   private:
     oop    _oop;
     size_t _bytesize;

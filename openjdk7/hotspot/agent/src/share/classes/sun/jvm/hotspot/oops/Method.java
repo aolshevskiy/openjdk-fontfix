@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,7 +48,7 @@ public class Method extends Oop {
   private static synchronized void initialize(TypeDataBase db) throws WrongTypeException {
     Type type                  = db.lookupType("methodOopDesc");
     constMethod                = new OopField(type.getOopField("_constMethod"), 0);
-    constants                  = new OopField(type.getOopField("_constants"), 0);
+    methodData                 = new OopField(type.getOopField("_method_data"), 0);
     methodSize                 = new CIntField(type.getCIntegerField("_method_size"), 0);
     maxStack                   = new CIntField(type.getCIntegerField("_max_stack"), 0);
     maxLocals                  = new CIntField(type.getCIntegerField("_max_locals"), 0);
@@ -58,8 +58,12 @@ public class Method extends Oop {
     vtableIndex                = new CIntField(type.getCIntegerField("_vtable_index"), 0);
     if (!VM.getVM().isCore()) {
       invocationCounter        = new CIntField(type.getCIntegerField("_invocation_counter"), 0);
+      backedgeCounter          = new CIntField(type.getCIntegerField("_backedge_counter"), 0);
     }
     bytecodeOffset = type.getSize();
+
+    interpreterThrowoutCountField = new CIntField(type.getCIntegerField("_interpreter_throwout_count"), 0);
+    interpreterInvocationCountField = new CIntField(type.getCIntegerField("_interpreter_invocation_count"), 0);
 
     /*
     interpreterEntry           = type.getAddressField("_interpreter_entry");
@@ -78,7 +82,7 @@ public class Method extends Oop {
 
   // Fields
   private static OopField  constMethod;
-  private static OopField  constants;
+  private static OopField  methodData;
   private static CIntField methodSize;
   private static CIntField maxStack;
   private static CIntField maxLocals;
@@ -86,9 +90,13 @@ public class Method extends Oop {
   private static CIntField accessFlags;
   private static CIntField vtableIndex;
   private static CIntField invocationCounter;
+  private static CIntField backedgeCounter;
   private static long      bytecodeOffset;
 
   private static AddressField       code;
+
+  private static CIntField interpreterThrowoutCountField;
+  private static CIntField interpreterInvocationCountField;
 
   // constant method names - <init>, <clinit>
   // Initialized lazily to avoid initialization ordering dependencies between Method and SymbolTable
@@ -115,8 +123,10 @@ public class Method extends Oop {
 
   // Accessors for declared fields
   public ConstMethod  getConstMethod()                { return (ConstMethod)  constMethod.getValue(this);       }
-  public ConstantPool getConstants()                  { return (ConstantPool) constants.getValue(this);         }
-  public TypeArray    getExceptionTable()             { return getConstMethod().getExceptionTable();            }
+  public ConstantPool getConstants()                  {
+    return getConstMethod().getConstants();
+  }
+  public MethodData   getMethodData()                 { return (MethodData) methodData.getValue(this);          }
   /** WARNING: this is in words, not useful in this system; use getObjectSize() instead */
   public long         getMethodSize()                 { return                methodSize.getValue(this);        }
   public long         getMaxStack()                   { return                maxStack.getValue(this);          }
@@ -133,6 +143,12 @@ public class Method extends Oop {
       Assert.that(!VM.getVM().isCore(), "must not be used in core build");
     }
     return invocationCounter.getValue(this);
+  }
+  public long         getBackedgeCounter()          {
+    if (Assert.ASSERTS_ENABLED) {
+      Assert.that(!VM.getVM().isCore(), "must not be used in core build");
+    }
+    return backedgeCounter.getValue(this);
   }
 
   // get associated compiled native method, if available, else return null.
@@ -180,10 +196,22 @@ public class Method extends Oop {
     return getConstMethod().getBytecodeShortArg(bci);
   }
 
+  /** Fetches a 16-bit native ordered value from the
+      bytecode stream */
+  public short getNativeShortArg(int bci) {
+    return getConstMethod().getNativeShortArg(bci);
+  }
+
   /** Fetches a 32-bit big-endian ("Java ordered") value from the
       bytecode stream */
   public int getBytecodeIntArg(int bci) {
     return getConstMethod().getBytecodeIntArg(bci);
+  }
+
+  /** Fetches a 32-bit native ordered value from the
+      bytecode stream */
+  public int getNativeIntArg(int bci) {
+    return getConstMethod().getNativeIntArg(bci);
   }
 
   public byte[] getByteCode() {
@@ -252,7 +280,6 @@ public class Method extends Oop {
     super.iterateFields(visitor, doVMFields);
     if (doVMFields) {
       visitor.doOop(constMethod, true);
-      visitor.doOop(constants, true);
       visitor.doCInt(methodSize, true);
       visitor.doCInt(maxStack, true);
       visitor.doCInt(maxLocals, true);
@@ -300,6 +327,14 @@ public class Method extends Oop {
     return null;
   }
 
+  public boolean hasExceptionTable() {
+    return getConstMethod().hasExceptionTable();
+  }
+
+  public ExceptionTableElement[] getExceptionTable() {
+    return getConstMethod().getExceptionTable();
+  }
+
   public boolean hasCheckedExceptions() {
     return getConstMethod().hasCheckedExceptions();
   }
@@ -320,5 +355,12 @@ public class Method extends Oop {
     new SignatureConverter(getSignature(), buf).iterateParameters();
     buf.append(")");
     return buf.toString().replace('/', '.');
+  }
+  public int interpreterThrowoutCount() {
+    return (int) interpreterThrowoutCountField.getValue(getHandle());
+  }
+
+  public int interpreterInvocationCount() {
+    return (int) interpreterInvocationCountField.getValue(getHandle());
   }
 }

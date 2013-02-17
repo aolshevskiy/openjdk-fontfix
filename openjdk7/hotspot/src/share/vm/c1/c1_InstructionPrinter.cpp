@@ -137,12 +137,16 @@ void InstructionPrinter::print_object(Value obj) {
       ciMethod* m = (ciMethod*)value;
       output()->print("<method %s.%s>", m->holder()->name()->as_utf8(), m->name()->as_utf8());
     } else {
-      output()->print("<object " PTR_FORMAT ">", value->constant_encoding());
+      output()->print("<object " PTR_FORMAT " klass=", value->constant_encoding());
+      print_klass(value->klass());
+      output()->print(">");
     }
   } else if (type->as_InstanceConstant() != NULL) {
     ciInstance* value = type->as_InstanceConstant()->value();
     if (value->is_loaded()) {
-      output()->print("<instance " PTR_FORMAT ">", value->constant_encoding());
+      output()->print("<instance " PTR_FORMAT " klass=", value->constant_encoding());
+      print_klass(value->klass());
+      output()->print(">");
     } else {
       output()->print("<unloaded instance " PTR_FORMAT ">", value);
     }
@@ -450,6 +454,14 @@ void InstructionPrinter::do_NullCheck(NullCheck* x) {
   if (!x->can_trap()) {
     output()->print(" (eliminated)");
   }
+}
+
+
+void InstructionPrinter::do_TypeCast(TypeCast* x) {
+  output()->print("type_cast(");
+  print_value(x->obj());
+  output()->print(") ");
+  print_klass(x->declared_type()->klass());
 }
 
 
@@ -816,6 +828,12 @@ void InstructionPrinter::do_UnsafePutObject(UnsafePutObject* x) {
   output()->put(')');
 }
 
+void InstructionPrinter::do_UnsafeGetAndSetObject(UnsafeGetAndSetObject* x) {
+  print_unsafe_object_op(x, x->is_add()?"UnsafeGetAndSetObject (add)":"UnsafeGetAndSetObject");
+  output()->print(", value ");
+  print_value(x->value());
+  output()->put(')');
+}
 
 void InstructionPrinter::do_UnsafePrefetchRead(UnsafePrefetchRead* x) {
   print_unsafe_object_op(x, "UnsafePrefetchRead");
@@ -853,6 +871,22 @@ void InstructionPrinter::do_RuntimeCall(RuntimeCall* x) {
     print_value(x->argument_at(i));
   }
   output()->put(')');
+}
+
+void InstructionPrinter::do_MemBar(MemBar* x) {
+  if (os::is_MP()) {
+    LIR_Code code = x->code();
+    switch (code) {
+      case lir_membar_acquire   : output()->print("membar_acquire"); break;
+      case lir_membar_release   : output()->print("membar_release"); break;
+      case lir_membar           : output()->print("membar"); break;
+      case lir_membar_loadload  : output()->print("membar_loadload"); break;
+      case lir_membar_storestore: output()->print("membar_storestore"); break;
+      case lir_membar_loadstore : output()->print("membar_loadstore"); break;
+      case lir_membar_storeload : output()->print("membar_storeload"); break;
+      default                   : ShouldNotReachHere(); break;
+    }
+  }
 }
 
 #endif // PRODUCT

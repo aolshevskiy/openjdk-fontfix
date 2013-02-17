@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,6 +29,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+ * This source code is provided to illustrate the usage of a given feature
+ * or technique and has been deliberately simplified. Additional steps
+ * required for a production-quality application, such as security checks,
+ * input validation and proper error handling, might not be present in
+ * this sample code.
+ */
+
+
 /* Primary hprof #include file, should be included by most if not
  *    all hprof source files. Gives access to the global data structure
  *    and all global macros, and everything declared in the #include
@@ -56,6 +65,7 @@
 #include "jni.h"
 #include "jvmti.h"
 #include "classfile_constants.h"
+#include "jvm_md.h"
 
 #ifndef SKIP_NPT
 #include "npt.h"   /* To get NptEnv for doing character conversions */

@@ -36,6 +36,9 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
+#endif
 
 //
 // Prioritized queue of VM operations.
@@ -43,7 +46,7 @@
 // Encapsulates both queue management and
 // and priority policy
 //
-class VMOperationQueue : public CHeapObj {
+class VMOperationQueue : public CHeapObj<mtInternal> {
  private:
   enum Priorities {
      SafepointPriority, // Highest priority (operation executed at a safepoint)

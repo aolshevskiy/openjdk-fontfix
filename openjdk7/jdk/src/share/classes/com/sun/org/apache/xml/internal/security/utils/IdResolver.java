@@ -223,7 +223,7 @@ public class IdResolver {
         } while (sibling==null  && parentNode!=null) {
                         sibling=parentNode.getNextSibling();
                         parentNode=parentNode.getParentNode();
-                        if (!(parentNode instanceof Element)) {
+                        if (parentNode != null && parentNode.getNodeType() != Node.ELEMENT_NODE) {
                                 parentNode=null;
                         }
                 }
@@ -248,6 +248,8 @@ public class IdResolver {
                     int index=s==null ? elementIndex : names.indexOf(n.getNamespaceURI());
                     index=(index<0) ? namesLength : index;
                     String name=n.getLocalName();
+                    if (name == null)
+                        name = n.getName();
                     if (name.length()>2)
                         continue;
                     String value=n.getNodeValue();

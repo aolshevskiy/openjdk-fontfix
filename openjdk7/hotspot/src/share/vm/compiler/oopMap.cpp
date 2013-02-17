@@ -599,7 +599,7 @@ void OopMapSet::print_on(outputStream* st) const {
 
 #ifdef COMPILER2
 
-class DerivedPointerEntry : public CHeapObj {
+class DerivedPointerEntry : public CHeapObj<mtCompiler> {
  private:
   oop*     _location; // Location of derived pointer (also pointing to the base)
   intptr_t _offset;   // Offset from base pointer
@@ -621,7 +621,7 @@ void DerivedPointerTable::clear() {
   assert (!_active, "should not be active");
   assert(_list == NULL || _list->length() == 0, "table not empty");
   if (_list == NULL) {
-    _list = new (ResourceObj::C_HEAP) GrowableArray<DerivedPointerEntry*>(10, true); // Allocated on C heap
+    _list = new (ResourceObj::C_HEAP, mtCompiler) GrowableArray<DerivedPointerEntry*>(10, true); // Allocated on C heap
   }
   _active = true;
 }
@@ -638,7 +638,9 @@ void DerivedPointerTable::add(oop *derived_loc, oop *base_loc) {
     assert(*derived_loc != (oop)base_loc, "location already added");
     assert(_list != NULL, "list must exist");
     intptr_t offset = value_of_loc(derived_loc) - value_of_loc(base_loc);
-    assert(offset >= -1000000, "wrong derived pointer info");
+    // This assert is invalid because derived pointers can be
+    // arbitrarily far away from their base.
+    // assert(offset >= -1000000, "wrong derived pointer info");
 
     if (TraceDerivedPointers) {
       tty->print_cr(

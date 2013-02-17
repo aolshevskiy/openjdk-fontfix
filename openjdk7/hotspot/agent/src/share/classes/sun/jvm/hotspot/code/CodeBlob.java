@@ -93,7 +93,6 @@ public class CodeBlob extends VMObject {
   public boolean isUncommonTrapStub()   { return false; }
   public boolean isExceptionStub()      { return false; }
   public boolean isSafepointStub()      { return false; }
-  public boolean isRicochetBlob()       { return false; }
   public boolean isAdapterBlob()        { return false; }
 
   // Fine grain nmethod support: isNmethod() == isJavaMethod() || isNativeMethod() || isOSRMethod()
@@ -101,6 +100,11 @@ public class CodeBlob extends VMObject {
   public boolean isNativeMethod()       { return false; }
   /** On-Stack Replacement method */
   public boolean isOSRMethod()          { return false; }
+
+  public NMethod asNMethodOrNull() {
+    if (isNMethod()) return (NMethod)this;
+    return null;
+  }
 
   // Boundaries
   public Address headerBegin() {
@@ -195,7 +199,7 @@ public class CodeBlob extends VMObject {
   }
 
   // Returns true, if the next frame is responsible for GC'ing oops passed as arguments
-  public boolean callerMustGCArguments(JavaThread thread) { return false; }
+  public boolean callerMustGCArguments() { return false; }
 
   public String getName() {
     return CStringUtilities.getString(nameField.getValue(addr));

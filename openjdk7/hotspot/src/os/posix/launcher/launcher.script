@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/bin/sh
 
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2011, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,7 @@
 # inside Emacs".
 #
 # If the first parameter is "-dbx", HotSpot will be launched inside dbx.
-# 
+#
 # If the first parameter is "-valgrind", HotSpot will be launched
 # inside Valgrind (http://valgrind.kde.org) using the Memcheck skin,
 # and with memory leak detection enabled.  This currently (2005jan19)
@@ -45,19 +45,19 @@
 
 # This is the name of the gdb binary to use
 if [ ! "$GDB" ]
-then 
+then
     GDB=gdb
 fi
 
 # This is the name of the gdb binary to use
 if [ ! "$DBX" ]
-then 
+then
     DBX=dbx
 fi
 
 # This is the name of the Valgrind binary to use
 if [ ! "$VALGRIND" ]
-then 
+then
     VALGRIND=valgrind
 fi
 
@@ -69,8 +69,8 @@ EMACS=emacs
 #
 
 # Make sure the paths are fully specified, i.e. they must begin with /.
-SCRIPT=$(cd $(dirname $0) && pwd)/$(basename $0)
-RUNDIR=$(pwd)
+REL_MYDIR=`dirname $0`
+MYDIR=`cd $REL_MYDIR && pwd`
 
 # Look whether the user wants to run inside gdb
 case "$1" in
@@ -95,13 +95,10 @@ case "$1" in
         ;;
 esac
 
-# Find out the absolute path to this script
-MYDIR=$(cd $(dirname $SCRIPT) && pwd)
-
 JDK=
 if [ "${ALT_JAVA_HOME}" = "" ]; then
-    source ${MYDIR}/jdkpath.sh
-else 
+    . ${MYDIR}/jdkpath.sh
+else
     JDK=${ALT_JAVA_HOME%%/jre};
 fi
 
@@ -117,24 +114,33 @@ fi
 # any.
 JRE=$JDK/jre
 JAVA_HOME=$JDK
+export JAVA_HOME
+
 ARCH=@@LIBARCH@@
-
-# Find out the absolute path to this script
-MYDIR=$(cd $(dirname $SCRIPT) && pwd)
-
 SBP=${MYDIR}:${JRE}/lib/${ARCH}
 
-# Set up a suitable LD_LIBRARY_PATH
 
-if [ -z "$LD_LIBRARY_PATH" ]
+# Set up a suitable LD_LIBRARY_PATH or DYLD_LIBRARY_PATH
+OS=`uname -s`
+if [ "${OS}" = "Darwin" ]
 then
-    LD_LIBRARY_PATH="$SBP"
+    if [ -z "$DYLD_LIBRARY_PATH" ]
+    then
+        DYLD_LIBRARY_PATH="$SBP"
+    else
+        DYLD_LIBRARY_PATH="$SBP:$DYLD_LIBRARY_PATH"
+    fi
+    export DYLD_LIBRARY_PATH
 else
-    LD_LIBRARY_PATH="$SBP:$LD_LIBRARY_PATH"
+    # not 'Darwin'
+    if [ -z "$LD_LIBRARY_PATH" ]
+    then
+        LD_LIBRARY_PATH="$SBP"
+    else
+        LD_LIBRARY_PATH="$SBP:$LD_LIBRARY_PATH"
+    fi
+    export LD_LIBRARY_PATH
 fi
-
-export LD_LIBRARY_PATH
-export JAVA_HOME
 
 JPARMS="$@ $JAVA_ARGS";
 
@@ -146,7 +152,7 @@ if [ ! -x $LAUNCHER ] ; then
 fi
 
 GDBSRCDIR=$MYDIR
-BASEDIR=$(cd $MYDIR/../../.. && pwd)
+BASEDIR=`cd $MYDIR/../../.. && pwd`
 
 init_gdb() {
 # Create a gdb script in case we should run inside gdb
@@ -179,7 +185,7 @@ case "$MODE" in
 	init_gdb
 # First find out what emacs version we're using, so that we can
 # use the new pretty GDB mode if emacs -version >= 22.1
-	case $($EMACS -version 2> /dev/null) in
+	case `$EMACS -version 2> /dev/null` in
 	    *GNU\ Emacs\ 2[23]*)
 	    emacs_gud_cmd="gdba"
 	    emacs_gud_args="--annotate=3"

@@ -109,6 +109,10 @@ public class PropertyDescriptor extends FeatureDescriptor {
         if (writeMethodName != null && getWriteMethod() == null) {
             throw new IntrospectionException("Method not found: " + writeMethodName);
         }
+        boundInitialization(beanClass);
+    }
+
+    private void boundInitialization(Class<?> beanClass) {
         // If this class or one of its base classes allow PropertyChangeListener,
         // then we assume that any properties we discover are "bound".
         // See Introspector.getTargetPropertyInfo() method.
@@ -159,6 +163,7 @@ public class PropertyDescriptor extends FeatureDescriptor {
         setReadMethod(read);
         setWriteMethod(write);
         this.baseName = base;
+        boundInitialization(bean);
     }
 
     /**
@@ -210,12 +215,13 @@ public class PropertyDescriptor extends FeatureDescriptor {
                 // The read method was explicitly set to null.
                 return null;
             }
+            String nextMethodName = Introspector.GET_PREFIX + getBaseName();
             if (readMethodName == null) {
                 Class type = getPropertyType0();
                 if (type == boolean.class || type == null) {
                     readMethodName = Introspector.IS_PREFIX + getBaseName();
                 } else {
-                    readMethodName = Introspector.GET_PREFIX + getBaseName();
+                    readMethodName = nextMethodName;
                 }
             }
 
@@ -225,8 +231,8 @@ public class PropertyDescriptor extends FeatureDescriptor {
             // methods.  If an "is" method exists, this is the official
             // reader method so look for this one first.
             readMethod = Introspector.findMethod(cls, readMethodName, 0);
-            if (readMethod == null) {
-                readMethodName = Introspector.GET_PREFIX + getBaseName();
+            if ((readMethod == null) && !readMethodName.equals(nextMethodName)) {
+                readMethodName = nextMethodName;
                 readMethod = Introspector.findMethod(cls, readMethodName, 0);
             }
             try {
@@ -562,7 +568,7 @@ public class PropertyDescriptor extends FeatureDescriptor {
 
         // Normally give priority to y's readMethod.
         try {
-            if (yr != null && yr.getDeclaringClass() == getClass0()) {
+            if (isAssignable(xr, yr)) {
                 setReadMethod(yr);
             } else {
                 setReadMethod(xr);
@@ -590,7 +596,7 @@ public class PropertyDescriptor extends FeatureDescriptor {
         Method yw = y.getWriteMethod();
 
         try {
-            if (yw != null && yw.getDeclaringClass() == getClass0()) {
+            if (yw != null) {
                 setWriteMethod(yw);
             } else {
                 setWriteMethod(xw);
@@ -629,6 +635,16 @@ public class PropertyDescriptor extends FeatureDescriptor {
         constrained = old.constrained;
     }
 
+    void updateGenericsFor(Class<?> type) {
+        setClass0(type);
+        try {
+            setPropertyType(findPropertyType(getReadMethod0(), getWriteMethod0()));
+        }
+        catch (IntrospectionException exception) {
+            setPropertyType(null);
+        }
+    }
+
     /**
      * Returns the property type that corresponds to the read and write method.
      * The type precedence is given to the readMethod.
@@ -659,7 +675,7 @@ public class PropertyDescriptor extends FeatureDescriptor {
                     throw new IntrospectionException("bad write method arg count: "
                                                      + writeMethod);
                 }
-                if (propertyType != null && propertyType != params[0]) {
+                if (propertyType != null && !params[0].isAssignableFrom(propertyType)) {
                     throw new IntrospectionException("type mismatch between read and write methods");
                 }
                 propertyType = params[0];
@@ -715,5 +731,38 @@ public class PropertyDescriptor extends FeatureDescriptor {
         appendTo(sb, "propertyType", this.propertyTypeRef);
         appendTo(sb, "readMethod", this.readMethodRef);
         appendTo(sb, "writeMethod", this.writeMethodRef);
+    }
+
+    private boolean isAssignable(Method m1, Method m2) {
+        if (m1 == null) {
+            return true; // choose second method
+        }
+        if (m2 == null) {
+            return false; // choose first method
+        }
+        if (!m1.getName().equals(m2.getName())) {
+            return true; // choose second method by default
+        }
+        Class<?> type1 = m1.getDeclaringClass();
+        Class<?> type2 = m2.getDeclaringClass();
+        if (!type1.isAssignableFrom(type2)) {
+            return false; // choose first method: it declared later
+        }
+        type1 = getReturnType(getClass0(), m1);
+        type2 = getReturnType(getClass0(), m2);
+        if (!type1.isAssignableFrom(type2)) {
+            return false; // choose first method: it overrides return type
+        }
+        Class<?>[] args1 = getParameterTypes(getClass0(), m1);
+        Class<?>[] args2 = getParameterTypes(getClass0(), m2);
+        if (args1.length != args2.length) {
+            return true; // choose second method by default
+        }
+        for (int i = 0; i < args1.length; i++) {
+            if (!args1[i].isAssignableFrom(args2[i])) {
+                return false; // choose first method: it overrides parameter
+            }
+        }
+        return true; // choose second method
     }
 }

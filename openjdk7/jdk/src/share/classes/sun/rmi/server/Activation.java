@@ -43,6 +43,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketException;
+import java.nio.file.Files;
 import java.nio.channels.Channel;
 import java.nio.channels.ServerSocketChannel;
 import java.rmi.AccessException;
@@ -138,7 +139,6 @@ public class Activation implements Serializable {
 
     /** indicate compatibility with JDK 1.2 version of class */
     private static final long serialVersionUID = 2921265612698155191L;
-
     private static final byte MAJOR_VERSION = 1;
     private static final byte MINOR_VERSION = 0;
 
@@ -298,6 +298,7 @@ public class Activation implements Serializable {
     private static class SystemRegistryImpl extends RegistryImpl {
 
         private static final String NAME = ActivationSystem.class.getName();
+        private static final long serialVersionUID = 4877330021609408794L;
         private final ActivationSystem systemStub;
 
         SystemRegistryImpl(int port,
@@ -804,9 +805,8 @@ public class Activation implements Serializable {
         ActivationGroupDesc desc = null;
         ActivationGroupID groupID = null;
         long incarnation = 0;
-        Map<ActivationID,ObjectEntry> objects =
-            new HashMap<ActivationID,ObjectEntry>();
-        Set<ActivationID> restartSet = new HashSet<ActivationID>();
+        Map<ActivationID,ObjectEntry> objects = new HashMap<>();
+        Set<ActivationID> restartSet = new HashSet<>();
 
         transient ActivationInstantiator group = null;
         transient int status = NORMAL;
@@ -1057,6 +1057,11 @@ public class Activation implements Serializable {
             }
         }
 
+       /*
+        * Fallthrough from TERMINATE to TERMINATING
+        * is intentional
+        */
+        @SuppressWarnings("fallthrough")
         private void await() {
             while (true) {
                 switch (status) {
@@ -1228,14 +1233,13 @@ public class Activation implements Serializable {
                     PipeWriter.plugTogetherPair
                         (child.getInputStream(), System.out,
                          child.getErrorStream(), System.err);
-
-                    MarshalOutputStream out =
-                        new MarshalOutputStream(child.getOutputStream());
-                    out.writeObject(id);
-                    out.writeObject(desc);
-                    out.writeLong(incarnation);
-                    out.flush();
-                    out.close();
+                    try (MarshalOutputStream out =
+                            new MarshalOutputStream(child.getOutputStream())) {
+                        out.writeObject(id);
+                        out.writeObject(desc);
+                        out.writeLong(incarnation);
+                        out.flush();
+                    }
 
 
                 } catch (IOException e) {
@@ -1352,7 +1356,7 @@ public class Activation implements Serializable {
         cmdenv = desc.getCommandEnvironment();
 
         // argv is the literal command to exec
-        List<String> argv = new ArrayList<String>();
+        List<String> argv = new ArrayList<>();
 
         // Command name/path
         argv.add((cmdenv != null && cmdenv.getCommandPath() != null)
@@ -1937,7 +1941,7 @@ public class Activation implements Serializable {
                     new PrivilegedExceptionAction<Void>() {
                         public Void run() throws IOException {
                             File file =
-                                File.createTempFile("rmid-err", null, null);
+                                Files.createTempFile("rmid-err", null).toFile();
                             PrintStream errStream =
                                 new PrintStream(new FileOutputStream(file));
                             System.setErr(errStream);
@@ -1957,7 +1961,7 @@ public class Activation implements Serializable {
             }
 
             String log = null;
-            List<String> childArgs = new ArrayList<String>();
+            List<String> childArgs = new ArrayList<>();
 
             /*
              * Parse arguments
@@ -2031,8 +2035,7 @@ public class Activation implements Serializable {
                 }
 
                 try {
-                    Class<?> execPolicyClass =
-                        RMIClassLoader.loadClass(execPolicyClassName);
+                    Class<?> execPolicyClass = getRMIClass(execPolicyClassName);
                     execPolicy = execPolicyClass.newInstance();
                     execPolicyMethod =
                         execPolicyClass.getMethod("checkExecCommand",
@@ -2123,6 +2126,10 @@ public class Activation implements Serializable {
         }
     }
 
+    @SuppressWarnings("deprecation")
+    private static Class<?> getRMIClass(String execPolicyClassName) throws Exception  {
+        return RMIClassLoader.loadClass(execPolicyClassName);
+    }
     /*
      * Dijkstra semaphore operations to limit the number of subprocesses
      * rmid attempts to make at once.

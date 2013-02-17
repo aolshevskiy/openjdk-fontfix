@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,987 +31,562 @@
 
 #ifdef PRODUCT
 #define BLOCK_COMMENT(str) /* nothing */
+#define STOP(error) stop(error)
 #else
 #define BLOCK_COMMENT(str) __ block_comment(str)
+#define STOP(error) block_comment(error); __ stop(error)
 #endif
 
 #define BIND(label) bind(label); BLOCK_COMMENT(#label ":")
 
-address MethodHandleEntry::start_compiled_entry(MacroAssembler* _masm,
-                                                address interpreted_entry) {
-  // Just before the actual machine code entry point, allocate space
-  // for a MethodHandleEntry::Data record, so that we can manage everything
-  // from one base pointer.
-  __ align(wordSize);
-  address target = __ pc() + sizeof(Data);
-  while (__ pc() < target) {
-    __ nop();
-    __ align(wordSize);
-  }
-
-  MethodHandleEntry* me = (MethodHandleEntry*) __ pc();
-  me->set_end_address(__ pc());         // set a temporary end_address
-  me->set_from_interpreted_entry(interpreted_entry);
-  me->set_type_checking_entry(NULL);
-
-  return (address) me;
+// Workaround for C++ overloading nastiness on '0' for RegisterOrConstant.
+static RegisterOrConstant constant(int value) {
+  return RegisterOrConstant(value);
 }
 
-MethodHandleEntry* MethodHandleEntry::finish_compiled_entry(MacroAssembler* _masm,
-                                                address start_addr) {
-  MethodHandleEntry* me = (MethodHandleEntry*) start_addr;
-  assert(me->end_address() == start_addr, "valid ME");
+void MethodHandles::load_klass_from_Class(MacroAssembler* _masm, Register klass_reg, Register temp_reg, Register temp2_reg) {
+  if (VerifyMethodHandles)
+    verify_klass(_masm, klass_reg, SystemDictionaryHandles::Class_klass(), temp_reg, temp2_reg,
+                 "MH argument is a Class");
+  __ load_heap_oop(Address(klass_reg, java_lang_Class::klass_offset_in_bytes()), klass_reg);
+}
 
-  // Fill in the real end_address:
-  __ align(wordSize);
-  me->set_end_address(__ pc());
+#ifdef ASSERT
+static int check_nonzero(const char* xname, int x) {
+  assert(x != 0, err_msg("%s should be nonzero", xname));
+  return x;
+}
+#define NONZERO(x) check_nonzero(#x, x)
+#else //ASSERT
+#define NONZERO(x) (x)
+#endif //ASSERT
 
-  return me;
+#ifdef ASSERT
+void MethodHandles::verify_klass(MacroAssembler* _masm,
+                                 Register obj_reg, KlassHandle klass,
+                                 Register temp_reg, Register temp2_reg,
+                                 const char* error_message) {
+  oop* klass_addr = klass.raw_value();
+  assert(klass_addr >= SystemDictionaryHandles::Object_klass().raw_value() &&
+         klass_addr <= SystemDictionaryHandles::Long_klass().raw_value(),
+         "must be one of the SystemDictionaryHandles");
+  bool did_save = false;
+  if (temp_reg == noreg || temp2_reg == noreg) {
+    temp_reg = L1;
+    temp2_reg = L2;
+    __ save_frame_and_mov(0, obj_reg, L0);
+    obj_reg = L0;
+    did_save = true;
+  }
+  Label L_ok, L_bad;
+  BLOCK_COMMENT("verify_klass {");
+  __ verify_oop(obj_reg);
+  __ br_null_short(obj_reg, Assembler::pn, L_bad);
+  __ load_klass(obj_reg, temp_reg);
+  __ set(ExternalAddress(klass_addr), temp2_reg);
+  __ ld_ptr(Address(temp2_reg, 0), temp2_reg);
+  __ cmp_and_brx_short(temp_reg, temp2_reg, Assembler::equal, Assembler::pt, L_ok);
+  intptr_t super_check_offset = klass->super_check_offset();
+  __ ld_ptr(Address(temp_reg, super_check_offset), temp_reg);
+  __ set(ExternalAddress(klass_addr), temp2_reg);
+  __ ld_ptr(Address(temp2_reg, 0), temp2_reg);
+  __ cmp_and_brx_short(temp_reg, temp2_reg, Assembler::equal, Assembler::pt, L_ok);
+  __ BIND(L_bad);
+  if (did_save)  __ restore();
+  __ STOP(error_message);
+  __ BIND(L_ok);
+  if (did_save)  __ restore();
+  BLOCK_COMMENT("} verify_klass");
+}
+
+void MethodHandles::verify_ref_kind(MacroAssembler* _masm, int ref_kind, Register member_reg, Register temp) {
+  Label L;
+  BLOCK_COMMENT("verify_ref_kind {");
+  __ lduw(Address(member_reg, NONZERO(java_lang_invoke_MemberName::flags_offset_in_bytes())), temp);
+  __ srl( temp, java_lang_invoke_MemberName::MN_REFERENCE_KIND_SHIFT, temp);
+  __ and3(temp, java_lang_invoke_MemberName::MN_REFERENCE_KIND_MASK,  temp);
+  __ cmp_and_br_short(temp, ref_kind, Assembler::equal, Assembler::pt, L);
+  { char* buf = NEW_C_HEAP_ARRAY(char, 100, mtInternal);
+    jio_snprintf(buf, 100, "verify_ref_kind expected %x", ref_kind);
+    if (ref_kind == JVM_REF_invokeVirtual ||
+        ref_kind == JVM_REF_invokeSpecial)
+      // could do this for all ref_kinds, but would explode assembly code size
+      trace_method_handle(_masm, buf);
+    __ STOP(buf);
+  }
+  BLOCK_COMMENT("} verify_ref_kind");
+  __ bind(L);
+}
+
+#endif // ASSERT
+
+void MethodHandles::jump_from_method_handle(MacroAssembler* _masm, Register method, Register target, Register temp,
+                                            bool for_compiler_entry) {
+  assert(method == G5_method, "interpreter calling convention");
+  assert_different_registers(method, target, temp);
+  __ verify_oop(method);
+
+  if (!for_compiler_entry && JvmtiExport::can_post_interpreter_events()) {
+    Label run_compiled_code;
+    // JVMTI events, such as single-stepping, are implemented partly by avoiding running
+    // compiled code in threads for which the event is enabled.  Check here for
+    // interp_only_mode if these events CAN be enabled.
+    __ verify_thread();
+    const Address interp_only(G2_thread, JavaThread::interp_only_mode_offset());
+    __ ld(interp_only, temp);
+    __ cmp_and_br_short(temp, 0, Assembler::zero, Assembler::pt, run_compiled_code);
+    __ ld_ptr(G5_method, in_bytes(methodOopDesc::interpreter_entry_offset()), target);
+    __ jmp(target, 0);
+    __ delayed()->nop();
+    __ BIND(run_compiled_code);
+    // Note: we could fill some delay slots here, but
+    // it doesn't matter, since this is interpreter code.
+  }
+
+  const ByteSize entry_offset = for_compiler_entry ? methodOopDesc::from_compiled_offset() :
+                                                     methodOopDesc::from_interpreted_offset();
+  __ ld_ptr(G5_method, in_bytes(entry_offset), target);
+  __ jmp(target, 0);
+  __ delayed()->nop();
+}
+
+void MethodHandles::jump_to_lambda_form(MacroAssembler* _masm,
+                                        Register recv, Register method_temp,
+                                        Register temp2, Register temp3,
+                                        bool for_compiler_entry) {
+  BLOCK_COMMENT("jump_to_lambda_form {");
+  // This is the initial entry point of a lazy method handle.
+  // After type checking, it picks up the invoker from the LambdaForm.
+  assert_different_registers(recv, method_temp, temp2);  // temp3 is only passed on
+  assert(method_temp == G5_method, "required register for loading method");
+
+  //NOT_PRODUCT({ FlagSetting fs(TraceMethodHandles, true); trace_method_handle(_masm, "LZMH"); });
+
+  // Load the invoker, as MH -> MH.form -> LF.vmentry
+  __ verify_oop(recv);
+  __ load_heap_oop(Address(recv,        NONZERO(java_lang_invoke_MethodHandle::form_offset_in_bytes())),   method_temp);
+  __ verify_oop(method_temp);
+  __ load_heap_oop(Address(method_temp, NONZERO(java_lang_invoke_LambdaForm::vmentry_offset_in_bytes())),  method_temp);
+  __ verify_oop(method_temp);
+  // the following assumes that a methodOop is normally compressed in the vmtarget field:
+  __ load_heap_oop(Address(method_temp, NONZERO(java_lang_invoke_MemberName::vmtarget_offset_in_bytes())), method_temp);
+  __ verify_oop(method_temp);
+
+  if (VerifyMethodHandles && !for_compiler_entry) {
+    // make sure recv is already on stack
+    __ load_sized_value(Address(method_temp, methodOopDesc::size_of_parameters_offset()),
+                        temp2,
+                        sizeof(u2), /*is_signed*/ false);
+    // assert(sizeof(u2) == sizeof(methodOopDesc::_size_of_parameters), "");
+    Label L;
+    __ ld_ptr(__ argument_address(temp2, temp2, -1), temp2);
+    __ cmp_and_br_short(temp2, recv, Assembler::equal, Assembler::pt, L);
+    __ STOP("receiver not on stack");
+    __ BIND(L);
+  }
+
+  jump_from_method_handle(_masm, method_temp, temp2, temp3, for_compiler_entry);
+  BLOCK_COMMENT("} jump_to_lambda_form");
 }
 
 
 // Code generation
-address MethodHandles::generate_method_handle_interpreter_entry(MacroAssembler* _masm) {
-  // I5_savedSP/O5_savedSP: sender SP (must preserve)
-  // G4 (Gargs): incoming argument list (must preserve)
-  // G5_method:  invoke methodOop
-  // G3_method_handle: receiver method handle (must load from sp[MethodTypeForm.vmslots])
-  // O0, O1, O2, O3, O4: garbage temps, blown away
-  Register O0_mtype   = O0;
-  Register O1_scratch = O1;
-  Register O2_scratch = O2;
-  Register O3_scratch = O3;
-  Register O4_argslot = O4;
-  Register O4_argbase = O4;
+address MethodHandles::generate_method_handle_interpreter_entry(MacroAssembler* _masm,
+                                                                vmIntrinsics::ID iid) {
+  const bool not_for_compiler_entry = false;  // this is the interpreter entry
+  assert(is_signature_polymorphic(iid), "expected invoke iid");
+  if (iid == vmIntrinsics::_invokeGeneric ||
+      iid == vmIntrinsics::_compiledLambdaForm) {
+    // Perhaps surprisingly, the symbolic references visible to Java are not directly used.
+    // They are linked to Java-generated adapters via MethodHandleNatives.linkMethod.
+    // They all allow an appendix argument.
+    __ should_not_reach_here();           // empty stubs make SG sick
+    return NULL;
+  }
 
-  // emit WrongMethodType path first, to enable back-branch from main path
-  Label wrong_method_type;
-  __ bind(wrong_method_type);
-  Label invoke_generic_slow_path;
-  assert(methodOopDesc::intrinsic_id_size_in_bytes() == sizeof(u1), "");;
-  __ ldub(Address(G5_method, methodOopDesc::intrinsic_id_offset_in_bytes()), O1_scratch);
-  __ cmp(O1_scratch, (int) vmIntrinsics::_invokeExact);
-  __ brx(Assembler::notEqual, false, Assembler::pt, invoke_generic_slow_path);
-  __ delayed()->nop();
-  __ mov(O0_mtype, G5_method_type);  // required by throw_WrongMethodType
-  // mov(G3_method_handle, G3_method_handle);  // already in this register
-  __ jump_to(AddressLiteral(Interpreter::throw_WrongMethodType_entry()), O1_scratch);
-  __ delayed()->nop();
+  // I5_savedSP/O5_savedSP: sender SP (must preserve; see prepare_to_jump_from_interpreted)
+  // G5_method:  methodOop
+  // G4 (Gargs): incoming argument list (must preserve)
+  // O0: used as temp to hold mh or receiver
+  // O1, O4: garbage temps, blown away
+  Register O1_scratch    = O1;
+  Register O4_param_size = O4;   // size of parameters
 
   // here's where control starts out:
   __ align(CodeEntryAlignment);
   address entry_point = __ pc();
 
-  // fetch the MethodType from the method handle
-  {
-    Register tem = G5_method;
-    for (jint* pchase = methodOopDesc::method_type_offsets_chain(); (*pchase) != -1; pchase++) {
-      __ ld_ptr(Address(tem, *pchase), O0_mtype);
-      tem = O0_mtype;          // in case there is another indirection
-    }
-  }
-
-  // given the MethodType, find out where the MH argument is buried
-  __ load_heap_oop(Address(O0_mtype,   __ delayed_value(java_lang_invoke_MethodType::form_offset_in_bytes,        O1_scratch)), O4_argslot);
-  __ ldsw(         Address(O4_argslot, __ delayed_value(java_lang_invoke_MethodTypeForm::vmslots_offset_in_bytes, O1_scratch)), O4_argslot);
-  __ add(Gargs, __ argument_offset(O4_argslot, 1), O4_argbase);
-  // Note: argument_address uses its input as a scratch register!
-  __ ld_ptr(Address(O4_argbase, -Interpreter::stackElementSize), G3_method_handle);
-
-  trace_method_handle(_masm, "invokeExact");
-
-  __ check_method_handle_type(O0_mtype, G3_method_handle, O1_scratch, wrong_method_type);
-  __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-
-  // for invokeGeneric (only), apply argument and result conversions on the fly
-  __ bind(invoke_generic_slow_path);
-#ifdef ASSERT
-  { Label L;
+  if (VerifyMethodHandles) {
+    Label L;
+    BLOCK_COMMENT("verify_intrinsic_id {");
     __ ldub(Address(G5_method, methodOopDesc::intrinsic_id_offset_in_bytes()), O1_scratch);
-    __ cmp(O1_scratch, (int) vmIntrinsics::_invokeGeneric);
-    __ brx(Assembler::equal, false, Assembler::pt, L);
-    __ delayed()->nop();
-    __ stop("bad methodOop::intrinsic_id");
+    __ cmp_and_br_short(O1_scratch, (int) iid, Assembler::equal, Assembler::pt, L);
+    if (iid == vmIntrinsics::_linkToVirtual ||
+        iid == vmIntrinsics::_linkToSpecial) {
+      // could do this for all kinds, but would explode assembly code size
+      trace_method_handle(_masm, "bad methodOop::intrinsic_id");
+    }
+    __ STOP("bad methodOop::intrinsic_id");
     __ bind(L);
+    BLOCK_COMMENT("} verify_intrinsic_id");
   }
-#endif //ASSERT
 
-  // make room on the stack for another pointer:
-  insert_arg_slots(_masm, 2 * stack_move_unit(), _INSERT_REF_MASK, O4_argbase, O1_scratch, O2_scratch, O3_scratch);
-  // load up an adapter from the calling type (Java weaves this)
-  Register O2_form    = O2_scratch;
-  Register O3_adapter = O3_scratch;
-  __ load_heap_oop(Address(O0_mtype, __ delayed_value(java_lang_invoke_MethodType::form_offset_in_bytes,               O1_scratch)), O2_form);
-  __ load_heap_oop(Address(O2_form,  __ delayed_value(java_lang_invoke_MethodTypeForm::genericInvoker_offset_in_bytes, O1_scratch)), O3_adapter);
-  __ verify_oop(O3_adapter);
-  __ st_ptr(O3_adapter, Address(O4_argbase, 1 * Interpreter::stackElementSize));
-  // As a trusted first argument, pass the type being called, so the adapter knows
-  // the actual types of the arguments and return values.
-  // (Generic invokers are shared among form-families of method-type.)
-  __ st_ptr(O0_mtype,   Address(O4_argbase, 0 * Interpreter::stackElementSize));
-  // FIXME: assert that O3_adapter is of the right method-type.
-  __ mov(O3_adapter, G3_method_handle);
-  trace_method_handle(_masm, "invokeGeneric");
-  __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
+  // First task:  Find out how big the argument list is.
+  Address O4_first_arg_addr;
+  int ref_kind = signature_polymorphic_intrinsic_ref_kind(iid);
+  assert(ref_kind != 0 || iid == vmIntrinsics::_invokeBasic, "must be _invokeBasic or a linkTo intrinsic");
+  if (ref_kind == 0 || MethodHandles::ref_kind_has_receiver(ref_kind)) {
+    __ load_sized_value(Address(G5_method, methodOopDesc::size_of_parameters_offset()),
+                        O4_param_size,
+                        sizeof(u2), /*is_signed*/ false);
+    // assert(sizeof(u2) == sizeof(methodOopDesc::_size_of_parameters), "");
+    O4_first_arg_addr = __ argument_address(O4_param_size, O4_param_size, -1);
+  } else {
+    DEBUG_ONLY(O4_param_size = noreg);
+  }
+
+  Register O0_mh = noreg;
+  if (!is_signature_polymorphic_static(iid)) {
+    __ ld_ptr(O4_first_arg_addr, O0_mh = O0);
+    DEBUG_ONLY(O4_param_size = noreg);
+  }
+
+  // O4_first_arg_addr is live!
+
+  if (TraceMethodHandles) {
+    if (O0_mh != noreg)
+      __ mov(O0_mh, G3_method_handle);  // make stub happy
+    trace_method_handle_interpreter_entry(_masm, iid);
+  }
+
+  if (iid == vmIntrinsics::_invokeBasic) {
+    generate_method_handle_dispatch(_masm, iid, O0_mh, noreg, not_for_compiler_entry);
+
+  } else {
+    // Adjust argument list by popping the trailing MemberName argument.
+    Register O0_recv = noreg;
+    if (MethodHandles::ref_kind_has_receiver(ref_kind)) {
+      // Load the receiver (not the MH; the actual MemberName's receiver) up from the interpreter stack.
+      __ ld_ptr(O4_first_arg_addr, O0_recv = O0);
+      DEBUG_ONLY(O4_param_size = noreg);
+    }
+    Register G5_member = G5_method;  // MemberName ptr; incoming method ptr is dead now
+    __ ld_ptr(__ argument_address(constant(0)), G5_member);
+    __ add(Gargs, Interpreter::stackElementSize, Gargs);
+    generate_method_handle_dispatch(_masm, iid, O0_recv, G5_member, not_for_compiler_entry);
+  }
 
   return entry_point;
 }
 
-
-#ifdef ASSERT
-static void verify_argslot(MacroAssembler* _masm, Register argslot_reg, Register temp_reg, const char* error_message) {
-  // Verify that argslot lies within (Gargs, FP].
-  Label L_ok, L_bad;
-  BLOCK_COMMENT("{ verify_argslot");
-#ifdef _LP64
-  __ add(FP, STACK_BIAS, temp_reg);
-  __ cmp(argslot_reg, temp_reg);
-#else
-  __ cmp(argslot_reg, FP);
-#endif
-  __ brx(Assembler::greaterUnsigned, false, Assembler::pn, L_bad);
-  __ delayed()->nop();
-  __ cmp(Gargs, argslot_reg);
-  __ brx(Assembler::lessEqualUnsigned, false, Assembler::pt, L_ok);
-  __ delayed()->nop();
-  __ bind(L_bad);
-  __ stop(error_message);
-  __ bind(L_ok);
-  BLOCK_COMMENT("} verify_argslot");
-}
-#endif
-
-
-// Helper to insert argument slots into the stack.
-// arg_slots must be a multiple of stack_move_unit() and <= 0
-void MethodHandles::insert_arg_slots(MacroAssembler* _masm,
-                                     RegisterOrConstant arg_slots,
-                                     int arg_mask,
-                                     Register argslot_reg,
-                                     Register temp_reg, Register temp2_reg, Register temp3_reg) {
-  assert(temp3_reg != noreg, "temp3 required");
-  assert_different_registers(argslot_reg, temp_reg, temp2_reg, temp3_reg,
-                             (!arg_slots.is_register() ? Gargs : arg_slots.as_register()));
-
-#ifdef ASSERT
-  verify_argslot(_masm, argslot_reg, temp_reg, "insertion point must fall within current frame");
-  if (arg_slots.is_register()) {
-    Label L_ok, L_bad;
-    __ cmp(arg_slots.as_register(), (int32_t) NULL_WORD);
-    __ br(Assembler::greater, false, Assembler::pn, L_bad);
-    __ delayed()->nop();
-    __ btst(-stack_move_unit() - 1, arg_slots.as_register());
-    __ br(Assembler::zero, false, Assembler::pt, L_ok);
-    __ delayed()->nop();
-    __ bind(L_bad);
-    __ stop("assert arg_slots <= 0 and clear low bits");
-    __ bind(L_ok);
+void MethodHandles::generate_method_handle_dispatch(MacroAssembler* _masm,
+                                                    vmIntrinsics::ID iid,
+                                                    Register receiver_reg,
+                                                    Register member_reg,
+                                                    bool for_compiler_entry) {
+  assert(is_signature_polymorphic(iid), "expected invoke iid");
+  Register temp1 = (for_compiler_entry ? G1_scratch : O1);
+  Register temp2 = (for_compiler_entry ? G3_scratch : O2);
+  Register temp3 = (for_compiler_entry ? G4_scratch : O3);
+  Register temp4 = (for_compiler_entry ? noreg      : O4);
+  if (for_compiler_entry) {
+    assert(receiver_reg == (iid == vmIntrinsics::_linkToStatic ? noreg : O0), "only valid assignment");
+    assert_different_registers(temp1, O0, O1, O2, O3, O4, O5);
+    assert_different_registers(temp2, O0, O1, O2, O3, O4, O5);
+    assert_different_registers(temp3, O0, O1, O2, O3, O4, O5);
+    assert_different_registers(temp4, O0, O1, O2, O3, O4, O5);
   } else {
-    assert(arg_slots.as_constant() <= 0, "");
-    assert(arg_slots.as_constant() % -stack_move_unit() == 0, "");
+    assert_different_registers(temp1, temp2, temp3, temp4, O5_savedSP);  // don't trash lastSP
   }
-#endif // ASSERT
+  if (receiver_reg != noreg)  assert_different_registers(temp1, temp2, temp3, temp4, receiver_reg);
+  if (member_reg   != noreg)  assert_different_registers(temp1, temp2, temp3, temp4, member_reg);
 
-#ifdef _LP64
-  if (arg_slots.is_register()) {
-    // Was arg_slots register loaded as signed int?
-    Label L_ok;
-    __ sll(arg_slots.as_register(), BitsPerInt, temp_reg);
-    __ sra(temp_reg, BitsPerInt, temp_reg);
-    __ cmp(arg_slots.as_register(), temp_reg);
-    __ br(Assembler::equal, false, Assembler::pt, L_ok);
-    __ delayed()->nop();
-    __ stop("arg_slots register not loaded as signed int");
-    __ bind(L_ok);
-  }
-#endif
+  if (iid == vmIntrinsics::_invokeBasic) {
+    // indirect through MH.form.vmentry.vmtarget
+    jump_to_lambda_form(_masm, receiver_reg, G5_method, temp1, temp2, for_compiler_entry);
 
-  // Make space on the stack for the inserted argument(s).
-  // Then pull down everything shallower than argslot_reg.
-  // The stacked return address gets pulled down with everything else.
-  // That is, copy [sp, argslot) downward by -size words.  In pseudo-code:
-  //   sp -= size;
-  //   for (temp = sp + size; temp < argslot; temp++)
-  //     temp[-size] = temp[0]
-  //   argslot -= size;
-  BLOCK_COMMENT("insert_arg_slots {");
-  RegisterOrConstant offset = __ regcon_sll_ptr(arg_slots, LogBytesPerWord, temp3_reg);
-
-  // Keep the stack pointer 2*wordSize aligned.
-  const int TwoWordAlignmentMask = right_n_bits(LogBytesPerWord + 1);
-  RegisterOrConstant masked_offset = __ regcon_andn_ptr(offset, TwoWordAlignmentMask, temp_reg);
-  __ add(SP, masked_offset, SP);
-
-  __ mov(Gargs, temp_reg);  // source pointer for copy
-  __ add(Gargs, offset, Gargs);
-
-  {
-    Label loop;
-    __ BIND(loop);
-    // pull one word down each time through the loop
-    __ ld_ptr(Address(temp_reg, 0), temp2_reg);
-    __ st_ptr(temp2_reg, Address(temp_reg, offset));
-    __ add(temp_reg, wordSize, temp_reg);
-    __ cmp(temp_reg, argslot_reg);
-    __ brx(Assembler::less, false, Assembler::pt, loop);
-    __ delayed()->nop();  // FILLME
-  }
-
-  // Now move the argslot down, to point to the opened-up space.
-  __ add(argslot_reg, offset, argslot_reg);
-  BLOCK_COMMENT("} insert_arg_slots");
-}
-
-
-// Helper to remove argument slots from the stack.
-// arg_slots must be a multiple of stack_move_unit() and >= 0
-void MethodHandles::remove_arg_slots(MacroAssembler* _masm,
-                                     RegisterOrConstant arg_slots,
-                                     Register argslot_reg,
-                                     Register temp_reg, Register temp2_reg, Register temp3_reg) {
-  assert(temp3_reg != noreg, "temp3 required");
-  assert_different_registers(argslot_reg, temp_reg, temp2_reg, temp3_reg,
-                             (!arg_slots.is_register() ? Gargs : arg_slots.as_register()));
-
-  RegisterOrConstant offset = __ regcon_sll_ptr(arg_slots, LogBytesPerWord, temp3_reg);
-
-#ifdef ASSERT
-  // Verify that [argslot..argslot+size) lies within (Gargs, FP).
-  __ add(argslot_reg, offset, temp2_reg);
-  verify_argslot(_masm, temp2_reg, temp_reg, "deleted argument(s) must fall within current frame");
-  if (arg_slots.is_register()) {
-    Label L_ok, L_bad;
-    __ cmp(arg_slots.as_register(), (int32_t) NULL_WORD);
-    __ br(Assembler::less, false, Assembler::pn, L_bad);
-    __ delayed()->nop();
-    __ btst(-stack_move_unit() - 1, arg_slots.as_register());
-    __ br(Assembler::zero, false, Assembler::pt, L_ok);
-    __ delayed()->nop();
-    __ bind(L_bad);
-    __ stop("assert arg_slots >= 0 and clear low bits");
-    __ bind(L_ok);
   } else {
-    assert(arg_slots.as_constant() >= 0, "");
-    assert(arg_slots.as_constant() % -stack_move_unit() == 0, "");
+    // The method is a member invoker used by direct method handles.
+    if (VerifyMethodHandles) {
+      // make sure the trailing argument really is a MemberName (caller responsibility)
+      verify_klass(_masm, member_reg, SystemDictionaryHandles::MemberName_klass(),
+                   temp1, temp2,
+                   "MemberName required for invokeVirtual etc.");
+    }
+
+    Address member_clazz(    member_reg, NONZERO(java_lang_invoke_MemberName::clazz_offset_in_bytes()));
+    Address member_vmindex(  member_reg, NONZERO(java_lang_invoke_MemberName::vmindex_offset_in_bytes()));
+    Address member_vmtarget( member_reg, NONZERO(java_lang_invoke_MemberName::vmtarget_offset_in_bytes()));
+
+    Register temp1_recv_klass = temp1;
+    if (iid != vmIntrinsics::_linkToStatic) {
+      __ verify_oop(receiver_reg);
+      if (iid == vmIntrinsics::_linkToSpecial) {
+        // Don't actually load the klass; just null-check the receiver.
+        __ null_check(receiver_reg);
+      } else {
+        // load receiver klass itself
+        __ null_check(receiver_reg, oopDesc::klass_offset_in_bytes());
+        __ load_klass(receiver_reg, temp1_recv_klass);
+        __ verify_oop(temp1_recv_klass);
+      }
+      BLOCK_COMMENT("check_receiver {");
+      // The receiver for the MemberName must be in receiver_reg.
+      // Check the receiver against the MemberName.clazz
+      if (VerifyMethodHandles && iid == vmIntrinsics::_linkToSpecial) {
+        // Did not load it above...
+        __ load_klass(receiver_reg, temp1_recv_klass);
+        __ verify_oop(temp1_recv_klass);
+      }
+      if (VerifyMethodHandles && iid != vmIntrinsics::_linkToInterface) {
+        Label L_ok;
+        Register temp2_defc = temp2;
+        __ load_heap_oop(member_clazz, temp2_defc);
+        load_klass_from_Class(_masm, temp2_defc, temp3, temp4);
+        __ verify_oop(temp2_defc);
+        __ check_klass_subtype(temp1_recv_klass, temp2_defc, temp3, temp4, L_ok);
+        // If we get here, the type check failed!
+        __ STOP("receiver class disagrees with MemberName.clazz");
+        __ bind(L_ok);
+      }
+      BLOCK_COMMENT("} check_receiver");
+    }
+    if (iid == vmIntrinsics::_linkToSpecial ||
+        iid == vmIntrinsics::_linkToStatic) {
+      DEBUG_ONLY(temp1_recv_klass = noreg);  // these guys didn't load the recv_klass
+    }
+
+    // Live registers at this point:
+    //  member_reg - MemberName that was the trailing argument
+    //  temp1_recv_klass - klass of stacked receiver, if needed
+    //  O5_savedSP - interpreter linkage (if interpreted)
+    //  O0..O5 - compiler arguments (if compiled)
+
+    Label L_incompatible_class_change_error;
+    switch (iid) {
+    case vmIntrinsics::_linkToSpecial:
+      if (VerifyMethodHandles) {
+        verify_ref_kind(_masm, JVM_REF_invokeSpecial, member_reg, temp2);
+      }
+      __ load_heap_oop(member_vmtarget, G5_method);
+      break;
+
+    case vmIntrinsics::_linkToStatic:
+      if (VerifyMethodHandles) {
+        verify_ref_kind(_masm, JVM_REF_invokeStatic, member_reg, temp2);
+      }
+      __ load_heap_oop(member_vmtarget, G5_method);
+      break;
+
+    case vmIntrinsics::_linkToVirtual:
+    {
+      // same as TemplateTable::invokevirtual,
+      // minus the CP setup and profiling:
+
+      if (VerifyMethodHandles) {
+        verify_ref_kind(_masm, JVM_REF_invokeVirtual, member_reg, temp2);
+      }
+
+      // pick out the vtable index from the MemberName, and then we can discard it:
+      Register temp2_index = temp2;
+      __ ld_ptr(member_vmindex, temp2_index);
+
+      if (VerifyMethodHandles) {
+        Label L_index_ok;
+        __ cmp_and_br_short(temp2_index, (int) 0, Assembler::greaterEqual, Assembler::pn, L_index_ok);
+        __ STOP("no virtual index");
+        __ BIND(L_index_ok);
+      }
+
+      // Note:  The verifier invariants allow us to ignore MemberName.clazz and vmtarget
+      // at this point.  And VerifyMethodHandles has already checked clazz, if needed.
+
+      // get target methodOop & entry point
+      __ lookup_virtual_method(temp1_recv_klass, temp2_index, G5_method);
+      break;
+    }
+
+    case vmIntrinsics::_linkToInterface:
+    {
+      // same as TemplateTable::invokeinterface
+      // (minus the CP setup and profiling, with different argument motion)
+      if (VerifyMethodHandles) {
+        verify_ref_kind(_masm, JVM_REF_invokeInterface, member_reg, temp2);
+      }
+
+      Register temp2_intf = temp2;
+      __ load_heap_oop(member_clazz, temp2_intf);
+      load_klass_from_Class(_masm, temp2_intf, temp3, temp4);
+      __ verify_oop(temp2_intf);
+
+      Register G5_index = G5_method;
+      __ ld_ptr(member_vmindex, G5_index);
+      if (VerifyMethodHandles) {
+        Label L;
+        __ cmp_and_br_short(G5_index, 0, Assembler::greaterEqual, Assembler::pt, L);
+        __ STOP("invalid vtable index for MH.invokeInterface");
+        __ bind(L);
+      }
+
+      // given intf, index, and recv klass, dispatch to the implementation method
+      __ lookup_interface_method(temp1_recv_klass, temp2_intf,
+                                 // note: next two args must be the same:
+                                 G5_index, G5_method,
+                                 temp3, temp4,
+                                 L_incompatible_class_change_error);
+      break;
+    }
+
+    default:
+      fatal(err_msg_res("unexpected intrinsic %d: %s", iid, vmIntrinsics::name_at(iid)));
+      break;
+    }
+
+    // Live at this point:
+    //   G5_method
+    //   O5_savedSP (if interpreted)
+
+    // After figuring out which concrete method to call, jump into it.
+    // Note that this works in the interpreter with no data motion.
+    // But the compiled version will require that rcx_recv be shifted out.
+    __ verify_oop(G5_method);
+    jump_from_method_handle(_masm, G5_method, temp1, temp2, for_compiler_entry);
+
+    if (iid == vmIntrinsics::_linkToInterface) {
+      __ BIND(L_incompatible_class_change_error);
+      AddressLiteral icce(StubRoutines::throw_IncompatibleClassChangeError_entry());
+      __ jump_to(icce, temp1);
+      __ delayed()->nop();
+    }
   }
-#endif // ASSERT
-
-  BLOCK_COMMENT("remove_arg_slots {");
-  // Pull up everything shallower than argslot.
-  // Then remove the excess space on the stack.
-  // The stacked return address gets pulled up with everything else.
-  // That is, copy [sp, argslot) upward by size words.  In pseudo-code:
-  //   for (temp = argslot-1; temp >= sp; --temp)
-  //     temp[size] = temp[0]
-  //   argslot += size;
-  //   sp += size;
-  __ sub(argslot_reg, wordSize, temp_reg);  // source pointer for copy
-  {
-    Label loop;
-    __ BIND(loop);
-    // pull one word up each time through the loop
-    __ ld_ptr(Address(temp_reg, 0), temp2_reg);
-    __ st_ptr(temp2_reg, Address(temp_reg, offset));
-    __ sub(temp_reg, wordSize, temp_reg);
-    __ cmp(temp_reg, Gargs);
-    __ brx(Assembler::greaterEqual, false, Assembler::pt, loop);
-    __ delayed()->nop();  // FILLME
-  }
-
-  // Now move the argslot up, to point to the just-copied block.
-  __ add(Gargs, offset, Gargs);
-  // And adjust the argslot address to point at the deletion point.
-  __ add(argslot_reg, offset, argslot_reg);
-
-  // Keep the stack pointer 2*wordSize aligned.
-  const int TwoWordAlignmentMask = right_n_bits(LogBytesPerWord + 1);
-  RegisterOrConstant masked_offset = __ regcon_andn_ptr(offset, TwoWordAlignmentMask, temp_reg);
-  __ add(SP, masked_offset, SP);
-  BLOCK_COMMENT("} remove_arg_slots");
 }
-
 
 #ifndef PRODUCT
-extern "C" void print_method_handle(oop mh);
 void trace_method_handle_stub(const char* adaptername,
                               oopDesc* mh,
-                              intptr_t* saved_sp) {
-  tty->print_cr("MH %s mh="INTPTR_FORMAT " saved_sp=" INTPTR_FORMAT, adaptername, (intptr_t) mh, saved_sp);
-  print_method_handle(mh);
+                              intptr_t* saved_sp,
+                              intptr_t* args,
+                              intptr_t* tracing_fp) {
+  bool has_mh = (strstr(adaptername, "/static") == NULL &&
+                 strstr(adaptername, "linkTo") == NULL);    // static linkers don't have MH
+  const char* mh_reg_name = has_mh ? "G3_mh" : "G3";
+  tty->print_cr("MH %s %s="INTPTR_FORMAT " saved_sp=" INTPTR_FORMAT " args=" INTPTR_FORMAT,
+                adaptername, mh_reg_name,
+                (intptr_t) mh, saved_sp, args);
+
+  if (Verbose) {
+    // dumping last frame with frame::describe
+
+    JavaThread* p = JavaThread::active();
+
+    ResourceMark rm;
+    PRESERVE_EXCEPTION_MARK; // may not be needed by safer and unexpensive here
+    FrameValues values;
+
+    // Note: We want to allow trace_method_handle from any call site.
+    // While trace_method_handle creates a frame, it may be entered
+    // without a valid return PC in O7 (e.g. not just after a call).
+    // Walking that frame could lead to failures due to that invalid PC.
+    // => carefully detect that frame when doing the stack walking
+
+    // walk up to the right frame using the "tracing_fp" argument
+    intptr_t* cur_sp = StubRoutines::Sparc::flush_callers_register_windows_func()();
+    frame cur_frame(cur_sp, frame::unpatchable, NULL);
+
+    while (cur_frame.fp() != (intptr_t *)(STACK_BIAS+(uintptr_t)tracing_fp)) {
+      cur_frame = os::get_sender_for_C_frame(&cur_frame);
+    }
+
+    // safely create a frame and call frame::describe
+    intptr_t *dump_sp = cur_frame.sender_sp();
+    intptr_t *dump_fp = cur_frame.link();
+
+    bool walkable = has_mh; // whether the traced frame shoud be walkable
+
+    // the sender for cur_frame is the caller of trace_method_handle
+    if (walkable) {
+      // The previous definition of walkable may have to be refined
+      // if new call sites cause the next frame constructor to start
+      // failing. Alternatively, frame constructors could be
+      // modified to support the current or future non walkable
+      // frames (but this is more intrusive and is not considered as
+      // part of this RFE, which will instead use a simpler output).
+      frame dump_frame = frame(dump_sp,
+                               cur_frame.sp(), // younger_sp
+                               false); // no adaptation
+      dump_frame.describe(values, 1);
+    } else {
+      // Robust dump for frames which cannot be constructed from sp/younger_sp
+      // Add descriptions without building a Java frame to avoid issues
+      values.describe(-1, dump_fp, "fp for #1 <not parsed, cannot trust pc>");
+      values.describe(-1, dump_sp, "sp");
+    }
+
+    bool has_args = has_mh; // whether Gargs is meaningful
+
+    // mark args, if seems valid (may not be valid for some adapters)
+    if (has_args) {
+      if ((args >= dump_sp) && (args < dump_fp)) {
+        values.describe(-1, args, "*G4_args");
+      }
+    }
+
+    // mark saved_sp, if seems valid (may not be valid for some adapters)
+    intptr_t *unbiased_sp = (intptr_t *)(STACK_BIAS+(uintptr_t)saved_sp);
+    const int ARG_LIMIT = 255, SLOP = 45, UNREASONABLE_STACK_MOVE = (ARG_LIMIT + SLOP);
+    if ((unbiased_sp >= dump_sp - UNREASONABLE_STACK_MOVE) && (unbiased_sp < dump_fp)) {
+      values.describe(-1, unbiased_sp, "*saved_sp+STACK_BIAS");
+    }
+
+    // Note: the unextended_sp may not be correct
+    tty->print_cr("  stack layout:");
+    values.print(p);
+    if (has_mh && mh->is_oop()) {
+      mh->print();
+      if (java_lang_invoke_MethodHandle::is_instance(mh)) {
+        if (java_lang_invoke_MethodHandle::form_offset_in_bytes() != 0)
+          java_lang_invoke_MethodHandle::form(mh)->print();
+      }
+    }
+  }
 }
+
 void MethodHandles::trace_method_handle(MacroAssembler* _masm, const char* adaptername) {
   if (!TraceMethodHandles)  return;
   BLOCK_COMMENT("trace_method_handle {");
   // save: Gargs, O5_savedSP
-  __ save_frame(16);
+  __ save_frame(16); // need space for saving required FPU state
+
   __ set((intptr_t) adaptername, O0);
   __ mov(G3_method_handle, O1);
   __ mov(I5_savedSP, O2);
+  __ mov(Gargs, O3);
+  __ mov(I6, O4); // frame identifier for safe stack walking
+
+  // Save scratched registers that might be needed. Robustness is more
+  // important than optimizing the saves for this debug only code.
+
+  // save FP result, valid at some call sites (adapter_opt_return_float, ...)
+  Address d_save(FP, -sizeof(jdouble) + STACK_BIAS);
+  __ stf(FloatRegisterImpl::D, Ftos_d, d_save);
+  // Safely save all globals but G2 (handled by call_VM_leaf) and G7
+  // (OS reserved).
   __ mov(G3_method_handle, L3);
   __ mov(Gargs, L4);
   __ mov(G5_method_type, L5);
-  __ call_VM_leaf(L7, CAST_FROM_FN_PTR(address, trace_method_handle_stub));
+  __ mov(G6, L6);
+  __ mov(G1, L1);
+
+  __ call_VM_leaf(L2 /* for G2 */, CAST_FROM_FN_PTR(address, trace_method_handle_stub));
 
   __ mov(L3, G3_method_handle);
   __ mov(L4, Gargs);
   __ mov(L5, G5_method_type);
+  __ mov(L6, G6);
+  __ mov(L1, G1);
+  __ ldf(FloatRegisterImpl::D, d_save, Ftos_d);
+
   __ restore();
   BLOCK_COMMENT("} trace_method_handle");
 }
 #endif // PRODUCT
-
-// which conversion op types are implemented here?
-int MethodHandles::adapter_conversion_ops_supported_mask() {
-  return ((1<<java_lang_invoke_AdapterMethodHandle::OP_RETYPE_ONLY)
-         |(1<<java_lang_invoke_AdapterMethodHandle::OP_RETYPE_RAW)
-         |(1<<java_lang_invoke_AdapterMethodHandle::OP_CHECK_CAST)
-         |(1<<java_lang_invoke_AdapterMethodHandle::OP_PRIM_TO_PRIM)
-         |(1<<java_lang_invoke_AdapterMethodHandle::OP_REF_TO_PRIM)
-         |(1<<java_lang_invoke_AdapterMethodHandle::OP_SWAP_ARGS)
-         |(1<<java_lang_invoke_AdapterMethodHandle::OP_ROT_ARGS)
-         |(1<<java_lang_invoke_AdapterMethodHandle::OP_DUP_ARGS)
-         |(1<<java_lang_invoke_AdapterMethodHandle::OP_DROP_ARGS)
-         //|(1<<java_lang_invoke_AdapterMethodHandle::OP_SPREAD_ARGS) //BUG!
-         );
-  // FIXME: MethodHandlesTest gets a crash if we enable OP_SPREAD_ARGS.
-}
-
-//------------------------------------------------------------------------------
-// MethodHandles::generate_method_handle_stub
-//
-// Generate an "entry" field for a method handle.
-// This determines how the method handle will respond to calls.
-void MethodHandles::generate_method_handle_stub(MacroAssembler* _masm, MethodHandles::EntryKind ek) {
-  // Here is the register state during an interpreted call,
-  // as set up by generate_method_handle_interpreter_entry():
-  // - G5: garbage temp (was MethodHandle.invoke methodOop, unused)
-  // - G3: receiver method handle
-  // - O5_savedSP: sender SP (must preserve)
-
-  const Register O0_argslot = O0;
-  const Register O1_scratch = O1;
-  const Register O2_scratch = O2;
-  const Register O3_scratch = O3;
-  const Register G5_index   = G5;
-
-  // Argument registers for _raise_exception.
-  const Register O0_code     = O0;
-  const Register O1_actual   = O1;
-  const Register O2_required = O2;
-
-  guarantee(java_lang_invoke_MethodHandle::vmentry_offset_in_bytes() != 0, "must have offsets");
-
-  // Some handy addresses:
-  Address G5_method_fie(    G5_method,        in_bytes(methodOopDesc::from_interpreted_offset()));
-  Address G5_method_fce(    G5_method,        in_bytes(methodOopDesc::from_compiled_offset()));
-
-  Address G3_mh_vmtarget(   G3_method_handle, java_lang_invoke_MethodHandle::vmtarget_offset_in_bytes());
-
-  Address G3_dmh_vmindex(   G3_method_handle, java_lang_invoke_DirectMethodHandle::vmindex_offset_in_bytes());
-
-  Address G3_bmh_vmargslot( G3_method_handle, java_lang_invoke_BoundMethodHandle::vmargslot_offset_in_bytes());
-  Address G3_bmh_argument(  G3_method_handle, java_lang_invoke_BoundMethodHandle::argument_offset_in_bytes());
-
-  Address G3_amh_vmargslot( G3_method_handle, java_lang_invoke_AdapterMethodHandle::vmargslot_offset_in_bytes());
-  Address G3_amh_argument ( G3_method_handle, java_lang_invoke_AdapterMethodHandle::argument_offset_in_bytes());
-  Address G3_amh_conversion(G3_method_handle, java_lang_invoke_AdapterMethodHandle::conversion_offset_in_bytes());
-
-  const int java_mirror_offset = klassOopDesc::klass_part_offset_in_bytes() + Klass::java_mirror_offset_in_bytes();
-
-  if (have_entry(ek)) {
-    __ nop();  // empty stubs make SG sick
-    return;
-  }
-
-  address interp_entry = __ pc();
-
-  trace_method_handle(_masm, entry_name(ek));
-
-  switch ((int) ek) {
-  case _raise_exception:
-    {
-      // Not a real MH entry, but rather shared code for raising an
-      // exception.  Since we use the compiled entry, arguments are
-      // expected in compiler argument registers.
-      assert(raise_exception_method(), "must be set");
-      assert(raise_exception_method()->from_compiled_entry(), "method must be linked");
-
-      __ mov(O5_savedSP, SP);  // Cut the stack back to where the caller started.
-
-      Label L_no_method;
-      // FIXME: fill in _raise_exception_method with a suitable java.lang.invoke method
-      __ set(AddressLiteral((address) &_raise_exception_method), G5_method);
-      __ ld_ptr(Address(G5_method, 0), G5_method);
-      __ tst(G5_method);
-      __ brx(Assembler::zero, false, Assembler::pn, L_no_method);
-      __ delayed()->nop();
-
-      const int jobject_oop_offset = 0;
-      __ ld_ptr(Address(G5_method, jobject_oop_offset), G5_method);
-      __ tst(G5_method);
-      __ brx(Assembler::zero, false, Assembler::pn, L_no_method);
-      __ delayed()->nop();
-
-      __ verify_oop(G5_method);
-      __ jump_indirect_to(G5_method_fce, O3_scratch);  // jump to compiled entry
-      __ delayed()->nop();
-
-      // Do something that is at least causes a valid throw from the interpreter.
-      __ bind(L_no_method);
-      __ unimplemented("call throw_WrongMethodType_entry");
-    }
-    break;
-
-  case _invokestatic_mh:
-  case _invokespecial_mh:
-    {
-      __ load_heap_oop(G3_mh_vmtarget, G5_method);  // target is a methodOop
-      __ verify_oop(G5_method);
-      // Same as TemplateTable::invokestatic or invokespecial,
-      // minus the CP setup and profiling:
-      if (ek == _invokespecial_mh) {
-        // Must load & check the first argument before entering the target method.
-        __ load_method_handle_vmslots(O0_argslot, G3_method_handle, O1_scratch);
-        __ ld_ptr(__ argument_address(O0_argslot, -1), G3_method_handle);
-        __ null_check(G3_method_handle);
-        __ verify_oop(G3_method_handle);
-      }
-      __ jump_indirect_to(G5_method_fie, O1_scratch);
-      __ delayed()->nop();
-    }
-    break;
-
-  case _invokevirtual_mh:
-    {
-      // Same as TemplateTable::invokevirtual,
-      // minus the CP setup and profiling:
-
-      // Pick out the vtable index and receiver offset from the MH,
-      // and then we can discard it:
-      __ load_method_handle_vmslots(O0_argslot, G3_method_handle, O1_scratch);
-      __ ldsw(G3_dmh_vmindex, G5_index);
-      // Note:  The verifier allows us to ignore G3_mh_vmtarget.
-      __ ld_ptr(__ argument_address(O0_argslot, -1), G3_method_handle);
-      __ null_check(G3_method_handle, oopDesc::klass_offset_in_bytes());
-
-      // Get receiver klass:
-      Register O0_klass = O0_argslot;
-      __ load_klass(G3_method_handle, O0_klass);
-      __ verify_oop(O0_klass);
-
-      // Get target methodOop & entry point:
-      const int base = instanceKlass::vtable_start_offset() * wordSize;
-      assert(vtableEntry::size() * wordSize == wordSize, "adjust the scaling in the code below");
-
-      __ sll_ptr(G5_index, LogBytesPerWord, G5_index);
-      __ add(O0_klass, G5_index, O0_klass);
-      Address vtable_entry_addr(O0_klass, base + vtableEntry::method_offset_in_bytes());
-      __ ld_ptr(vtable_entry_addr, G5_method);
-
-      __ verify_oop(G5_method);
-      __ jump_indirect_to(G5_method_fie, O1_scratch);
-      __ delayed()->nop();
-    }
-    break;
-
-  case _invokeinterface_mh:
-    {
-      // Same as TemplateTable::invokeinterface,
-      // minus the CP setup and profiling:
-      __ load_method_handle_vmslots(O0_argslot, G3_method_handle, O1_scratch);
-      Register O1_intf  = O1_scratch;
-      __ load_heap_oop(G3_mh_vmtarget, O1_intf);
-      __ ldsw(G3_dmh_vmindex, G5_index);
-      __ ld_ptr(__ argument_address(O0_argslot, -1), G3_method_handle);
-      __ null_check(G3_method_handle, oopDesc::klass_offset_in_bytes());
-
-      // Get receiver klass:
-      Register O0_klass = O0_argslot;
-      __ load_klass(G3_method_handle, O0_klass);
-      __ verify_oop(O0_klass);
-
-      // Get interface:
-      Label no_such_interface;
-      __ verify_oop(O1_intf);
-      __ lookup_interface_method(O0_klass, O1_intf,
-                                 // Note: next two args must be the same:
-                                 G5_index, G5_method,
-                                 O2_scratch,
-                                 O3_scratch,
-                                 no_such_interface);
-
-      __ verify_oop(G5_method);
-      __ jump_indirect_to(G5_method_fie, O1_scratch);
-      __ delayed()->nop();
-
-      __ bind(no_such_interface);
-      // Throw an exception.
-      // For historical reasons, it will be IncompatibleClassChangeError.
-      __ unimplemented("not tested yet");
-      __ ld_ptr(Address(O1_intf, java_mirror_offset), O2_required);  // required interface
-      __ mov(   O0_klass,                             O1_actual);    // bad receiver
-      __ jump_to(AddressLiteral(from_interpreted_entry(_raise_exception)), O3_scratch);
-      __ delayed()->mov(Bytecodes::_invokeinterface,  O0_code);      // who is complaining?
-    }
-    break;
-
-  case _bound_ref_mh:
-  case _bound_int_mh:
-  case _bound_long_mh:
-  case _bound_ref_direct_mh:
-  case _bound_int_direct_mh:
-  case _bound_long_direct_mh:
-    {
-      const bool direct_to_method = (ek >= _bound_ref_direct_mh);
-      BasicType arg_type  = T_ILLEGAL;
-      int       arg_mask  = _INSERT_NO_MASK;
-      int       arg_slots = -1;
-      get_ek_bound_mh_info(ek, arg_type, arg_mask, arg_slots);
-
-      // Make room for the new argument:
-      __ ldsw(G3_bmh_vmargslot, O0_argslot);
-      __ add(Gargs, __ argument_offset(O0_argslot), O0_argslot);
-
-      insert_arg_slots(_masm, arg_slots * stack_move_unit(), arg_mask, O0_argslot, O1_scratch, O2_scratch, G5_index);
-
-      // Store bound argument into the new stack slot:
-      __ load_heap_oop(G3_bmh_argument, O1_scratch);
-      if (arg_type == T_OBJECT) {
-        __ st_ptr(O1_scratch, Address(O0_argslot, 0));
-      } else {
-        Address prim_value_addr(O1_scratch, java_lang_boxing_object::value_offset_in_bytes(arg_type));
-        const int arg_size = type2aelembytes(arg_type);
-        __ load_sized_value(prim_value_addr, O2_scratch, arg_size, is_signed_subword_type(arg_type));
-        __ store_sized_value(O2_scratch, Address(O0_argslot, 0), arg_size);  // long store uses O2/O3 on !_LP64
-      }
-
-      if (direct_to_method) {
-        __ load_heap_oop(G3_mh_vmtarget, G5_method);  // target is a methodOop
-        __ verify_oop(G5_method);
-        __ jump_indirect_to(G5_method_fie, O1_scratch);
-        __ delayed()->nop();
-      } else {
-        __ load_heap_oop(G3_mh_vmtarget, G3_method_handle);  // target is a methodOop
-        __ verify_oop(G3_method_handle);
-        __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-      }
-    }
-    break;
-
-  case _adapter_retype_only:
-  case _adapter_retype_raw:
-    // Immediately jump to the next MH layer:
-    __ load_heap_oop(G3_mh_vmtarget, G3_method_handle);
-    __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-    // This is OK when all parameter types widen.
-    // It is also OK when a return type narrows.
-    break;
-
-  case _adapter_check_cast:
-    {
-      // Temps:
-      Register G5_klass = G5_index;  // Interesting AMH data.
-
-      // Check a reference argument before jumping to the next layer of MH:
-      __ ldsw(G3_amh_vmargslot, O0_argslot);
-      Address vmarg = __ argument_address(O0_argslot);
-
-      // What class are we casting to?
-      __ load_heap_oop(G3_amh_argument, G5_klass);  // This is a Class object!
-      __ load_heap_oop(Address(G5_klass, java_lang_Class::klass_offset_in_bytes()), G5_klass);
-
-      Label done;
-      __ ld_ptr(vmarg, O1_scratch);
-      __ tst(O1_scratch);
-      __ brx(Assembler::zero, false, Assembler::pn, done);  // No cast if null.
-      __ delayed()->nop();
-      __ load_klass(O1_scratch, O1_scratch);
-
-      // Live at this point:
-      // - G5_klass        :  klass required by the target method
-      // - O0_argslot      :  argslot index in vmarg; may be required in the failing path
-      // - O1_scratch      :  argument klass to test
-      // - G3_method_handle:  adapter method handle
-      __ check_klass_subtype(O1_scratch, G5_klass, O2_scratch, O3_scratch, done);
-
-      // If we get here, the type check failed!
-      __ load_heap_oop(G3_amh_argument,        O2_required);  // required class
-      __ ld_ptr(       vmarg,                  O1_actual);    // bad object
-      __ jump_to(AddressLiteral(from_interpreted_entry(_raise_exception)), O3_scratch);
-      __ delayed()->mov(Bytecodes::_checkcast, O0_code);      // who is complaining?
-
-      __ bind(done);
-      // Get the new MH:
-      __ load_heap_oop(G3_mh_vmtarget, G3_method_handle);
-      __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-    }
-    break;
-
-  case _adapter_prim_to_prim:
-  case _adapter_ref_to_prim:
-    // Handled completely by optimized cases.
-    __ stop("init_AdapterMethodHandle should not issue this");
-    break;
-
-  case _adapter_opt_i2i:        // optimized subcase of adapt_prim_to_prim
-//case _adapter_opt_f2i:        // optimized subcase of adapt_prim_to_prim
-  case _adapter_opt_l2i:        // optimized subcase of adapt_prim_to_prim
-  case _adapter_opt_unboxi:     // optimized subcase of adapt_ref_to_prim
-    {
-      // Perform an in-place conversion to int or an int subword.
-      __ ldsw(G3_amh_vmargslot, O0_argslot);
-      Address value;
-      Address vmarg = __ argument_address(O0_argslot);
-      bool value_left_justified = false;
-
-      switch (ek) {
-      case _adapter_opt_i2i:
-        value = vmarg;
-        break;
-      case _adapter_opt_l2i:
-        {
-          // just delete the extra slot
-#ifdef _LP64
-          // In V9, longs are given 2 64-bit slots in the interpreter, but the
-          // data is passed in only 1 slot.
-          // Keep the second slot.
-          __ add(Gargs, __ argument_offset(O0_argslot, -1), O0_argslot);
-          remove_arg_slots(_masm, -stack_move_unit(), O0_argslot, O1_scratch, O2_scratch, O3_scratch);
-          value = Address(O0_argslot, 4);  // Get least-significant 32-bit of 64-bit value.
-          vmarg = Address(O0_argslot, Interpreter::stackElementSize);
-#else
-          // Keep the first slot.
-          __ add(Gargs, __ argument_offset(O0_argslot), O0_argslot);
-          remove_arg_slots(_masm, -stack_move_unit(), O0_argslot, O1_scratch, O2_scratch, O3_scratch);
-          value = Address(O0_argslot, 0);
-          vmarg = value;
-#endif
-        }
-        break;
-      case _adapter_opt_unboxi:
-        {
-          // Load the value up from the heap.
-          __ ld_ptr(vmarg, O1_scratch);
-          int value_offset = java_lang_boxing_object::value_offset_in_bytes(T_INT);
-#ifdef ASSERT
-          for (int bt = T_BOOLEAN; bt < T_INT; bt++) {
-            if (is_subword_type(BasicType(bt)))
-              assert(value_offset == java_lang_boxing_object::value_offset_in_bytes(BasicType(bt)), "");
-          }
-#endif
-          __ null_check(O1_scratch, value_offset);
-          value = Address(O1_scratch, value_offset);
-#ifdef _BIG_ENDIAN
-          // Values stored in objects are packed.
-          value_left_justified = true;
-#endif
-        }
-        break;
-      default:
-        ShouldNotReachHere();
-      }
-
-      // This check is required on _BIG_ENDIAN
-      Register G5_vminfo = G5_index;
-      __ ldsw(G3_amh_conversion, G5_vminfo);
-      assert(CONV_VMINFO_SHIFT == 0, "preshifted");
-
-      // Original 32-bit vmdata word must be of this form:
-      // | MBZ:6 | signBitCount:8 | srcDstTypes:8 | conversionOp:8 |
-      __ lduw(value, O1_scratch);
-      if (!value_left_justified)
-        __ sll(O1_scratch, G5_vminfo, O1_scratch);
-      Label zero_extend, done;
-      __ btst(CONV_VMINFO_SIGN_FLAG, G5_vminfo);
-      __ br(Assembler::zero, false, Assembler::pn, zero_extend);
-      __ delayed()->nop();
-
-      // this path is taken for int->byte, int->short
-      __ sra(O1_scratch, G5_vminfo, O1_scratch);
-      __ ba(false, done);
-      __ delayed()->nop();
-
-      __ bind(zero_extend);
-      // this is taken for int->char
-      __ srl(O1_scratch, G5_vminfo, O1_scratch);
-
-      __ bind(done);
-      __ st(O1_scratch, vmarg);
-
-      // Get the new MH:
-      __ load_heap_oop(G3_mh_vmtarget, G3_method_handle);
-      __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-    }
-    break;
-
-  case _adapter_opt_i2l:        // optimized subcase of adapt_prim_to_prim
-  case _adapter_opt_unboxl:     // optimized subcase of adapt_ref_to_prim
-    {
-      // Perform an in-place int-to-long or ref-to-long conversion.
-      __ ldsw(G3_amh_vmargslot, O0_argslot);
-
-      // On big-endian machine we duplicate the slot and store the MSW
-      // in the first slot.
-      __ add(Gargs, __ argument_offset(O0_argslot, 1), O0_argslot);
-
-      insert_arg_slots(_masm, stack_move_unit(), _INSERT_INT_MASK, O0_argslot, O1_scratch, O2_scratch, G5_index);
-
-      Address arg_lsw(O0_argslot, 0);
-      Address arg_msw(O0_argslot, -Interpreter::stackElementSize);
-
-      switch (ek) {
-      case _adapter_opt_i2l:
-        {
-#ifdef _LP64
-          __ ldsw(arg_lsw, O2_scratch);                 // Load LSW sign-extended
-#else
-          __ ldsw(arg_lsw, O3_scratch);                 // Load LSW sign-extended
-          __ srlx(O3_scratch, BitsPerInt, O2_scratch);  // Move MSW value to lower 32-bits for std
-#endif
-          __ st_long(O2_scratch, arg_msw);              // Uses O2/O3 on !_LP64
-        }
-        break;
-      case _adapter_opt_unboxl:
-        {
-          // Load the value up from the heap.
-          __ ld_ptr(arg_lsw, O1_scratch);
-          int value_offset = java_lang_boxing_object::value_offset_in_bytes(T_LONG);
-          assert(value_offset == java_lang_boxing_object::value_offset_in_bytes(T_DOUBLE), "");
-          __ null_check(O1_scratch, value_offset);
-          __ ld_long(Address(O1_scratch, value_offset), O2_scratch);  // Uses O2/O3 on !_LP64
-          __ st_long(O2_scratch, arg_msw);
-        }
-        break;
-      default:
-        ShouldNotReachHere();
-      }
-
-      __ load_heap_oop(G3_mh_vmtarget, G3_method_handle);
-      __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-    }
-    break;
-
-  case _adapter_opt_f2d:        // optimized subcase of adapt_prim_to_prim
-  case _adapter_opt_d2f:        // optimized subcase of adapt_prim_to_prim
-    {
-      // perform an in-place floating primitive conversion
-      __ unimplemented(entry_name(ek));
-    }
-    break;
-
-  case _adapter_prim_to_ref:
-    __ unimplemented(entry_name(ek)); // %%% FIXME: NYI
-    break;
-
-  case _adapter_swap_args:
-  case _adapter_rot_args:
-    // handled completely by optimized cases
-    __ stop("init_AdapterMethodHandle should not issue this");
-    break;
-
-  case _adapter_opt_swap_1:
-  case _adapter_opt_swap_2:
-  case _adapter_opt_rot_1_up:
-  case _adapter_opt_rot_1_down:
-  case _adapter_opt_rot_2_up:
-  case _adapter_opt_rot_2_down:
-    {
-      int swap_bytes = 0, rotate = 0;
-      get_ek_adapter_opt_swap_rot_info(ek, swap_bytes, rotate);
-
-      // 'argslot' is the position of the first argument to swap.
-      __ ldsw(G3_amh_vmargslot, O0_argslot);
-      __ add(Gargs, __ argument_offset(O0_argslot), O0_argslot);
-
-      // 'vminfo' is the second.
-      Register O1_destslot = O1_scratch;
-      __ ldsw(G3_amh_conversion, O1_destslot);
-      assert(CONV_VMINFO_SHIFT == 0, "preshifted");
-      __ and3(O1_destslot, CONV_VMINFO_MASK, O1_destslot);
-      __ add(Gargs, __ argument_offset(O1_destslot), O1_destslot);
-
-      if (!rotate) {
-        for (int i = 0; i < swap_bytes; i += wordSize) {
-          __ ld_ptr(Address(O0_argslot,  i), O2_scratch);
-          __ ld_ptr(Address(O1_destslot, i), O3_scratch);
-          __ st_ptr(O3_scratch, Address(O0_argslot,  i));
-          __ st_ptr(O2_scratch, Address(O1_destslot, i));
-        }
-      } else {
-        // Save the first chunk, which is going to get overwritten.
-        switch (swap_bytes) {
-        case 4 : __ lduw(Address(O0_argslot, 0), O2_scratch); break;
-        case 16: __ ldx( Address(O0_argslot, 8), O3_scratch); //fall-thru
-        case 8 : __ ldx( Address(O0_argslot, 0), O2_scratch); break;
-        default: ShouldNotReachHere();
-        }
-
-        if (rotate > 0) {
-          // Rorate upward.
-          __ sub(O0_argslot, swap_bytes, O0_argslot);
-#if ASSERT
-          {
-            // Verify that argslot > destslot, by at least swap_bytes.
-            Label L_ok;
-            __ cmp(O0_argslot, O1_destslot);
-            __ brx(Assembler::greaterEqualUnsigned, false, Assembler::pt, L_ok);
-            __ delayed()->nop();
-            __ stop("source must be above destination (upward rotation)");
-            __ bind(L_ok);
-          }
-#endif
-          // Work argslot down to destslot, copying contiguous data upwards.
-          // Pseudo-code:
-          //   argslot  = src_addr - swap_bytes
-          //   destslot = dest_addr
-          //   while (argslot >= destslot) {
-          //     *(argslot + swap_bytes) = *(argslot + 0);
-          //     argslot--;
-          //   }
-          Label loop;
-          __ bind(loop);
-          __ ld_ptr(Address(O0_argslot, 0), G5_index);
-          __ st_ptr(G5_index, Address(O0_argslot, swap_bytes));
-          __ sub(O0_argslot, wordSize, O0_argslot);
-          __ cmp(O0_argslot, O1_destslot);
-          __ brx(Assembler::greaterEqualUnsigned, false, Assembler::pt, loop);
-          __ delayed()->nop();  // FILLME
-        } else {
-          __ add(O0_argslot, swap_bytes, O0_argslot);
-#if ASSERT
-          {
-            // Verify that argslot < destslot, by at least swap_bytes.
-            Label L_ok;
-            __ cmp(O0_argslot, O1_destslot);
-            __ brx(Assembler::lessEqualUnsigned, false, Assembler::pt, L_ok);
-            __ delayed()->nop();
-            __ stop("source must be above destination (upward rotation)");
-            __ bind(L_ok);
-          }
-#endif
-          // Work argslot up to destslot, copying contiguous data downwards.
-          // Pseudo-code:
-          //   argslot  = src_addr + swap_bytes
-          //   destslot = dest_addr
-          //   while (argslot >= destslot) {
-          //     *(argslot - swap_bytes) = *(argslot + 0);
-          //     argslot++;
-          //   }
-          Label loop;
-          __ bind(loop);
-          __ ld_ptr(Address(O0_argslot, 0), G5_index);
-          __ st_ptr(G5_index, Address(O0_argslot, -swap_bytes));
-          __ add(O0_argslot, wordSize, O0_argslot);
-          __ cmp(O0_argslot, O1_destslot);
-          __ brx(Assembler::lessEqualUnsigned, false, Assembler::pt, loop);
-          __ delayed()->nop();  // FILLME
-        }
-
-        // Store the original first chunk into the destination slot, now free.
-        switch (swap_bytes) {
-        case 4 : __ stw(O2_scratch, Address(O1_destslot, 0)); break;
-        case 16: __ stx(O3_scratch, Address(O1_destslot, 8)); // fall-thru
-        case 8 : __ stx(O2_scratch, Address(O1_destslot, 0)); break;
-        default: ShouldNotReachHere();
-        }
-      }
-
-      __ load_heap_oop(G3_mh_vmtarget, G3_method_handle);
-      __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-    }
-    break;
-
-  case _adapter_dup_args:
-    {
-      // 'argslot' is the position of the first argument to duplicate.
-      __ ldsw(G3_amh_vmargslot, O0_argslot);
-      __ add(Gargs, __ argument_offset(O0_argslot), O0_argslot);
-
-      // 'stack_move' is negative number of words to duplicate.
-      Register G5_stack_move = G5_index;
-      __ ldsw(G3_amh_conversion, G5_stack_move);
-      __ sra(G5_stack_move, CONV_STACK_MOVE_SHIFT, G5_stack_move);
-
-      // Remember the old Gargs (argslot[0]).
-      Register O1_oldarg = O1_scratch;
-      __ mov(Gargs, O1_oldarg);
-
-      // Move Gargs down to make room for dups.
-      __ sll_ptr(G5_stack_move, LogBytesPerWord, G5_stack_move);
-      __ add(Gargs, G5_stack_move, Gargs);
-
-      // Compute the new Gargs (argslot[0]).
-      Register O2_newarg = O2_scratch;
-      __ mov(Gargs, O2_newarg);
-
-      // Copy from oldarg[0...] down to newarg[0...]
-      // Pseude-code:
-      //   O1_oldarg  = old-Gargs
-      //   O2_newarg  = new-Gargs
-      //   O0_argslot = argslot
-      //   while (O2_newarg < O1_oldarg) *O2_newarg = *O0_argslot++
-      Label loop;
-      __ bind(loop);
-      __ ld_ptr(Address(O0_argslot, 0), O3_scratch);
-      __ st_ptr(O3_scratch, Address(O2_newarg, 0));
-      __ add(O0_argslot, wordSize, O0_argslot);
-      __ add(O2_newarg,  wordSize, O2_newarg);
-      __ cmp(O2_newarg, O1_oldarg);
-      __ brx(Assembler::less, false, Assembler::pt, loop);
-      __ delayed()->nop();  // FILLME
-
-      __ load_heap_oop(G3_mh_vmtarget, G3_method_handle);
-      __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-    }
-    break;
-
-  case _adapter_drop_args:
-    {
-      // 'argslot' is the position of the first argument to nuke.
-      __ ldsw(G3_amh_vmargslot, O0_argslot);
-      __ add(Gargs, __ argument_offset(O0_argslot), O0_argslot);
-
-      // 'stack_move' is number of words to drop.
-      Register G5_stack_move = G5_index;
-      __ ldsw(G3_amh_conversion, G5_stack_move);
-      __ sra(G5_stack_move, CONV_STACK_MOVE_SHIFT, G5_stack_move);
-
-      remove_arg_slots(_masm, G5_stack_move, O0_argslot, O1_scratch, O2_scratch, O3_scratch);
-
-      __ load_heap_oop(G3_mh_vmtarget, G3_method_handle);
-      __ jump_to_method_handle_entry(G3_method_handle, O1_scratch);
-    }
-    break;
-
-  case _adapter_collect_args:
-    __ unimplemented(entry_name(ek)); // %%% FIXME: NYI
-    break;
-
-  case _adapter_spread_args:
-    // Handled completely by optimized cases.
-    __ stop("init_AdapterMethodHandle should not issue this");
-    break;
-
-  case _adapter_opt_spread_0:
-  case _adapter_opt_spread_1:
-  case _adapter_opt_spread_more:
-    {
-      // spread an array out into a group of arguments
-      __ unimplemented(entry_name(ek));
-    }
-    break;
-
-  case _adapter_flyby:
-  case _adapter_ricochet:
-    __ unimplemented(entry_name(ek)); // %%% FIXME: NYI
-    break;
-
-  default:
-    ShouldNotReachHere();
-  }
-
-  address me_cookie = MethodHandleEntry::start_compiled_entry(_masm, interp_entry);
-  __ unimplemented(entry_name(ek)); // %%% FIXME: NYI
-
-  init_entry(ek, MethodHandleEntry::finish_compiled_entry(_masm, me_cookie));
-}

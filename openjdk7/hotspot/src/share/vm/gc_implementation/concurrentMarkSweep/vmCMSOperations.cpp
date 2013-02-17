@@ -26,15 +26,22 @@
 #include "gc_implementation/concurrentMarkSweep/concurrentMarkSweepGeneration.inline.hpp"
 #include "gc_implementation/concurrentMarkSweep/concurrentMarkSweepThread.hpp"
 #include "gc_implementation/concurrentMarkSweep/vmCMSOperations.hpp"
+#include "gc_implementation/shared/gcTimer.hpp"
+#include "gc_implementation/shared/gcTraceTime.hpp"
 #include "gc_implementation/shared/isGCActiveMark.hpp"
 #include "memory/gcLocker.inline.hpp"
 #include "runtime/interfaceSupport.hpp"
+#include "runtime/os.hpp"
 #include "utilities/dtrace.hpp"
+
+
+#ifndef USDT2
 HS_DTRACE_PROBE_DECL(hs_private, cms__initmark__begin);
 HS_DTRACE_PROBE_DECL(hs_private, cms__initmark__end);
 
 HS_DTRACE_PROBE_DECL(hs_private, cms__remark__begin);
 HS_DTRACE_PROBE_DECL(hs_private, cms__remark__end);
+#endif /* !USDT2 */
 
 //////////////////////////////////////////////////////////
 // Methods in abstract class VM_CMS_Operation
@@ -56,21 +63,23 @@ void VM_CMS_Operation::release_and_notify_pending_list_lock() {
 void VM_CMS_Operation::verify_before_gc() {
   if (VerifyBeforeGC &&
       GenCollectedHeap::heap()->total_collections() >= VerifyGCStartAt) {
+    GCTraceTime tm("Verify Before", false, false, _collector->_gc_timer_cm);
     HandleMark hm;
     FreelistLocker x(_collector);
     MutexLockerEx  y(_collector->bitMapLock(), Mutex::_no_safepoint_check_flag);
     Universe::heap()->prepare_for_verify();
-    Universe::verify(true);
+    Universe::verify();
   }
 }
 
 void VM_CMS_Operation::verify_after_gc() {
   if (VerifyAfterGC &&
       GenCollectedHeap::heap()->total_collections() >= VerifyGCStartAt) {
+    GCTraceTime tm("Verify After", false, false, _collector->_gc_timer_cm);
     HandleMark hm;
     FreelistLocker x(_collector);
     MutexLockerEx  y(_collector->bitMapLock(), Mutex::_no_safepoint_check_flag);
-    Universe::verify(true);
+    Universe::verify();
   }
 }
 
@@ -129,7 +138,14 @@ void VM_CMS_Initial_Mark::doit() {
     // Nothing to do.
     return;
   }
+#ifndef USDT2
   HS_DTRACE_PROBE(hs_private, cms__initmark__begin);
+#else /* USDT2 */
+  HS_PRIVATE_CMS_INITMARK_BEGIN(
+                                );
+#endif /* USDT2 */
+
+  _collector->_gc_timer_cm->register_gc_pause_start("Initial Mark", os::elapsed_counter());
 
   GenCollectedHeap* gch = GenCollectedHeap::heap();
   GCCauseSetter gccs(gch, GCCause::_cms_initial_mark);
@@ -137,10 +153,18 @@ void VM_CMS_Initial_Mark::doit() {
   VM_CMS_Operation::verify_before_gc();
 
   IsGCActiveMark x; // stop-world GC active
-  _collector->do_CMS_operation(CMSCollector::CMS_op_checkpointRootsInitial);
+  _collector->do_CMS_operation(CMSCollector::CMS_op_checkpointRootsInitial, gch->gc_cause());
 
   VM_CMS_Operation::verify_after_gc();
+
+  _collector->_gc_timer_cm->register_gc_pause_end(os::elapsed_counter());
+
+#ifndef USDT2
   HS_DTRACE_PROBE(hs_private, cms__initmark__end);
+#else /* USDT2 */
+  HS_PRIVATE_CMS_INITMARK_END(
+                                );
+#endif /* USDT2 */
 }
 
 //////////////////////////////////////////////////////////
@@ -151,7 +175,14 @@ void VM_CMS_Final_Remark::doit() {
     // Nothing to do.
     return;
   }
+#ifndef USDT2
   HS_DTRACE_PROBE(hs_private, cms__remark__begin);
+#else /* USDT2 */
+  HS_PRIVATE_CMS_REMARK_BEGIN(
+                                );
+#endif /* USDT2 */
+
+  _collector->_gc_timer_cm->register_gc_pause_start("Final Mark", os::elapsed_counter());
 
   GenCollectedHeap* gch = GenCollectedHeap::heap();
   GCCauseSetter gccs(gch, GCCause::_cms_final_remark);
@@ -159,10 +190,18 @@ void VM_CMS_Final_Remark::doit() {
   VM_CMS_Operation::verify_before_gc();
 
   IsGCActiveMark x; // stop-world GC active
-  _collector->do_CMS_operation(CMSCollector::CMS_op_checkpointRootsFinal);
+  _collector->do_CMS_operation(CMSCollector::CMS_op_checkpointRootsFinal, gch->gc_cause());
 
   VM_CMS_Operation::verify_after_gc();
+
+  _collector->_gc_timer_cm->register_gc_pause_end(os::elapsed_counter());
+
+#ifndef USDT2
   HS_DTRACE_PROBE(hs_private, cms__remark__end);
+#else /* USDT2 */
+  HS_PRIVATE_CMS_REMARK_END(
+                                );
+#endif /* USDT2 */
 }
 
 // VM operation to invoke a concurrent collection of a

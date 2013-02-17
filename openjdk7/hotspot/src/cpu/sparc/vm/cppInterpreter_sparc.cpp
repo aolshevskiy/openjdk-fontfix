@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -490,7 +490,8 @@ address InterpreterGenerator::generate_accessor_entry(void) {
                       ConstantPoolCacheEntry::size()) * BytesPerWord), G1_scratch);
 
     // get constant pool cache
-    __ ld_ptr(G5_method, in_bytes(methodOopDesc::constants_offset()), G3_scratch);
+    __ ld_ptr(G5_method, in_bytes(methodOopDesc::const_offset()), G3_scratch);
+    __ ld_ptr(G3_scratch, in_bytes(constMethodOopDesc::constants_offset()), G3_scratch);
     __ ld_ptr(G3_scratch, constantPoolOopDesc::cache_offset_in_bytes(), G3_scratch);
 
     // get specific constant pool cache entry
@@ -514,9 +515,9 @@ address InterpreterGenerator::generate_accessor_entry(void) {
     // Need to differentiate between igetfield, agetfield, bgetfield etc.
     // because they are different sizes.
     // Get the type from the constant pool cache
-    __ srl(G1_scratch, ConstantPoolCacheEntry::tosBits, G1_scratch);
-    // Make sure we don't need to mask G1_scratch for tosBits after the above shift
-    ConstantPoolCacheEntry::verify_tosBits();
+    __ srl(G1_scratch, ConstantPoolCacheEntry::tos_state_shift, G1_scratch);
+    // Make sure we don't need to mask G1_scratch after the above shift
+    ConstantPoolCacheEntry::verify_tos_state_shift();
     __ cmp(G1_scratch, atos );
     __ br(Assembler::equal, true, Assembler::pt, xreturn_path);
     __ delayed()->ld_ptr(Otos_i, G3_scratch, Otos_i);
@@ -544,7 +545,7 @@ address InterpreterGenerator::generate_accessor_entry(void) {
 
     // Generate regular method entry
     __ bind(slow_path);
-    __ ba(false, fast_accessor_slow_entry_path);
+    __ ba(fast_accessor_slow_entry_path);
     __ delayed()->nop();
     return entry;
   }
@@ -719,8 +720,7 @@ address InterpreterGenerator::generate_native_entry(bool synchronized) {
 
     Address exception_addr(G2_thread, 0, in_bytes(Thread::pending_exception_offset()));
     __ ld_ptr(exception_addr, G3_scratch);
-    __ br_notnull(G3_scratch, false, Assembler::pn, pending_exception_present);
-    __ delayed()->nop();
+    __ br_notnull_short(G3_scratch, Assembler::pn, pending_exception_present);
     __ ld_ptr(Address(G5_method, 0, in_bytes(methodOopDesc::signature_handler_offset())), G3_scratch);
     __ bind(L);
   }
@@ -767,9 +767,10 @@ address InterpreterGenerator::generate_native_entry(bool synchronized) {
       // get native function entry point(O0 is a good temp until the very end)
        ld_ptr(Address(G5_method, 0, in_bytes(methodOopDesc::native_function_offset())), O0);
     // for static methods insert the mirror argument
-    const int mirror_offset = klassOopDesc::klass_part_offset_in_bytes() + Klass::java_mirror_offset_in_bytes();
+    const int mirror_offset = in_bytes(Klass::java_mirror_offset());
 
-    __ ld_ptr(Address(G5_method, 0, in_bytes(methodOopDesc:: constants_offset())), O1);
+    __ ld_ptr(Address(G5_method, 0, in_bytes(methodOopDesc:: const_offset())), O1);
+    __ ld_ptr(Address(O1, 0, in_bytes(constMethodOopDesc::constants_offset())), O1);
     __ ld_ptr(Address(O1, 0, constantPoolOopDesc::pool_holder_offset_in_bytes()), O1);
     __ ld_ptr(O1, mirror_offset, O1);
     // where the mirror handle body is allocated:
@@ -1048,7 +1049,7 @@ void CppInterpreterGenerator::generate_compute_interpreter_state(const Register 
   assert_different_registers(state, prev_state);
   assert_different_registers(prev_state, G3_scratch);
   const Register Gtmp = G3_scratch;
-  const Address constants         (G5_method, 0, in_bytes(methodOopDesc::constants_offset()));
+  const Address constMethod       (G5_method, 0, in_bytes(methodOopDesc::const_offset()));
   const Address access_flags      (G5_method, 0, in_bytes(methodOopDesc::access_flags_offset()));
   const Address size_of_parameters(G5_method, 0, in_bytes(methodOopDesc::size_of_parameters_offset()));
   const Address max_stack         (G5_method, 0, in_bytes(methodOopDesc::max_stack_offset()));
@@ -1156,7 +1157,8 @@ void CppInterpreterGenerator::generate_compute_interpreter_state(const Register 
   __ set((int) BytecodeInterpreter::method_entry, O1);
   __ st(O1, XXX_STATE(_msg));
 
-  __ ld_ptr(constants, O3);
+  __ ld_ptr(constMethod, O3);
+  __ ld_ptr(O3, in_bytes(constMethodOopDesc::constants_offset()), O3);
   __ ld_ptr(O3, constantPoolOopDesc::cache_offset_in_bytes(), O2);
   __ st_ptr(O2, XXX_STATE(_constants));
 
@@ -1174,12 +1176,13 @@ void CppInterpreterGenerator::generate_compute_interpreter_state(const Register 
     __ btst(JVM_ACC_SYNCHRONIZED, O1);
     __ br( Assembler::zero, false, Assembler::pt, done);
 
-    const int mirror_offset = klassOopDesc::klass_part_offset_in_bytes() + Klass::java_mirror_offset_in_bytes();
+    const int mirror_offset = in_bytes(Klass::java_mirror_offset());
     __ delayed()->btst(JVM_ACC_STATIC, O1);
     __ ld_ptr(XXX_STATE(_locals), O1);
     __ br( Assembler::zero, true, Assembler::pt, got_obj);
     __ delayed()->ld_ptr(O1, 0, O1);                  // get receiver for not-static case
-    __ ld_ptr(constants, O1);
+    __ ld_ptr(constMethod, O1);
+    __ ld_ptr( O1, in_bytes(constMethodOopDesc::constants_offset()), O1);
     __ ld_ptr( O1, constantPoolOopDesc::pool_holder_offset_in_bytes(), O1);
     // lock the mirror, not the klassOop
     __ ld_ptr( O1, mirror_offset, O1);
@@ -1188,7 +1191,7 @@ void CppInterpreterGenerator::generate_compute_interpreter_state(const Register 
 
   #ifdef ASSERT
     __ tst(O1);
-    __ breakpoint_trap(Assembler::zero);
+    __ breakpoint_trap(Assembler::zero, Assembler::ptr_cc);
   #endif // ASSERT
 
     const int entry_size            = frame::interpreter_frame_monitor_size() * wordSize;
@@ -1292,7 +1295,7 @@ void CppInterpreterGenerator::generate_deopt_handling() {
   deopt_frame_manager_return_atos  = __ pc();
 
   // O0/O1 live
-  __ ba(false, return_from_deopt_common);
+  __ ba(return_from_deopt_common);
   __ delayed()->set(AbstractInterpreter::BasicType_as_index(T_OBJECT), L3_scratch);    // Result stub address array index
 
 
@@ -1300,14 +1303,14 @@ void CppInterpreterGenerator::generate_deopt_handling() {
   deopt_frame_manager_return_btos  = __ pc();
 
   // O0/O1 live
-  __ ba(false, return_from_deopt_common);
+  __ ba(return_from_deopt_common);
   __ delayed()->set(AbstractInterpreter::BasicType_as_index(T_BOOLEAN), L3_scratch);    // Result stub address array index
 
   // deopt needs to jump to here to enter the interpreter (return a result)
   deopt_frame_manager_return_itos  = __ pc();
 
   // O0/O1 live
-  __ ba(false, return_from_deopt_common);
+  __ ba(return_from_deopt_common);
   __ delayed()->set(AbstractInterpreter::BasicType_as_index(T_INT), L3_scratch);    // Result stub address array index
 
   // deopt needs to jump to here to enter the interpreter (return a result)
@@ -1327,21 +1330,21 @@ void CppInterpreterGenerator::generate_deopt_handling() {
   __ srlx(G1,32,O0);
 #endif /* !_LP64 && COMPILER2 */
   // O0/O1 live
-  __ ba(false, return_from_deopt_common);
+  __ ba(return_from_deopt_common);
   __ delayed()->set(AbstractInterpreter::BasicType_as_index(T_LONG), L3_scratch);    // Result stub address array index
 
   // deopt needs to jump to here to enter the interpreter (return a result)
 
   deopt_frame_manager_return_ftos  = __ pc();
   // O0/O1 live
-  __ ba(false, return_from_deopt_common);
+  __ ba(return_from_deopt_common);
   __ delayed()->set(AbstractInterpreter::BasicType_as_index(T_FLOAT), L3_scratch);    // Result stub address array index
 
   // deopt needs to jump to here to enter the interpreter (return a result)
   deopt_frame_manager_return_dtos  = __ pc();
 
   // O0/O1 live
-  __ ba(false, return_from_deopt_common);
+  __ ba(return_from_deopt_common);
   __ delayed()->set(AbstractInterpreter::BasicType_as_index(T_DOUBLE), L3_scratch);    // Result stub address array index
 
   // deopt needs to jump to here to enter the interpreter (return a result)
@@ -1398,7 +1401,7 @@ void CppInterpreterGenerator::generate_more_monitors() {
   __ ld_ptr(STATE(_stack), L1_scratch);                // Get current stack top
   __ sub(L1_scratch, entry_size, L1_scratch);
   __ st_ptr(L1_scratch, STATE(_stack));
-  __ ba(false, entry);
+  __ ba(entry);
   __ delayed()->add(L1_scratch, wordSize, L1_scratch);        // first real entry (undo prepush)
 
   // 2. move expression stack
@@ -1537,7 +1540,7 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
   const Register Gtmp1 = G3_scratch;
   // const Register Lmirror = L1;     // native mirror (native calls only)
 
-  const Address constants         (G5_method, 0, in_bytes(methodOopDesc::constants_offset()));
+  const Address constMethod       (G5_method, 0, in_bytes(methodOopDesc::const_offset()));
   const Address access_flags      (G5_method, 0, in_bytes(methodOopDesc::access_flags_offset()));
   const Address size_of_parameters(G5_method, 0, in_bytes(methodOopDesc::size_of_parameters_offset()));
   const Address max_stack         (G5_method, 0, in_bytes(methodOopDesc::max_stack_offset()));
@@ -1651,7 +1654,7 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   __ set((int)BytecodeInterpreter::got_monitors, L1_scratch);
   VALIDATE_STATE(G3_scratch, 5);
-  __ ba(false, call_interpreter);
+  __ ba(call_interpreter);
   __ delayed()->st(L1_scratch, STATE(_msg));
 
   // uncommon trap needs to jump to here to enter the interpreter (re-execute current bytecode)
@@ -1659,7 +1662,7 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   // QQQ what message do we send
 
-  __ ba(false, call_interpreter);
+  __ ba(call_interpreter);
   __ delayed()->ld_ptr(STATE(_frame_bottom), SP);                  // restore to full stack frame
 
   //=============================================================================
@@ -1675,7 +1678,7 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
   // ready to resume the interpreter
 
   __ set((int)BytecodeInterpreter::deopt_resume, L1_scratch);
-  __ ba(false, call_interpreter);
+  __ ba(call_interpreter);
   __ delayed()->st(L1_scratch, STATE(_msg));
 
   // Current frame has caught an exception we need to dispatch to the
@@ -1763,7 +1766,7 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   // L1_scratch points to top of stack (prepushed)
 
-  __ ba(false, resume_interpreter);
+  __ ba(resume_interpreter);
   __ delayed()->mov(L1_scratch, O1);
 
   // An exception is being caught on return to a vanilla interpreter frame.
@@ -1773,7 +1776,7 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   __ ld_ptr(STATE(_frame_bottom), SP);                             // restore to full stack frame
   __ ld_ptr(STATE(_stack_base), O1);                               // empty java expression stack
-  __ ba(false, resume_interpreter);
+  __ ba(resume_interpreter);
   __ delayed()->sub(O1, wordSize, O1);                             // account for prepush
 
   // Return from interpreted method we return result appropriate to the caller (i.e. "recursive"
@@ -1852,7 +1855,7 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   __ set((int)BytecodeInterpreter::method_resume, L1_scratch);
   __ st(L1_scratch, STATE(_msg));
-  __ ba(false, call_interpreter_2);
+  __ ba(call_interpreter_2);
   __ delayed()->st_ptr(O1, STATE(_stack));
 
 
@@ -1867,8 +1870,8 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
     __ cmp(Gtmp1, O7);                                                // returning to interpreter?
     __ brx(Assembler::equal, true, Assembler::pt, re_dispatch);       // yep
     __ delayed()->nop();
-    __ ba(false, re_dispatch);
-    __ delayed()->mov(G0, prevState);                                   // initial entry
+    __ ba(re_dispatch);
+    __ delayed()->mov(G0, prevState);                                 // initial entry
 
   }
 
@@ -2031,8 +2034,8 @@ address InterpreterGenerator::generate_normal_entry(bool synchronized) {
   __ brx(Assembler::zero, false, Assembler::pt, unwind_and_forward);
   __ delayed()->nop();
 
-  __ ld_ptr(STATE(_locals), O1);                                   // get result of popping callee's args
-  __ ba(false, unwind_recursive_activation);
+  __ ld_ptr(STATE(_locals), O1); // get result of popping callee's args
+  __ ba(unwind_recursive_activation);
   __ delayed()->nop();
 
   interpreter_frame_manager = entry_point;

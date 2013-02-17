@@ -28,9 +28,11 @@
 #include "ci/ciInstance.hpp"
 #include "ci/ciInstanceKlass.hpp"
 #include "ci/ciInstanceKlassKlass.hpp"
+#include "ci/ciMemberName.hpp"
 #include "ci/ciMethod.hpp"
 #include "ci/ciMethodData.hpp"
 #include "ci/ciMethodHandle.hpp"
+#include "ci/ciMethodType.hpp"
 #include "ci/ciMethodKlass.hpp"
 #include "ci/ciNullObject.hpp"
 #include "ci/ciObjArray.hpp"
@@ -111,7 +113,7 @@ void ciObjectFactory::initialize() {
   // This Arena is long lived and exists in the resource mark of the
   // compiler thread that initializes the initial ciObjectFactory which
   // creates the shared ciObjects that all later ciObjectFactories use.
-  Arena* arena = new Arena();
+  Arena* arena = new (mtCompiler) Arena();
   ciEnv initial(arena);
   ciEnv* env = ciEnv::current();
   env->_factory->init_shared_objects();
@@ -344,8 +346,12 @@ ciObject* ciObjectFactory::create_new_object(oop o) {
     instanceHandle h_i(THREAD, (instanceOop)o);
     if (java_lang_invoke_CallSite::is_instance(o))
       return new (arena()) ciCallSite(h_i);
+    else if (java_lang_invoke_MemberName::is_instance(o))
+      return new (arena()) ciMemberName(h_i);
     else if (java_lang_invoke_MethodHandle::is_instance(o))
       return new (arena()) ciMethodHandle(h_i);
+    else if (java_lang_invoke_MethodType::is_instance(o))
+      return new (arena()) ciMethodType(h_i);
     else
       return new (arena()) ciInstance(h_i);
   } else if (o->is_objArray()) {
@@ -374,20 +380,32 @@ ciObject* ciObjectFactory::create_new_object(oop o) {
 // unloaded method.  This may need to change.
 ciMethod* ciObjectFactory::get_unloaded_method(ciInstanceKlass* holder,
                                                ciSymbol*        name,
-                                               ciSymbol*        signature) {
-  for (int i=0; i<_unloaded_methods->length(); i++) {
+                                               ciSymbol*        signature,
+                                               ciInstanceKlass* accessor) {
+  ciSignature* that = NULL;
+  for (int i = 0; i < _unloaded_methods->length(); i++) {
     ciMethod* entry = _unloaded_methods->at(i);
     if (entry->holder()->equals(holder) &&
         entry->name()->equals(name) &&
         entry->signature()->as_symbol()->equals(signature)) {
-      // We've found a match.
-      return entry;
+      // Short-circuit slow resolve.
+      if (entry->signature()->accessing_klass() == accessor) {
+        // We've found a match.
+        return entry;
+      } else {
+        // Lazily create ciSignature
+        if (that == NULL)  that = new (arena()) ciSignature(accessor, constantPoolHandle(), signature);
+        if (entry->signature()->equals(that)) {
+          // We've found a match.
+          return entry;
+        }
+      }
     }
   }
 
   // This is a new unloaded method.  Create it and stick it in
   // the cache.
-  ciMethod* new_method = new (arena()) ciMethod(holder, name, signature);
+  ciMethod* new_method = new (arena()) ciMethod(holder, name, signature, accessor);
 
   init_ident_of(new_method);
   _unloaded_methods->append(new_method);

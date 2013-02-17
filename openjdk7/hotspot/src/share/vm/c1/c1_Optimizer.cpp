@@ -29,6 +29,7 @@
 #include "c1/c1_ValueSet.hpp"
 #include "c1/c1_ValueStack.hpp"
 #include "utilities/bitMap.inline.hpp"
+#include "compiler/compileLog.hpp"
 
 define_array(ValueSetArray, ValueSet*);
 define_stack(ValueSetList, ValueSetArray);
@@ -54,7 +55,18 @@ class CE_Eliminator: public BlockClosure {
       // substituted some ifops/phis, so resolve the substitution
       SubstitutionResolver sr(_hir);
     }
+
+    CompileLog* log = _hir->compilation()->log();
+    if (log != NULL)
+      log->set_context("optimize name='cee'");
   }
+
+  ~CE_Eliminator() {
+    CompileLog* log = _hir->compilation()->log();
+    if (log != NULL)
+      log->clear_context(); // skip marker if nothing was printed
+  }
+
   int cee_count() const                          { return _cee_count; }
   int ifop_count() const                         { return _ifop_count; }
 
@@ -122,18 +134,32 @@ void CE_Eliminator::block_do(BlockBegin* block) {
   if (sux != f_goto->default_sux()) return;
 
   // check if at least one word was pushed on sux_state
+  // inlining depths must match
+  ValueStack* if_state = if_->state();
   ValueStack* sux_state = sux->state();
-  if (sux_state->stack_size() <= if_->state()->stack_size()) return;
+  if (if_state->scope()->level() > sux_state->scope()->level()) {
+    while (sux_state->scope() != if_state->scope()) {
+      if_state = if_state->caller_state();
+      assert(if_state != NULL, "states do not match up");
+    }
+  } else if (if_state->scope()->level() < sux_state->scope()->level()) {
+    while (sux_state->scope() != if_state->scope()) {
+      sux_state = sux_state->caller_state();
+      assert(sux_state != NULL, "states do not match up");
+    }
+  }
+
+  if (sux_state->stack_size() <= if_state->stack_size()) return;
 
   // check if phi function is present at end of successor stack and that
   // only this phi was pushed on the stack
-  Value sux_phi = sux_state->stack_at(if_->state()->stack_size());
+  Value sux_phi = sux_state->stack_at(if_state->stack_size());
   if (sux_phi == NULL || sux_phi->as_Phi() == NULL || sux_phi->as_Phi()->block() != sux) return;
-  if (sux_phi->type()->size() != sux_state->stack_size() - if_->state()->stack_size()) return;
+  if (sux_phi->type()->size() != sux_state->stack_size() - if_state->stack_size()) return;
 
   // get the values that were pushed in the true- and false-branch
-  Value t_value = t_goto->state()->stack_at(if_->state()->stack_size());
-  Value f_value = f_goto->state()->stack_at(if_->state()->stack_size());
+  Value t_value = t_goto->state()->stack_at(if_state->stack_size());
+  Value f_value = f_goto->state()->stack_at(if_state->stack_size());
 
   // backend does not support floats
   assert(t_value->type()->base() == f_value->type()->base(), "incompatible types");
@@ -180,11 +206,7 @@ void CE_Eliminator::block_do(BlockBegin* block) {
   Goto* goto_ = new Goto(sux, state_before, if_->is_safepoint() || t_goto->is_safepoint() || f_goto->is_safepoint());
 
   // prepare state for Goto
-  ValueStack* goto_state = if_->state();
-  while (sux_state->scope() != goto_state->scope()) {
-    goto_state = goto_state->caller_state();
-    assert(goto_state != NULL, "states do not match up");
-  }
+  ValueStack* goto_state = if_state;
   goto_state = goto_state->copy(ValueStack::StateAfter, goto_state->bci());
   goto_state->push(result->type(), result);
   assert(goto_state->is_same(sux_state), "states must match now");
@@ -296,6 +318,15 @@ class BlockMerger: public BlockClosure {
   , _merge_count(0)
   {
     _hir->iterate_preorder(this);
+    CompileLog* log = _hir->compilation()->log();
+    if (log != NULL)
+      log->set_context("optimize name='eliminate_blocks'");
+  }
+
+  ~BlockMerger() {
+    CompileLog* log = _hir->compilation()->log();
+    if (log != NULL)
+      log->clear_context(); // skip marker if nothing was printed
   }
 
   bool try_merge(BlockBegin* block) {
@@ -468,6 +499,7 @@ public:
   void do_IfOp           (IfOp*            x);
   void do_Convert        (Convert*         x);
   void do_NullCheck      (NullCheck*       x);
+  void do_TypeCast       (TypeCast*        x);
   void do_Invoke         (Invoke*          x);
   void do_NewInstance    (NewInstance*     x);
   void do_NewTypeArray   (NewTypeArray*    x);
@@ -494,11 +526,13 @@ public:
   void do_UnsafePutRaw   (UnsafePutRaw*    x);
   void do_UnsafeGetObject(UnsafeGetObject* x);
   void do_UnsafePutObject(UnsafePutObject* x);
+  void do_UnsafeGetAndSetObject(UnsafeGetAndSetObject* x);
   void do_UnsafePrefetchRead (UnsafePrefetchRead*  x);
   void do_UnsafePrefetchWrite(UnsafePrefetchWrite* x);
   void do_ProfileCall    (ProfileCall*     x);
   void do_ProfileInvoke  (ProfileInvoke*   x);
   void do_RuntimeCall    (RuntimeCall*     x);
+  void do_MemBar         (MemBar*          x);
 };
 
 
@@ -561,6 +595,15 @@ class NullCheckEliminator: public ValueVisitor {
     , _work_list(new BlockList()) {
     _visitable_instructions = new ValueSet();
     _visitor.set_eliminator(this);
+    CompileLog* log = _opt->ir()->compilation()->log();
+    if (log != NULL)
+      log->set_context("optimize name='null_check_elimination'");
+  }
+
+  ~NullCheckEliminator() {
+    CompileLog* log = _opt->ir()->compilation()->log();
+    if (log != NULL)
+      log->clear_context(); // skip marker if nothing was printed
   }
 
   Optimizer*  opt()                               { return _opt; }
@@ -637,12 +680,13 @@ void NullCheckVisitor::do_CompareOp      (CompareOp*       x) {}
 void NullCheckVisitor::do_IfOp           (IfOp*            x) {}
 void NullCheckVisitor::do_Convert        (Convert*         x) {}
 void NullCheckVisitor::do_NullCheck      (NullCheck*       x) { nce()->handle_NullCheck(x); }
+void NullCheckVisitor::do_TypeCast       (TypeCast*        x) {}
 void NullCheckVisitor::do_Invoke         (Invoke*          x) { nce()->handle_Invoke(x); }
 void NullCheckVisitor::do_NewInstance    (NewInstance*     x) { nce()->handle_NewInstance(x); }
 void NullCheckVisitor::do_NewTypeArray   (NewTypeArray*    x) { nce()->handle_NewArray(x); }
 void NullCheckVisitor::do_NewObjectArray (NewObjectArray*  x) { nce()->handle_NewArray(x); }
 void NullCheckVisitor::do_NewMultiArray  (NewMultiArray*   x) { nce()->handle_NewArray(x); }
-void NullCheckVisitor::do_CheckCast      (CheckCast*       x) {}
+void NullCheckVisitor::do_CheckCast      (CheckCast*       x) { nce()->clear_last_explicit_null_check(); }
 void NullCheckVisitor::do_InstanceOf     (InstanceOf*      x) {}
 void NullCheckVisitor::do_MonitorEnter   (MonitorEnter*    x) { nce()->handle_AccessMonitor(x); }
 void NullCheckVisitor::do_MonitorExit    (MonitorExit*     x) { nce()->handle_AccessMonitor(x); }
@@ -663,11 +707,13 @@ void NullCheckVisitor::do_UnsafeGetRaw   (UnsafeGetRaw*    x) {}
 void NullCheckVisitor::do_UnsafePutRaw   (UnsafePutRaw*    x) {}
 void NullCheckVisitor::do_UnsafeGetObject(UnsafeGetObject* x) {}
 void NullCheckVisitor::do_UnsafePutObject(UnsafePutObject* x) {}
+void NullCheckVisitor::do_UnsafeGetAndSetObject(UnsafeGetAndSetObject* x) {}
 void NullCheckVisitor::do_UnsafePrefetchRead (UnsafePrefetchRead*  x) {}
 void NullCheckVisitor::do_UnsafePrefetchWrite(UnsafePrefetchWrite* x) {}
 void NullCheckVisitor::do_ProfileCall    (ProfileCall*     x) { nce()->clear_last_explicit_null_check(); }
 void NullCheckVisitor::do_ProfileInvoke  (ProfileInvoke*   x) {}
 void NullCheckVisitor::do_RuntimeCall    (RuntimeCall*     x) {}
+void NullCheckVisitor::do_MemBar         (MemBar*          x) {}
 
 
 void NullCheckEliminator::visit(Value* p) {

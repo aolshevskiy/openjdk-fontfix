@@ -40,13 +40,23 @@
 
 #ifdef __solaris__
 #include <strings.h>
-#include <sys/mnttab.h>
-#include <sys/mkdev.h>
 #endif
 
 #ifdef __linux__
 #include <string.h>
-#include <mntent.h>
+#endif
+
+#ifdef _ALLBSD_SOURCE
+#include <string.h>
+
+#define stat64 stat
+#define statvfs64 statvfs
+
+#define open64 open
+#define fstat64 fstat
+#define lstat64 lstat
+#define dirent64 dirent
+#define readdir64_r readdir_r
 #endif
 
 #include "jni.h"
@@ -198,7 +208,7 @@ Java_sun_nio_fs_UnixNativeDispatcher_init(JNIEnv* env, jclass this)
 
     /* system calls that might not be available at run time */
 
-#if defined(__solaris__) && defined(_LP64)
+#if (defined(__solaris__) && defined(_LP64)) || defined(_ALLBSD_SOURCE)
     /* Solaris 64-bit does not have openat64/fstatat64 */
     my_openat64_func = (openat64_func*)dlsym(RTLD_DEFAULT, "openat");
     my_fstatat64_func = (fstatat64_func*)dlsym(RTLD_DEFAULT, "fstatat");
@@ -552,11 +562,17 @@ Java_sun_nio_fs_UnixNativeDispatcher_futimes(JNIEnv* env, jclass this, jint file
     times[1].tv_sec = modificationTime / 1000000;
     times[1].tv_usec = modificationTime % 1000000;
 
-    if (my_futimesat_func != NULL) {
-        RESTARTABLE((*my_futimesat_func)(filedes, NULL, &times[0]), err);
-        if (err == -1) {
-            throwUnixException(env, errno);
-        }
+#ifdef _ALLBSD_SOURCE
+    RESTARTABLE(futimes(filedes, &times[0]), err);
+#else
+    if (my_futimesat_func == NULL) {
+        JNU_ThrowInternalError(env, "my_ftimesat_func is NULL");
+        return;
+    }
+    RESTARTABLE((*my_futimesat_func)(filedes, NULL, &times[0]), err);
+#endif
+    if (err == -1) {
+        throwUnixException(env, errno);
     }
 }
 
@@ -605,9 +621,12 @@ Java_sun_nio_fs_UnixNativeDispatcher_closedir(JNIEnv* env, jclass this, jlong di
 
 JNIEXPORT jbyteArray JNICALL
 Java_sun_nio_fs_UnixNativeDispatcher_readdir(JNIEnv* env, jclass this, jlong value) {
-    char entry[sizeof(struct dirent64) + PATH_MAX + 1];
-    struct dirent64* ptr = (struct dirent64*)&entry;
     struct dirent64* result;
+    struct {
+        struct dirent64 buf;
+        char name_extra[PATH_MAX + 1 - sizeof result->d_name];
+    } entry;
+    struct dirent64* ptr = &entry.buf;
     int res;
     DIR* dirp = jlong_to_ptr(value);
 
@@ -996,7 +1015,7 @@ Java_sun_nio_fs_UnixNativeDispatcher_getpwnam0(JNIEnv* env, jclass this,
 
         if (res != 0 || p == NULL || p->pw_name == NULL || *(p->pw_name) == '\0') {
             /* not found or error */
-            if (errno != 0 && errno != ENOENT)
+            if (errno != 0 && errno != ENOENT && errno != ESRCH)
                 throwUnixException(env, errno);
         } else {
             uid = p->pw_uid;
@@ -1042,7 +1061,7 @@ Java_sun_nio_fs_UnixNativeDispatcher_getgrnam0(JNIEnv* env, jclass this,
         retry = 0;
         if (res != 0 || g == NULL || g->gr_name == NULL || *(g->gr_name) == '\0') {
             /* not found or error */
-            if (errno != 0 && errno != ENOENT) {
+            if (errno != 0 && errno != ENOENT && errno != ESRCH) {
                 if (errno == ERANGE) {
                     /* insufficient buffer size so need larger buffer */
                     buflen += ENT_BUF_SIZE;
@@ -1060,83 +1079,4 @@ Java_sun_nio_fs_UnixNativeDispatcher_getgrnam0(JNIEnv* env, jclass this,
     } while (retry);
 
     return gid;
-}
-
-JNIEXPORT jint JNICALL
-Java_sun_nio_fs_UnixNativeDispatcher_getextmntent(JNIEnv* env, jclass this,
-    jlong value, jobject entry)
-{
-#ifdef __solaris__
-    struct extmnttab ent;
-#else
-    struct mntent ent;
-    char buf[1024];
-    int buflen = sizeof(buf);
-    struct mntent* m;
-#endif
-    FILE* fp = jlong_to_ptr(value);
-    jsize len;
-    jbyteArray bytes;
-    char* name;
-    char* dir;
-    char* fstype;
-    char* options;
-    dev_t dev;
-
-#ifdef __solaris__
-    if (getextmntent(fp, &ent, 0))
-        return -1;
-    name = ent.mnt_special;
-    dir = ent.mnt_mountp;
-    fstype = ent.mnt_fstype;
-    options = ent.mnt_mntopts;
-    dev = makedev(ent.mnt_major, ent.mnt_minor);
-    if (dev == NODEV) {
-        /* possible bug on Solaris 8 and 9 */
-        throwUnixException(env, errno);
-        return -1;
-    }
-#else
-    m = getmntent_r(fp, &ent, (char*)&buf, buflen);
-    if (m == NULL)
-        return -1;
-    name = m->mnt_fsname;
-    dir = m->mnt_dir;
-    fstype = m->mnt_type;
-    options = m->mnt_opts;
-    dev = 0;
-#endif
-
-    len = strlen(name);
-    bytes = (*env)->NewByteArray(env, len);
-    if (bytes == NULL)
-        return -1;
-    (*env)->SetByteArrayRegion(env, bytes, 0, len, (jbyte*)name);
-    (*env)->SetObjectField(env, entry, entry_name, bytes);
-
-    len = strlen(dir);
-    bytes = (*env)->NewByteArray(env, len);
-    if (bytes == NULL)
-        return -1;
-    (*env)->SetByteArrayRegion(env, bytes, 0, len, (jbyte*)dir);
-    (*env)->SetObjectField(env, entry, entry_dir, bytes);
-
-    len = strlen(fstype);
-    bytes = (*env)->NewByteArray(env, len);
-    if (bytes == NULL)
-        return -1;
-    (*env)->SetByteArrayRegion(env, bytes, 0, len, (jbyte*)fstype);
-    (*env)->SetObjectField(env, entry, entry_fstype, bytes);
-
-    len = strlen(options);
-    bytes = (*env)->NewByteArray(env, len);
-    if (bytes == NULL)
-        return -1;
-    (*env)->SetByteArrayRegion(env, bytes, 0, len, (jbyte*)options);
-    (*env)->SetObjectField(env, entry, entry_options, bytes);
-
-    if (dev != 0)
-        (*env)->SetLongField(env, entry, entry_dev, (jlong)dev);
-
-    return 0;
 }

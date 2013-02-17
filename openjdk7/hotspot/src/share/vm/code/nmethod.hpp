@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,7 @@
 // This class is used internally by nmethods, to cache
 // exception/pc/handler information.
 
-class ExceptionCache : public CHeapObj {
+class ExceptionCache : public CHeapObj<mtCode> {
   friend class VMStructs;
  private:
   enum { cache_size = 16 };
@@ -175,6 +175,8 @@ class nmethod : public CodeBlob {
   // set during construction
   unsigned int _has_unsafe_access:1;         // May fault due to unsafe access.
   unsigned int _has_method_handle_invokes:1; // Has this method MethodHandle invokes?
+  unsigned int _lazy_critical_native:1;      // Lazy JNI critical native
+  unsigned int _has_wide_vectors:1;          // Preserve wide vectors at safepoints
 
   // Protected by Patching_lock
   unsigned char _state;                      // {alive, not_entrant, zombie, unloaded}
@@ -190,8 +192,6 @@ class nmethod : public CodeBlob {
 
 
   jbyte _scavenge_root_state;
-
-  NOT_PRODUCT(bool _has_debug_info; )
 
   // Nmethod Flushing lock. If non-zero, then the nmethod is not removed
   // and is not made into a zombie. However, once the nmethod is made into
@@ -329,11 +329,6 @@ class nmethod : public CodeBlob {
   methodOop method() const                        { return _method; }
   AbstractCompiler* compiler() const              { return _compiler; }
 
-#ifndef PRODUCT
-  bool has_debug_info() const                     { return _has_debug_info; }
-  void set_has_debug_info(bool f)                 { _has_debug_info = false; }
-#endif // NOT PRODUCT
-
   // type info
   bool is_nmethod() const                         { return true; }
   bool is_java_method() const                     { return !method()->is_native(); }
@@ -437,7 +432,13 @@ class nmethod : public CodeBlob {
   void  set_has_method_handle_invokes(bool z)     { _has_method_handle_invokes = z; }
 
   bool  is_speculatively_disconnected() const     { return _speculatively_disconnected; }
-  void  set_speculatively_disconnected(bool z)     { _speculatively_disconnected = z; }
+  void  set_speculatively_disconnected(bool z)    { _speculatively_disconnected = z; }
+
+  bool  is_lazy_critical_native() const           { return _lazy_critical_native; }
+  void  set_lazy_critical_native(bool z)          { _lazy_critical_native = z; }
+
+  bool  has_wide_vectors() const                  { return _has_wide_vectors; }
+  void  set_has_wide_vectors(bool z)              { _has_wide_vectors = z; }
 
   int   comp_level() const                        { return _comp_level; }
 
@@ -556,7 +557,7 @@ public:
   static void oops_do_marking_prologue();
   static void oops_do_marking_epilogue();
   static bool oops_do_marking_is_active() { return _oops_do_mark_nmethods != NULL; }
-  DEBUG_ONLY(bool test_oops_do_mark() { return _oops_do_mark_link != NULL; })
+  bool test_oops_do_mark() { return _oops_do_mark_link != NULL; }
 
   // ScopeDesc for an instruction
   ScopeDesc* scope_desc_at(address pc);
@@ -633,11 +634,11 @@ public:
   void log_state_change() const;
 
   // Prints block-level comments, including nmethod specific block labels:
-  virtual void print_block_comment(outputStream* stream, address block_begin) {
+  virtual void print_block_comment(outputStream* stream, address block_begin) const {
     print_nmethod_labels(stream, block_begin);
     CodeBlob::print_block_comment(stream, block_begin);
   }
-  void print_nmethod_labels(outputStream* stream, address block_begin);
+  void print_nmethod_labels(outputStream* stream, address block_begin) const;
 
   // Prints a comment for one native instruction (reloc info, pc desc)
   void print_code_comment_on(outputStream* st, int column, address begin, address end);

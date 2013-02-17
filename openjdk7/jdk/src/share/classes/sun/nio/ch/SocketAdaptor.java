@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,8 @@ import java.security.AccessController;
 import java.security.PrivilegedExceptionAction;
 import java.util.*;
 
+import sun.misc.IoTrace;
+
 
 // Make a socket channel look like a socket.
 //
@@ -57,13 +59,17 @@ public class SocketAdaptor
     // Timeout "option" value for reads
     private volatile int timeout = 0;
 
-    // ## super will create a useless impl
-    private SocketAdaptor(SocketChannelImpl sc) {
+    private SocketAdaptor(SocketChannelImpl sc) throws SocketException {
+        super((SocketImpl) null);
         this.sc = sc;
     }
 
     public static Socket create(SocketChannelImpl sc) {
-        return new SocketAdaptor(sc);
+        try {
+            return new SocketAdaptor(sc);
+        } catch (SocketException e) {
+            throw new InternalError("Should not reach here");
+        }
     }
 
     public SocketChannel getChannel() {
@@ -200,8 +206,9 @@ public class SocketAdaptor
                 SelectionKey sk = null;
                 Selector sel = null;
                 sc.configureBlocking(false);
+                int n = 0;
+                Object traceContext = IoTrace.socketReadBegin(getInetAddress(), getPort(), timeout);
                 try {
-                    int n;
                     if ((n = sc.read(bb)) != 0)
                         return n;
                     sel = Util.getTemporarySelector(sc);
@@ -222,6 +229,7 @@ public class SocketAdaptor
                             throw new SocketTimeoutException();
                     }
                 } finally {
+                    IoTrace.socketReadEnd(traceContext, n > 0 ? n : 0);
                     if (sk != null)
                         sk.cancel();
                     if (sc.isOpen())

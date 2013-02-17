@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@
 #include "memory/allocation.hpp"
 #include "memory/allocation.inline.hpp"
 #include "oops/oop.inline.hpp"
+#include "oops/fieldStreams.hpp"
 #include "runtime/fieldDescriptor.hpp"
 
 // ciInstanceKlass
@@ -53,15 +54,12 @@ ciInstanceKlass::ciInstanceKlass(KlassHandle h_k) :
   _flags = ciFlags(access_flags);
   _has_finalizer = access_flags.has_finalizer();
   _has_subklass = ik->subklass() != NULL;
-  _init_state = (instanceKlass::ClassState)ik->get_init_state();
+  _init_state = ik->init_state();
   _nonstatic_field_size = ik->nonstatic_field_size();
   _has_nonstatic_fields = ik->has_nonstatic_fields();
   _nonstatic_fields = NULL; // initialized lazily by compute_nonstatic_fields:
 
-  _nof_implementors = ik->nof_implementors();
-  for (int i = 0; i < implementors_limit; i++) {
-    _implementors[i] = NULL;  // we will fill these lazily
-  }
+  _implementor = NULL; // we will fill these lazily
 
   Thread *thread = Thread::current();
   if (ciObjectFactory::is_initialized()) {
@@ -101,7 +99,6 @@ ciInstanceKlass::ciInstanceKlass(ciSymbol* name,
   _nonstatic_field_size = -1;
   _has_nonstatic_fields = false;
   _nonstatic_fields = NULL;
-  _nof_implementors = -1;
   _loader = loader;
   _protection_domain = protection_domain;
   _is_shared = false;
@@ -117,7 +114,7 @@ ciInstanceKlass::ciInstanceKlass(ciSymbol* name,
 void ciInstanceKlass::compute_shared_init_state() {
   GUARDED_VM_ENTRY(
     instanceKlass* ik = get_instanceKlass();
-    _init_state = (instanceKlass::ClassState)ik->get_init_state();
+    _init_state = ik->init_state();
   )
 }
 
@@ -128,17 +125,6 @@ bool ciInstanceKlass::compute_shared_has_subklass() {
     instanceKlass* ik = get_instanceKlass();
     _has_subklass = ik->subklass() != NULL;
     return _has_subklass;
-  )
-}
-
-// ------------------------------------------------------------------
-// ciInstanceKlass::compute_shared_nof_implementors
-int ciInstanceKlass::compute_shared_nof_implementors() {
-  // We requery this property, since it is a very old ciObject.
-  GUARDED_VM_ENTRY(
-    instanceKlass* ik = get_instanceKlass();
-    _nof_implementors = ik->nof_implementors();
-    return _nof_implementors;
   )
 }
 
@@ -412,7 +398,7 @@ GrowableArray<ciField*>* ciInstanceKlass::non_static_fields() {
     VM_ENTRY_MARK;
     ciEnv* curEnv = ciEnv::current();
     instanceKlass* ik = get_instanceKlass();
-    int max_n_fields = ik->fields()->length()/instanceKlass::next_offset;
+    int max_n_fields = ik->java_fields_count();
 
     Arena* arena = curEnv->arena();
     _non_static_fields =
@@ -476,23 +462,6 @@ int ciInstanceKlass::compute_nonstatic_fields() {
   // Now sort them by offset, ascending.
   // (In principle, they could mix with superclass fields.)
   fields->sort(sort_field_by_offset);
-#ifdef ASSERT
-  int last_offset = instanceOopDesc::base_offset_in_bytes();
-  for (int i = 0; i < fields->length(); i++) {
-    ciField* field = fields->at(i);
-    int offset = field->offset_in_bytes();
-    int size   = (field->_type == NULL) ? heapOopSize : field->size_in_bytes();
-    assert(last_offset <= offset, err_msg("no field overlap: %d <= %d", last_offset, offset));
-    if (last_offset > (int)sizeof(oopDesc))
-      assert((offset - last_offset) < BytesPerLong, "no big holes");
-    // Note:  Two consecutive T_BYTE fields will be separated by wordSize-1
-    // padding bytes if one of them is declared by a superclass.
-    // This is a minor inefficiency classFileParser.cpp.
-    last_offset = offset + size;
-  }
-  assert(last_offset <= (int)instanceOopDesc::base_offset_in_bytes() + fsize, "no overflow");
-#endif
-
   _nonstatic_fields = fields;
   return flen;
 }
@@ -505,33 +474,29 @@ ciInstanceKlass::compute_nonstatic_fields_impl(GrowableArray<ciField*>*
   int flen = 0;
   GrowableArray<ciField*>* fields = NULL;
   instanceKlass* k = get_instanceKlass();
-  typeArrayOop fields_array = k->fields();
-  for (int pass = 0; pass <= 1; pass++) {
-    for (int i = 0, alen = fields_array->length(); i < alen; i += instanceKlass::next_offset) {
-      fieldDescriptor fd;
-      fd.initialize(k->as_klassOop(), i);
-      if (fd.is_static())  continue;
-      if (pass == 0) {
-        flen += 1;
-      } else {
-        ciField* field = new (arena) ciField(&fd);
-        fields->append(field);
-      }
-    }
+  for (JavaFieldStream fs(k); !fs.done(); fs.next()) {
+    if (fs.access_flags().is_static())  continue;
+    flen += 1;
+  }
 
-    // Between passes, allocate the array:
-    if (pass == 0) {
-      if (flen == 0) {
-        return NULL;  // return nothing if none are locally declared
-      }
-      if (super_fields != NULL) {
-        flen += super_fields->length();
-      }
-      fields = new (arena) GrowableArray<ciField*>(arena, flen, 0, NULL);
-      if (super_fields != NULL) {
-        fields->appendAll(super_fields);
-      }
-    }
+  // allocate the array:
+  if (flen == 0) {
+    return NULL;  // return nothing if none are locally declared
+  }
+  if (super_fields != NULL) {
+    flen += super_fields->length();
+  }
+  fields = new (arena) GrowableArray<ciField*>(arena, flen, 0, NULL);
+  if (super_fields != NULL) {
+    fields->appendAll(super_fields);
+  }
+
+  for (JavaFieldStream fs(k); !fs.done(); fs.next()) {
+    if (fs.access_flags().is_static())  continue;
+    fieldDescriptor fd;
+    fd.initialize(k->as_klassOop(), fs.index());
+    ciField* field = new (arena) ciField(&fd);
+    fields->append(field);
   }
   assert(fields->length() == flen, "sanity");
   return fields;
@@ -560,7 +525,7 @@ bool ciInstanceKlass::is_leaf_type() {
   if (is_shared()) {
     return is_final();  // approximately correct
   } else {
-    return !_has_subklass && (_nof_implementors == 0);
+    return !_has_subklass && (nof_implementors() == 0);
   }
 }
 
@@ -568,35 +533,31 @@ bool ciInstanceKlass::is_leaf_type() {
 // ciInstanceKlass::implementor
 //
 // Report an implementor of this interface.
-// Returns NULL if exact information is not available.
 // Note that there are various races here, since my copy
 // of _nof_implementors might be out of date with respect
 // to results returned by instanceKlass::implementor.
 // This is OK, since any dependencies we decide to assert
 // will be checked later under the Compile_lock.
-ciInstanceKlass* ciInstanceKlass::implementor(int n) {
-  if (n >= implementors_limit) {
-    return NULL;
-  }
-  ciInstanceKlass* impl = _implementors[n];
+ciInstanceKlass* ciInstanceKlass::implementor() {
+  ciInstanceKlass* impl = _implementor;
   if (impl == NULL) {
-    if (_nof_implementors > implementors_limit) {
-      return NULL;
-    }
     // Go into the VM to fetch the implementor.
     {
       VM_ENTRY_MARK;
-      klassOop k = get_instanceKlass()->implementor(n);
+      klassOop k = get_instanceKlass()->implementor();
       if (k != NULL) {
-        impl = CURRENT_THREAD_ENV->get_object(k)->as_instance_klass();
+        if (k == get_instanceKlass()->as_klassOop()) {
+          // More than one implementors. Use 'this' in this case.
+          impl = this;
+        } else {
+          impl = CURRENT_THREAD_ENV->get_object(k)->as_instance_klass();
+        }
       }
     }
     // Memoize this result.
     if (!is_shared()) {
-      _implementors[n] = (impl == NULL)? this: impl;
+      _implementor = impl;
     }
-  } else if (impl == this) {
-    impl = NULL;  // memoized null result from a VM query
   }
   return impl;
 }

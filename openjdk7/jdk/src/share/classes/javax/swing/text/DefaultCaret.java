@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -403,6 +403,10 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
      * @see MouseListener#mouseClicked
      */
     public void mouseClicked(MouseEvent e) {
+        if (getComponent() == null) {
+            return;
+        }
+
         int nclicks = SwingUtilities2.getAdjustedClickCount(getComponent(), e);
 
         if (! e.isConsumed()) {
@@ -1326,7 +1330,7 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
         if ( ! SwingUtilities2.canCurrentEventAccessSystemClipboard() ) {
             return;
         }
-        if (this.dot != this.mark && component != null) {
+        if (this.dot != this.mark && component != null && component.hasFocus()) {
             Clipboard clip = getSystemSelection();
             if (clip != null) {
                 String selectedText;
@@ -1499,9 +1503,14 @@ public class DefaultCaret extends Rectangle implements Caret, FocusListener, Mou
 
         if (caretWidth > -1) {
             return caretWidth;
+        } else {
+            Object property = UIManager.get("Caret.width");
+            if (property instanceof Integer) {
+                return ((Integer) property).intValue();
+            } else {
+                return 1;
+            }
         }
-
-        return 1;
     }
 
     // --- serialization ---------------------------------------------

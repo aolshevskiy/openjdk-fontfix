@@ -419,8 +419,12 @@ public abstract class WComponentPeer extends WObjectPeer
     public void createScreenSurface(boolean isResize)
     {
         Win32GraphicsConfig gc = (Win32GraphicsConfig)getGraphicsConfiguration();
-        ScreenUpdateManager mgr = ScreenUpdateManager.getInstance();
+        if (gc == null) {
+            surfaceData = null;
+            return;
+        }
 
+        ScreenUpdateManager mgr = ScreenUpdateManager.getInstance();
         surfaceData = mgr.createScreenSurface(gc, this, numBackBuffers, isResize);
     }
 
@@ -613,6 +617,14 @@ public abstract class WComponentPeer extends WObjectPeer
         // remove from updater before calling targetDisposedPeer
         WToolkit.targetDisposedPeer(target, this);
         _dispose();
+    }
+
+    public void disposeLater() {
+        postEvent(new InvocationEvent(Toolkit.getDefaultToolkit(), new Runnable() {
+            public void run() {
+                dispose();
+            }
+        }));
     }
 
     public synchronized void setForeground(Color c) {

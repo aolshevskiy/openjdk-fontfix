@@ -42,6 +42,11 @@ void Canonicalizer::set_canonical(Value x) {
   // the instruction stream (because the instruction list is embedded
   // in the instructions).
   if (canonical() != x) {
+#ifndef PRODUCT
+    if (!x->has_printable_bci()) {
+      x->set_printable_bci(bci());
+    }
+#endif
     if (PrintCanonicalization) {
       PrintValueVisitor do_print_value;
       canonical()->input_values_do(&do_print_value);
@@ -451,6 +456,28 @@ void Canonicalizer::do_Intrinsic      (Intrinsic*       x) {
     }
     break;
   }
+  case vmIntrinsics::_isInstance          : {
+    assert(x->number_of_arguments() == 2, "wrong type");
+
+    InstanceConstant* c = x->argument_at(0)->type()->as_InstanceConstant();
+    if (c != NULL && !c->value()->is_null_object()) {
+      // ciInstance::java_mirror_type() returns non-NULL only for Java mirrors
+      ciType* t = c->value()->as_instance()->java_mirror_type();
+      if (t->is_klass()) {
+        // substitute cls.isInstance(obj) of a constant Class into
+        // an InstantOf instruction
+        InstanceOf* i = new InstanceOf(t->as_klass(), x->argument_at(1), x->state_before());
+        set_canonical(i);
+        // and try to canonicalize even further
+        do_InstanceOf(i);
+      } else {
+        assert(t->is_primitive_type(), "should be a primitive type");
+        // cls.isInstance(obj) always returns false for primitive classes
+        set_constant(0);
+      }
+    }
+    break;
+  }
   }
 }
 
@@ -540,6 +567,7 @@ void Canonicalizer::do_NullCheck      (NullCheck*       x) {
   }
 }
 
+void Canonicalizer::do_TypeCast       (TypeCast*        x) {}
 void Canonicalizer::do_Invoke         (Invoke*          x) {}
 void Canonicalizer::do_NewInstance    (NewInstance*     x) {}
 void Canonicalizer::do_NewTypeArray   (NewTypeArray*    x) {}
@@ -594,6 +622,13 @@ static bool is_true(jlong x, If::Condition cond, jlong y) {
   return false;
 }
 
+static bool is_safepoint(BlockEnd* x, BlockBegin* sux) {
+  // An Instruction with multiple successors, x, is replaced by a Goto
+  // to a single successor, sux. Is a safepoint check needed = was the
+  // instruction being replaced a safepoint and the single remaining
+  // successor a back branch?
+  return x->is_safepoint() && (sux->bci() < x->state_before()->bci());
+}
 
 void Canonicalizer::do_If(If* x) {
   // move const to right
@@ -614,7 +649,7 @@ void Canonicalizer::do_If(If* x) {
     case If::geq: sux = x->sux_for(true);  break;
     }
     // If is a safepoint then the debug information should come from the state_before of the If.
-    set_canonical(new Goto(sux, x->state_before(), x->is_safepoint()));
+    set_canonical(new Goto(sux, x->state_before(), is_safepoint(x, sux)));
     return;
   }
 
@@ -626,7 +661,7 @@ void Canonicalizer::do_If(If* x) {
                                                        x->sux_for(false));
       if (sux != NULL) {
         // If is a safepoint then the debug information should come from the state_before of the If.
-        set_canonical(new Goto(sux, x->state_before(), x->is_safepoint()));
+        set_canonical(new Goto(sux, x->state_before(), is_safepoint(x, sux)));
       }
     }
   } else if (rt->as_IntConstant() != NULL) {
@@ -670,8 +705,8 @@ void Canonicalizer::do_If(If* x) {
                 return;
             }
           }
-          set_canonical(canon);
           set_bci(cmp->state_before()->bci());
+          set_canonical(canon);
         }
       }
     } else if (l->as_InstanceOf() != NULL) {
@@ -694,10 +729,12 @@ void Canonicalizer::do_If(If* x) {
     }
   } else if (rt == objectNull && (l->as_NewInstance() || l->as_NewArray())) {
     if (x->cond() == Instruction::eql) {
-      set_canonical(new Goto(x->fsux(), x->state_before(), x->is_safepoint()));
+      BlockBegin* sux = x->fsux();
+      set_canonical(new Goto(sux, x->state_before(), is_safepoint(x, sux)));
     } else {
       assert(x->cond() == Instruction::neq, "only other valid case");
-      set_canonical(new Goto(x->tsux(), x->state_before(), x->is_safepoint()));
+      BlockBegin* sux = x->tsux();
+      set_canonical(new Goto(sux, x->state_before(), is_safepoint(x, sux)));
     }
   }
 }
@@ -710,7 +747,7 @@ void Canonicalizer::do_TableSwitch(TableSwitch* x) {
     if (v >= x->lo_key() && v <= x->hi_key()) {
       sux = x->sux_at(v - x->lo_key());
     }
-    set_canonical(new Goto(sux, x->state_before(), x->is_safepoint()));
+    set_canonical(new Goto(sux, x->state_before(), is_safepoint(x, sux)));
   } else if (x->number_of_sux() == 1) {
     // NOTE: Code permanently disabled for now since the switch statement's
     //       tag expression may produce side-effects in which case it must
@@ -741,7 +778,7 @@ void Canonicalizer::do_LookupSwitch(LookupSwitch* x) {
         sux = x->sux_at(i);
       }
     }
-    set_canonical(new Goto(sux, x->state_before(), x->is_safepoint()));
+    set_canonical(new Goto(sux, x->state_before(), is_safepoint(x, sux)));
   } else if (x->number_of_sux() == 1) {
     // NOTE: Code permanently disabled for now since the switch statement's
     //       tag expression may produce side-effects in which case it must
@@ -894,8 +931,10 @@ void Canonicalizer::do_UnsafeGetRaw(UnsafeGetRaw* x) { if (OptimizeUnsafes) do_U
 void Canonicalizer::do_UnsafePutRaw(UnsafePutRaw* x) { if (OptimizeUnsafes) do_UnsafeRawOp(x); }
 void Canonicalizer::do_UnsafeGetObject(UnsafeGetObject* x) {}
 void Canonicalizer::do_UnsafePutObject(UnsafePutObject* x) {}
+void Canonicalizer::do_UnsafeGetAndSetObject(UnsafeGetAndSetObject* x) {}
 void Canonicalizer::do_UnsafePrefetchRead (UnsafePrefetchRead*  x) {}
 void Canonicalizer::do_UnsafePrefetchWrite(UnsafePrefetchWrite* x) {}
 void Canonicalizer::do_ProfileCall(ProfileCall* x) {}
 void Canonicalizer::do_ProfileInvoke(ProfileInvoke* x) {}
 void Canonicalizer::do_RuntimeCall(RuntimeCall* x) {}
+void Canonicalizer::do_MemBar(MemBar* x) {}

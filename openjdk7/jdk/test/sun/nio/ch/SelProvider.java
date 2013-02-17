@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012 Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,28 +31,23 @@ import java.nio.channels.spi.*;
 
 public class SelProvider {
     public static void main(String[] args) throws Exception {
-        String osname = System.getProperty("os.name");
-        String osver = System.getProperty("os.version");
-        String spName = SelectorProvider.provider().getClass().getName();
-        String expected = null;
-        if ("SunOS".equals(osname)) {
-            expected = "sun.nio.ch.DevPollSelectorProvider";
-        } else if ("Linux".equals(osname)) {
-            String[] vers = osver.split("\\.", 0);
-            if (vers.length >= 2) {
-                int major = Integer.parseInt(vers[0]);
-                int minor = Integer.parseInt(vers[1]);
-                if (major > 2 || (major == 2 && minor >= 6)) {
-                    expected = "sun.nio.ch.EPollSelectorProvider";
-                } else {
-                    expected = "sun.nio.ch.PollSelectorProvider";
-                }
+        String expected = System.getProperty("java.nio.channels.spi.SelectorProvider");
+        if (expected == null) {
+            String osname = System.getProperty("os.name");
+            String osver = System.getProperty("os.version");
+            if ("SunOS".equals(osname)) {
+                expected = "sun.nio.ch.DevPollSelectorProvider";
+            } else if ("Linux".equals(osname)) {
+                expected = "sun.nio.ch.EPollSelectorProvider";
+            } else if (osname.contains("OS X")) {
+                expected = "sun.nio.ch.KQueueSelectorProvider";
             } else {
-                throw new RuntimeException("Test does not recognize this operating system");
+                return;
             }
-        } else
-            return;
-        if (!spName.equals(expected))
+        }
+        String cn = SelectorProvider.provider().getClass().getName();
+        System.out.println(cn);
+        if (!cn.equals(expected))
             throw new Exception("failed");
     }
 }

@@ -25,46 +25,20 @@
 #ifndef SHARE_VM_CI_CIMETHODHANDLE_HPP
 #define SHARE_VM_CI_CIMETHODHANDLE_HPP
 
-#include "ci/ciCallProfile.hpp"
+#include "ci/ciClassList.hpp"
 #include "ci/ciInstance.hpp"
-#include "prims/methodHandles.hpp"
 
 // ciMethodHandle
 //
 // The class represents a java.lang.invoke.MethodHandle object.
 class ciMethodHandle : public ciInstance {
-private:
-  ciMethod*      _callee;
-  ciMethod*      _caller;
-  ciCallProfile* _profile;
-
-  // Return an adapter for this MethodHandle.
-  ciMethod* get_adapter_impl(bool is_invokedynamic) const;
-  ciMethod* get_adapter(     bool is_invokedynamic) const;
-
-protected:
-  void print_impl(outputStream* st);
-
 public:
-  ciMethodHandle(instanceHandle h_i) :
-    ciInstance(h_i),
-    _callee(NULL),
-    _caller(NULL),
-    _profile(NULL)
-  {}
+  ciMethodHandle(instanceHandle h_i) : ciInstance(h_i) {}
 
   // What kind of ciObject is this?
   bool is_method_handle() const { return true; }
 
-  void set_callee(ciMethod* m)                  { _callee  = m;       }
-  void set_caller(ciMethod* m)                  { _caller  = m;       }
-  void set_call_profile(ciCallProfile* profile) { _profile = profile; }
-
-  // Return an adapter for a MethodHandle call.
-  ciMethod* get_method_handle_adapter() const { return get_adapter(false); }
-
-  // Return an adapter for an invokedynamic call.
-  ciMethod* get_invokedynamic_adapter() const { return get_adapter(true);  }
+  ciMethod* get_vmtarget() const;
 };
 
 #endif // SHARE_VM_CI_CIMETHODHANDLE_HPP

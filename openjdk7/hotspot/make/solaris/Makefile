@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -157,17 +157,16 @@ SUBDIRS_C1        = $(addprefix $(OSNAME)_$(BUILDARCH)_compiler1/,$(TARGETS))
 SUBDIRS_C2        = $(addprefix $(OSNAME)_$(BUILDARCH)_compiler2/,$(TARGETS))
 SUBDIRS_TIERED    = $(addprefix $(OSNAME)_$(BUILDARCH)_tiered/,$(TARGETS))
 SUBDIRS_CORE      = $(addprefix $(OSNAME)_$(BUILDARCH)_core/,$(TARGETS))
-SUBDIRS_KERNEL    = $(addprefix $(OSNAME)_$(BUILDARCH)_kernel/,$(TARGETS))
 
 TARGETS_C2        = $(TARGETS)
 TARGETS_C1        = $(addsuffix 1,$(TARGETS))
 TARGETS_TIERED    = $(addsuffix tiered,$(TARGETS))
 TARGETS_CORE      = $(addsuffix core,$(TARGETS))
-TARGETS_KERNEL    = $(addsuffix kernel,$(TARGETS))
 
 BUILDTREE_MAKE    = $(GAMMADIR)/make/$(OSNAME)/makefiles/buildtree.make
 BUILDTREE_VARS    = GAMMADIR=$(GAMMADIR) OS_FAMILY=$(OSNAME) ARCH=$(SRCARCH) BUILDARCH=$(BUILDARCH) LIBARCH=$(LIBARCH)
 BUILDTREE_VARS   += HOTSPOT_RELEASE_VERSION=$(HOTSPOT_RELEASE_VERSION) HOTSPOT_BUILD_VERSION=$(HOTSPOT_BUILD_VERSION) JRE_RELEASE_VERSION=$(JRE_RELEASE_VERSION)
+BUILDTREE_VARS   += ENABLE_FULL_DEBUG_SYMBOLS=$(ENABLE_FULL_DEBUG_SYMBOLS) OBJCOPY=$(OBJCOPY) STRIP_POLICY=$(STRIP_POLICY) ZIP_DEBUGINFO_FILES=$(ZIP_DEBUGINFO_FILES) ZIPEXE=$(ZIPEXE)
 
 BUILDTREE         = $(MAKE) -f $(BUILDTREE_MAKE) $(BUILDTREE_VARS)
 
@@ -228,10 +227,6 @@ $(SUBDIRS_CORE): $(BUILDTREE_MAKE)
 	$(QUIETLY) $(MAKE) -f $(GAMMADIR)/make/$(OSNAME)/Makefile checks
 	$(BUILDTREE) VARIANT=core
 
-$(SUBDIRS_KERNEL): $(BUILDTREE_MAKE)
-	$(QUIETLY) $(MAKE) -f $(GAMMADIR)/make/$(OSNAME)/Makefile checks
-	$(BUILDTREE) VARIANT=kernel
-
 # Define INSTALL=y at command line to automatically copy JVM into JAVA_HOME
 
 $(TARGETS_C2):  $(SUBDIRS_C2)
@@ -262,24 +257,18 @@ ifdef INSTALL
 	cd $(OSNAME)_$(BUILDARCH)_core/$(patsubst %core,%,$@) && $(MAKE) $(MFLAGS) install
 endif
 
-$(TARGETS_KERNEL):  $(SUBDIRS_KERNEL)
-	cd $(OSNAME)_$(BUILDARCH)_kernel/$(patsubst %kernel,%,$@) && $(MAKE) $(MFLAGS)
-	cd $(OSNAME)_$(BUILDARCH)_kernel/$(patsubst %kernel,%,$@) && ./test_gamma
-ifdef INSTALL
-	cd $(OSNAME)_$(BUILDARCH)_kernel/$(patsubst %kernel,%,$@) && $(MAKE) $(MFLAGS) install
-endif
-
 # Just build the tree, and nothing else:
 tree:      $(SUBDIRS_C2)
 tree1:     $(SUBDIRS_C1)
 treecore:  $(SUBDIRS_CORE)
-treekernel:  $(SUBDIRS_KERNEL)
 
 # Doc target.  This is the same for all build options.
 #     Hence create a docs directory beside ...$(ARCH)_[...]
+# We specify 'BUILD_FLAVOR=product' so that the proper
+# ENABLE_FULL_DEBUG_SYMBOLS value is used.
 docs: checks
 	$(QUIETLY) mkdir -p $(SUBDIR_DOCS)
-	$(MAKE) -f $(GAMMADIR)/make/$(OSNAME)/makefiles/jvmti.make $(MFLAGS) $(BUILDTREE_VARS) JvmtiOutDir=$(SUBDIR_DOCS) jvmtidocs
+	$(MAKE) -f $(GAMMADIR)/make/$(OSNAME)/makefiles/jvmti.make $(MFLAGS) $(BUILDTREE_VARS) JvmtiOutDir=$(SUBDIR_DOCS) BUILD_FLAVOR=product jvmtidocs
 
 # Synonyms for win32-like targets.
 compiler2:  jvmg product
@@ -291,10 +280,10 @@ core: jvmgcore productcore
 clean_docs:
 	rm -rf $(SUBDIR_DOCS)
 
-clean_compiler1 clean_compiler2 clean_core clean_kernel:
+clean_compiler1 clean_compiler2 clean_core:
 	rm -rf $(OSNAME)_$(BUILDARCH)_$(subst clean_,,$@)
 
-clean:  clean_compiler2 clean_compiler1 clean_core clean_docs clean_kernel
+clean:  clean_compiler2 clean_compiler1 clean_core clean_docs
 
 include $(GAMMADIR)/make/cscope.make
 

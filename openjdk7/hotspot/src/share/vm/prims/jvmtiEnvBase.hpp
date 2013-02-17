@@ -52,7 +52,7 @@ class JvmtiTagMap;
 // done via JNI GetEnv() call. Multiple attachments are
 // allowed in jvmti.
 
-class JvmtiEnvBase : public CHeapObj {
+class JvmtiEnvBase : public CHeapObj<mtInternal> {
 
  private:
 
@@ -175,7 +175,7 @@ class JvmtiEnvBase : public CHeapObj {
     if (size == 0) {
       *mem_ptr = NULL;
     } else {
-      *mem_ptr = (unsigned char *)os::malloc((size_t)size);
+      *mem_ptr = (unsigned char *)os::malloc((size_t)size, mtInternal);
       if (*mem_ptr == NULL) {
         return JVMTI_ERROR_OUT_OF_MEMORY;
       }
@@ -185,7 +185,7 @@ class JvmtiEnvBase : public CHeapObj {
 
   jvmtiError deallocate(unsigned char* mem) {
     if (mem != NULL) {
-      os::free(mem);
+      os::free(mem, mtInternal);
     }
     return JVMTI_ERROR_NONE;
   }
@@ -266,8 +266,6 @@ class JvmtiEnvBase : public CHeapObj {
 
   // convert to a jni jclass from a non-null klassOop
   jclass get_jni_class_non_null(klassOop k);
-
-  void update_klass_field_access_flag(fieldDescriptor *fd);
 
   jint count_locked_objects(JavaThread *java_thread, Handle hobj);
   jvmtiError get_locked_objects_in_frame(JavaThread *calling_thread,

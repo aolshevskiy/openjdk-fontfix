@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,9 +33,9 @@
 #include "runtime/globals.hpp"
 #include "runtime/interfaceSupport.hpp"
 #include "runtime/reflection.hpp"
-#include "runtime/reflectionCompat.hpp"
 #include "runtime/synchronizer.hpp"
 #include "services/threadService.hpp"
+#include "trace/tracing.hpp"
 #include "utilities/copy.hpp"
 #include "utilities/dtrace.hpp"
 
@@ -43,9 +43,11 @@
  *      Implementation of class sun.misc.Unsafe
  */
 
+#ifndef USDT2
 HS_DTRACE_PROBE_DECL3(hotspot, thread__park__begin, uintptr_t, int, long long);
 HS_DTRACE_PROBE_DECL1(hotspot, thread__park__end, uintptr_t);
 HS_DTRACE_PROBE_DECL1(hotspot, thread__unpark, uintptr_t);
+#endif /* !USDT2 */
 
 #define MAX_OBJECT_SIZE \
   ( arrayOopDesc::header_size(T_DOUBLE) * HeapWordSize \
@@ -123,6 +125,8 @@ inline void* index_oop_from_field_offset_long(oop p, jlong field_offset) {
       assert((void*)p->obj_field_addr<oop>((jint)byte_offset) == ptr_plus_disp,
              "raw [ptr+disp] must be consistent with oop::field_base");
     }
+    jlong p_size = HeapWordSize * (jlong)(p->size());
+    assert(byte_offset < p_size, err_msg("Unsafe access: offset " INT64_FORMAT " > object's size " INT64_FORMAT, byte_offset, p_size));
   }
 #endif
   if (sizeof(char*) == sizeof(jint))    // (this constant folds!)
@@ -176,17 +180,6 @@ jint Unsafe_invocation_key_to_method_slot(jint key) {
   } else {                            \
     v = *(oop*)index_oop_from_field_offset_long(p, offset);                 \
   }
-
-#define GET_OOP_FIELD_VOLATILE(obj, offset, v) \
-  oop p = JNIHandles::resolve(obj);   \
-  volatile oop v;                     \
-  if (UseCompressedOops) {            \
-    volatile narrowOop n = *(volatile narrowOop*)index_oop_from_field_offset_long(p, offset); \
-    v = oopDesc::decode_heap_oop(n);                               \
-  } else {                            \
-    v = *(volatile oop*)index_oop_from_field_offset_long(p, offset);       \
-  } \
-  OrderAccess::acquire();
 
 
 // Get/SetObject must be special-cased, since it works with handles.
@@ -295,7 +288,16 @@ UNSAFE_END
 
 UNSAFE_ENTRY(jobject, Unsafe_GetObjectVolatile(JNIEnv *env, jobject unsafe, jobject obj, jlong offset))
   UnsafeWrapper("Unsafe_GetObjectVolatile");
-  GET_OOP_FIELD_VOLATILE(obj, offset, v)
+  oop p = JNIHandles::resolve(obj);
+  void* addr = index_oop_from_field_offset_long(p, offset);
+  volatile oop v;
+  if (UseCompressedOops) {
+    volatile narrowOop n = *(volatile narrowOop*) addr;
+    v = oopDesc::decode_heap_oop(n);
+  } else {
+    v = *(volatile oop*) addr;
+  }
+  OrderAccess::acquire();
   return JNIHandles::make_local(env, v);
 UNSAFE_END
 
@@ -579,7 +581,7 @@ UNSAFE_ENTRY(jlong, Unsafe_AllocateMemory(JNIEnv *env, jobject unsafe, jlong siz
     return 0;
   }
   sz = round_to(sz, HeapWordSize);
-  void* x = os::malloc(sz);
+  void* x = os::malloc(sz, mtInternal);
   if (x == NULL) {
     THROW_0(vmSymbols::java_lang_OutOfMemoryError());
   }
@@ -599,7 +601,7 @@ UNSAFE_ENTRY(jlong, Unsafe_ReallocateMemory(JNIEnv *env, jobject unsafe, jlong a
     return 0;
   }
   sz = round_to(sz, HeapWordSize);
-  void* x = (p == NULL) ? os::malloc(sz) : os::realloc(p, sz);
+  void* x = (p == NULL) ? os::malloc(sz, mtInternal) : os::realloc(p, sz, mtInternal);
   if (x == NULL) {
     THROW_0(vmSymbols::java_lang_OutOfMemoryError());
   }
@@ -707,7 +709,7 @@ jint find_field_offset(jobject field, int must_be_static, TRAPS) {
     }
   }
 
-  int offset = instanceKlass::cast(k)->offset_from_fields(slot);
+  int offset = instanceKlass::cast(k)->field_offset(slot);
   return field_offset_from_byte_offset(offset);
 }
 
@@ -762,16 +764,33 @@ UNSAFE_ENTRY(jobject, Unsafe_StaticFieldBaseFromClass(JNIEnv *env, jobject unsaf
   return JNIHandles::make_local(env, JNIHandles::resolve_non_null(clazz));
 UNSAFE_END
 
-UNSAFE_ENTRY(void, Unsafe_EnsureClassInitialized(JNIEnv *env, jobject unsafe, jobject clazz))
+UNSAFE_ENTRY(void, Unsafe_EnsureClassInitialized(JNIEnv *env, jobject unsafe, jobject clazz)) {
   UnsafeWrapper("Unsafe_EnsureClassInitialized");
   if (clazz == NULL) {
     THROW(vmSymbols::java_lang_NullPointerException());
   }
   oop mirror = JNIHandles::resolve_non_null(clazz);
-  instanceKlass* k = instanceKlass::cast(java_lang_Class::as_klassOop(mirror));
-  if (k != NULL) {
+
+  klassOop klass = java_lang_Class::as_klassOop(mirror);
+  if (klass != NULL && Klass::cast(klass)->should_be_initialized()) {
+    instanceKlass* k = instanceKlass::cast(klass);
     k->initialize(CHECK);
   }
+}
+UNSAFE_END
+
+UNSAFE_ENTRY(jboolean, Unsafe_ShouldBeInitialized(JNIEnv *env, jobject unsafe, jobject clazz)) {
+  UnsafeWrapper("Unsafe_ShouldBeInitialized");
+  if (clazz == NULL) {
+    THROW_(vmSymbols::java_lang_NullPointerException(), false);
+  }
+  oop mirror = JNIHandles::resolve_non_null(clazz);
+  klassOop klass = java_lang_Class::as_klassOop(mirror);
+  if (klass != NULL && Klass::cast(klass)->should_be_initialized()) {
+    return true;
+  }
+  return false;
+}
 UNSAFE_END
 
 static void getBaseAndScale(int& base, int& scale, jclass acls, TRAPS) {
@@ -860,7 +879,7 @@ static jclass Unsafe_DefineClass(JNIEnv *env, jstring name, jbyteArray data, int
         return 0;
     }
 
-    body = NEW_C_HEAP_ARRAY(jbyte, length);
+    body = NEW_C_HEAP_ARRAY(jbyte, length, mtInternal);
 
     if (body == 0) {
         throw_new(env, "OutOfMemoryError");
@@ -876,7 +895,7 @@ static jclass Unsafe_DefineClass(JNIEnv *env, jstring name, jbyteArray data, int
         uint len = env->GetStringUTFLength(name);
         int unicode_len = env->GetStringLength(name);
         if (len >= sizeof(buf)) {
-            utfName = NEW_C_HEAP_ARRAY(char, len + 1);
+            utfName = NEW_C_HEAP_ARRAY(char, len + 1, mtInternal);
             if (utfName == NULL) {
                 throw_new(env, "OutOfMemoryError");
                 goto free_body;
@@ -896,10 +915,10 @@ static jclass Unsafe_DefineClass(JNIEnv *env, jstring name, jbyteArray data, int
     result = JVM_DefineClass(env, utfName, loader, body, length, pd);
 
     if (utfName && utfName != buf)
-        FREE_C_HEAP_ARRAY(char, utfName);
+        FREE_C_HEAP_ARRAY(char, utfName, mtInternal);
 
  free_body:
-    FREE_C_HEAP_ARRAY(jbyte, body);
+    FREE_C_HEAP_ARRAY(jbyte, body, mtInternal);
     return result;
   }
 }
@@ -994,7 +1013,7 @@ Unsafe_DefineAnonymousClass_impl(JNIEnv *env,
 
   jint length = typeArrayOop(JNIHandles::resolve_non_null(data))->length();
   jint word_length = (length + sizeof(HeapWord)-1) / sizeof(HeapWord);
-  HeapWord* body = NEW_C_HEAP_ARRAY(HeapWord, word_length);
+  HeapWord* body = NEW_C_HEAP_ARRAY(HeapWord, word_length, mtInternal);
   if (body == NULL) {
     THROW_0(vmSymbols::java_lang_OutOfMemoryError());
   }
@@ -1078,7 +1097,7 @@ UNSAFE_ENTRY(jclass, Unsafe_DefineAnonymousClass(JNIEnv *env, jobject unsafe, jc
 
   // try/finally clause:
   if (temp_alloc != NULL) {
-    FREE_C_HEAP_ARRAY(HeapWord, temp_alloc);
+    FREE_C_HEAP_ARRAY(HeapWord, temp_alloc, mtInternal);
   }
 
   return (jclass) res_jh;
@@ -1175,10 +1194,28 @@ UNSAFE_END
 
 UNSAFE_ENTRY(void, Unsafe_Park(JNIEnv *env, jobject unsafe, jboolean isAbsolute, jlong time))
   UnsafeWrapper("Unsafe_Park");
+  EventThreadPark event;
+#ifndef USDT2
   HS_DTRACE_PROBE3(hotspot, thread__park__begin, thread->parker(), (int) isAbsolute, time);
+#else /* USDT2 */
+   HOTSPOT_THREAD_PARK_BEGIN(
+                             (uintptr_t) thread->parker(), (int) isAbsolute, time);
+#endif /* USDT2 */
   JavaThreadParkedState jtps(thread, time != 0);
   thread->parker()->park(isAbsolute != 0, time);
+#ifndef USDT2
   HS_DTRACE_PROBE1(hotspot, thread__park__end, thread->parker());
+#else /* USDT2 */
+  HOTSPOT_THREAD_PARK_END(
+                          (uintptr_t) thread->parker());
+#endif /* USDT2 */
+  oop obj = thread->current_park_blocker();
+  if (event.should_commit()) {
+    event.set_klass(obj ? obj->klass() : (klassOop)NULL);
+    event.set_timeout(time);
+    event.set_address(obj ? (TYPE_ADDRESS) (uintptr_t) obj : 0);
+    event.commit();
+  }
 UNSAFE_END
 
 UNSAFE_ENTRY(void, Unsafe_Unpark(JNIEnv *env, jobject unsafe, jobject jthread))
@@ -1210,7 +1247,12 @@ UNSAFE_ENTRY(void, Unsafe_Unpark(JNIEnv *env, jobject unsafe, jobject jthread))
     }
   }
   if (p != NULL) {
+#ifndef USDT2
     HS_DTRACE_PROBE1(hotspot, thread__unpark, p);
+#else /* USDT2 */
+    HOTSPOT_THREAD_UNPARK(
+                          (uintptr_t) p);
+#endif /* USDT2 */
     p->unpark();
   }
 UNSAFE_END
@@ -1552,6 +1594,10 @@ JNINativeMethod anonk_methods[] = {
     {CC"defineAnonymousClass", CC"("DAC_Args")"CLS,      FN_PTR(Unsafe_DefineAnonymousClass)},
 };
 
+JNINativeMethod lform_methods[] = {
+    {CC"shouldBeInitialized",CC"("CLS")Z",               FN_PTR(Unsafe_ShouldBeInitialized)},
+};
+
 #undef CC
 #undef FN_PTR
 
@@ -1618,6 +1664,15 @@ JVM_ENTRY(void, JVM_RegisterUnsafeMethods(JNIEnv *env, jclass unsafecls))
       if (env->ExceptionOccurred()) {
         if (PrintMiscellaneous && (Verbose || WizardMode)) {
           tty->print_cr("Warning:  SDK 1.7 Unsafe.defineClass (anonymous version) not found.");
+        }
+        env->ExceptionClear();
+      }
+    }
+    if (EnableInvokeDynamic) {
+      env->RegisterNatives(unsafecls, lform_methods, sizeof(lform_methods)/sizeof(JNINativeMethod));
+      if (env->ExceptionOccurred()) {
+        if (PrintMiscellaneous && (Verbose || WizardMode)) {
+          tty->print_cr("Warning:  SDK 1.7 LambdaForm support in Unsafe not found.");
         }
         env->ExceptionClear();
       }

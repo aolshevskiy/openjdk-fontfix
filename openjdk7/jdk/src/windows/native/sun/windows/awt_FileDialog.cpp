@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -153,6 +153,12 @@ FileDialogHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
             break;
         }
         case WM_DESTROY: {
+            HIMC hIMC = ::ImmGetContext(hdlg);
+            if (hIMC != NULL) {
+                ::ImmNotifyIME(hIMC, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+                ::ImmReleaseContext(hdlg, hIMC);
+            }
+
             WNDPROC lpfnWndProc = (WNDPROC)(::GetProp(parent, NativeDialogWndProcProp));
             ComCtl32Util::GetInstance().UnsubclassHWND(parent,
                                                        FileDialogWndProc,
@@ -284,7 +290,7 @@ AwtFileDialog::Show(void *p)
         file = (jstring)env->GetObjectField(target, AwtFileDialog::fileID);
         if (file != NULL) {
             LPCTSTR tmp = JNU_GetStringPlatformChars(env, file, NULL);
-            _tcscpy(fileBuffer, tmp);
+            _tcsncpy(fileBuffer, tmp, bufferLimit - 2); // the fileBuffer is double null terminated string
             JNU_ReleaseStringPlatformChars(env, file, tmp);
         } else {
             fileBuffer[0] = _T('\0');

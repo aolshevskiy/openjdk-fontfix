@@ -73,7 +73,7 @@ default: vm_build_preliminaries the_vm
 	@echo All done.
 
 # This is an explicit dependency for the sake of parallel makes.
-vm_build_preliminaries:  checks $(Cached_plat) $(AD_Files_If_Required) jvmti_stuff sa_stuff
+vm_build_preliminaries:  checks $(Cached_plat) $(AD_Files_If_Required) jvmti_stuff trace_stuff sa_stuff
 	@# We need a null action here, so implicit rules don't get consulted.
 
 $(Cached_plat): $(Plat_File)
@@ -86,6 +86,10 @@ ad_stuff: $(Cached_plat) $(adjust-mflags)
 # generate JVMTI files from the spec
 jvmti_stuff: $(Cached_plat) $(adjust-mflags)
 	@$(MAKE) -f jvmti.make $(MFLAGS-adjusted)
+
+# generate trace files 
+trace_stuff: jvmti_stuff $(Cached_plat) $(adjust-mflags)
+	@$(MAKE) -f trace.make $(MFLAGS-adjusted)
 
 # generate SA jar files and native header
 sa_stuff:
@@ -107,8 +111,8 @@ $(adjust-mflags): $(GAMMADIR)/make/$(Platform_os_family)/makefiles/adjust-mflags
 the_vm: vm_build_preliminaries $(adjust-mflags)
 	@$(MAKE) -f vm.make $(MFLAGS-adjusted)
 
-install: the_vm
-	@$(MAKE) -f vm.make install
+install gamma: the_vm
+	@$(MAKE) -f vm.make $@
 
 # next rules support "make foo.[oi]"
 
@@ -127,5 +131,5 @@ realclean:
 	rm -fr $(GENERATED)
 
 .PHONY: default vm_build_preliminaries
-.PHONY: lists ad_stuff jvmti_stuff sa_stuff the_vm clean realclean
+.PHONY: lists ad_stuff jvmti_stuff trace_stuff sa_stuff the_vm clean realclean
 .PHONY: checks check_os_version install

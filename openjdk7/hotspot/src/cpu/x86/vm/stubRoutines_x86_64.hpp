@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,16 +36,12 @@ enum platform_dependent_constants {
   code_size2 = 22000           // simply increase if too small (assembler will crash if too small)
 };
 
-// MethodHandles adapters
-enum method_handles_platform_dependent_constants {
-  method_handles_adapters_code_size = 80000 DEBUG_ONLY(+ 120000)
-};
-
 class x86 {
  friend class StubGenerator;
 
  private:
   static address _get_previous_fp_entry;
+  static address _get_previous_sp_entry;
   static address _verify_mxcsr_entry;
 
   static address _f2i_fixup;
@@ -58,12 +54,19 @@ class x86 {
   static address _double_sign_mask;
   static address _double_sign_flip;
   static address _mxcsr_std;
+  // shuffle mask for fixing up 128-bit words consisting of big-endian 32-bit integers
+  static address _key_shuffle_mask_addr;
 
  public:
 
   static address get_previous_fp_entry()
   {
     return _get_previous_fp_entry;
+  }
+
+  static address get_previous_sp_entry()
+  {
+    return _get_previous_sp_entry;
   }
 
   static address verify_mxcsr_entry()
@@ -115,6 +118,9 @@ class x86 {
   {
     return _mxcsr_std;
   }
+
+  static address key_shuffle_mask_addr()                     { return _key_shuffle_mask_addr; }
+
 };
 
 #endif // CPU_X86_VM_STUBROUTINES_X86_64_HPP

@@ -93,9 +93,10 @@
   template(HeapWalkOperation)                     \
   template(HeapIterateOperation)                  \
   template(ReportJavaOutOfMemory)                 \
+  template(JFRCheckpoint)                         \
   template(Exit)                                  \
 
-class VM_Operation: public CHeapObj {
+class VM_Operation: public CHeapObj<mtInternal> {
  public:
   enum Mode {
     _safepoint,       // blocking,        safepoint, vm_op C-heap allocated
@@ -176,6 +177,8 @@ class VM_Operation: public CHeapObj {
     return evaluation_mode() == _concurrent ||
            evaluation_mode() == _async_safepoint;
   }
+
+  static const char* mode_to_string(Mode mode);
 
   // Debugging
   void print_on_error(outputStream* st) const;

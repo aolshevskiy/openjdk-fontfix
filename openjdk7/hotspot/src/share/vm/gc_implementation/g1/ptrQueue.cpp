@@ -37,6 +37,9 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "thread_windows.inline.hpp"
 #endif
+#ifdef TARGET_OS_FAMILY_bsd
+# include "thread_bsd.inline.hpp"
+#endif
 
 PtrQueue::PtrQueue(PtrQueueSet* qset, bool perm, bool active) :
   _qset(qset), _buf(NULL), _index(0), _active(active),
@@ -123,7 +126,7 @@ void** PtrQueueSet::allocate_buffer() {
     return res;
   } else {
     // Allocate space for the BufferNode in front of the buffer.
-    char *b =  NEW_C_HEAP_ARRAY(char, _sz + BufferNode::aligned_size());
+    char *b =  NEW_C_HEAP_ARRAY(char, _sz + BufferNode::aligned_size(), mtGC);
     return BufferNode::make_buffer_from_block(b);
   }
 }
@@ -146,7 +149,7 @@ void PtrQueueSet::reduce_free_list() {
     assert(_buf_free_list != NULL, "_buf_free_list_sz must be wrong.");
     void* b = BufferNode::make_block_from_node(_buf_free_list);
     _buf_free_list = _buf_free_list->next();
-    FREE_C_HEAP_ARRAY(char, b);
+    FREE_C_HEAP_ARRAY(char, b, mtGC);
     _buf_free_list_sz --;
     n--;
   }

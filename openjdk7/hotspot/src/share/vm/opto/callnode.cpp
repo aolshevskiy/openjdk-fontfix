@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 #include "precompiled.hpp"
 #include "ci/bcEscapeAnalyzer.hpp"
 #include "compiler/oopMap.hpp"
+#include "opto/callGenerator.hpp"
 #include "opto/callnode.hpp"
 #include "opto/escape.hpp"
 #include "opto/locknode.hpp"
@@ -72,20 +73,20 @@ Node *StartNode::match( const ProjNode *proj, const Matcher *match ) {
   case TypeFunc::Control:
   case TypeFunc::I_O:
   case TypeFunc::Memory:
-    return new (match->C, 1) MachProjNode(this,proj->_con,RegMask::Empty,MachProjNode::unmatched_proj);
+    return new (match->C) MachProjNode(this,proj->_con,RegMask::Empty,MachProjNode::unmatched_proj);
   case TypeFunc::FramePtr:
-    return new (match->C, 1) MachProjNode(this,proj->_con,Matcher::c_frame_ptr_mask, Op_RegP);
+    return new (match->C) MachProjNode(this,proj->_con,Matcher::c_frame_ptr_mask, Op_RegP);
   case TypeFunc::ReturnAdr:
-    return new (match->C, 1) MachProjNode(this,proj->_con,match->_return_addr_mask,Op_RegP);
+    return new (match->C) MachProjNode(this,proj->_con,match->_return_addr_mask,Op_RegP);
   case TypeFunc::Parms:
   default: {
       uint parm_num = proj->_con - TypeFunc::Parms;
       const Type *t = _domain->field_at(proj->_con);
       if (t->base() == Type::Half)  // 2nd half of Longs and Doubles
-        return new (match->C, 1) ConNode(Type::TOP);
+        return new (match->C) ConNode(Type::TOP);
       uint ideal_reg = Matcher::base2reg[t->base()];
       RegMask &rm = match->_calling_convention_mask[parm_num];
-      return new (match->C, 1) MachProjNode(this,proj->_con,rm,ideal_reg);
+      return new (match->C) MachProjNode(this,proj->_con,rm,ideal_reg);
     }
   }
   return NULL;
@@ -231,9 +232,9 @@ uint TailJumpNode::match_edge(uint idx) const {
 }
 
 //=============================================================================
-JVMState::JVMState(ciMethod* method, JVMState* caller) {
+JVMState::JVMState(ciMethod* method, JVMState* caller) :
+  _method(method) {
   assert(method != NULL, "must be valid call site");
-  _method = method;
   _reexecute = Reexecute_Undefined;
   debug_only(_bci = -99);  // random garbage value
   debug_only(_map = (SafePointNode*)-1);
@@ -246,8 +247,8 @@ JVMState::JVMState(ciMethod* method, JVMState* caller) {
   _endoff = _monoff;
   _sp = 0;
 }
-JVMState::JVMState(int stack_size) {
-  _method = NULL;
+JVMState::JVMState(int stack_size) :
+  _method(NULL) {
   _bci = InvocationEntryBci;
   _reexecute = Reexecute_Undefined;
   debug_only(_map = (SafePointNode*)-1);
@@ -400,10 +401,10 @@ void JVMState::format(PhaseRegAlloc *regalloc, const Node *n, outputStream* st) 
       Node *box = mcall->monitor_box(this, i);
       Node *obj = mcall->monitor_obj(this, i);
       if ( OptoReg::is_valid(regalloc->get_reg_first(box)) ) {
-        while( !box->is_BoxLock() )  box = box->in(1);
+        box = BoxLockNode::box_node(box);
         format_helper( regalloc, st, box, "MON-BOX[", i, &scobjs );
       } else {
-        OptoReg::Name box_reg = BoxLockNode::stack_slot(box);
+        OptoReg::Name box_reg = BoxLockNode::reg(box);
         st->print(" MON-BOX%d=%s+%d",
                    i,
                    OptoReg::regname(OptoReg::c_frame_pointer),
@@ -411,8 +412,7 @@ void JVMState::format(PhaseRegAlloc *regalloc, const Node *n, outputStream* st) 
       }
       const char* obj_msg = "MON-OBJ[";
       if (EliminateLocks) {
-        while( !box->is_BoxLock() )  box = box->in(1);
-        if (box->as_BoxLock()->is_eliminated())
+        if (BoxLockNode::box_node(box)->is_eliminated())
           obj_msg = "MON-OBJ(LOCK ELIMINATED)[";
       }
       format_helper( regalloc, st, obj, obj_msg, i, &scobjs );
@@ -527,8 +527,8 @@ void JVMState::dump_on(outputStream* st) const {
     }
     _map->dump(2);
   }
-  st->print("JVMS depth=%d loc=%d stk=%d mon=%d scalar=%d end=%d mondepth=%d sp=%d bci=%d reexecute=%s method=",
-             depth(), locoff(), stkoff(), monoff(), scloff(), endoff(), monitor_depth(), sp(), bci(), should_reexecute()?"true":"false");
+  st->print("JVMS depth=%d loc=%d stk=%d arg=%d mon=%d scalar=%d end=%d mondepth=%d sp=%d bci=%d reexecute=%s method=",
+             depth(), locoff(), stkoff(), argoff(), monoff(), scloff(), endoff(), monitor_depth(), sp(), bci(), should_reexecute()?"true":"false");
   if (_method == NULL) {
     st->print_cr("(none)");
   } else {
@@ -621,12 +621,12 @@ Node *CallNode::match( const ProjNode *proj, const Matcher *match ) {
   case TypeFunc::Control:
   case TypeFunc::I_O:
   case TypeFunc::Memory:
-    return new (match->C, 1) MachProjNode(this,proj->_con,RegMask::Empty,MachProjNode::unmatched_proj);
+    return new (match->C) MachProjNode(this,proj->_con,RegMask::Empty,MachProjNode::unmatched_proj);
 
   case TypeFunc::Parms+1:       // For LONG & DOUBLE returns
     assert(tf()->_range->field_at(TypeFunc::Parms+1) == Type::HALF, "");
     // 2nd half of doubles and longs
-    return new (match->C, 1) MachProjNode(this,proj->_con, RegMask::Empty, (uint)OptoReg::Bad);
+    return new (match->C) MachProjNode(this,proj->_con, RegMask::Empty, (uint)OptoReg::Bad);
 
   case TypeFunc::Parms: {       // Normal returns
     uint ideal_reg = Matcher::base2reg[tf()->range()->field_at(TypeFunc::Parms)->base()];
@@ -636,7 +636,7 @@ Node *CallNode::match( const ProjNode *proj, const Matcher *match ) {
     RegMask rm = RegMask(regs.first());
     if( OptoReg::is_valid(regs.second()) )
       rm.Insert( regs.second() );
-    return new (match->C, 1) MachProjNode(this,proj->_con,rm,ideal_reg);
+    return new (match->C) MachProjNode(this,proj->_con,rm,ideal_reg);
   }
 
   case TypeFunc::ReturnAdr:
@@ -747,7 +747,7 @@ void CallNode::extract_projections(CallProjections* projs, bool separate_io_proj
         projs->fallthrough_ioproj = pn;
       for (DUIterator j = pn->outs(); pn->has_out(j); j++) {
         Node* e = pn->out(j);
-        if (e->Opcode() == Op_CreateEx && e->in(0)->is_CatchProj()) {
+        if (e->Opcode() == Op_CreateEx && e->in(0)->is_CatchProj() && e->outcnt() > 0) {
           assert(projs->exobj == NULL, "only one");
           projs->exobj = e;
         }
@@ -771,14 +771,36 @@ void CallNode::extract_projections(CallProjections* projs, bool separate_io_proj
   // and the exception object may not exist if an exception handler
   // swallows the exception but all the other must exist and be found.
   assert(projs->fallthrough_proj      != NULL, "must be found");
-  assert(projs->fallthrough_catchproj != NULL, "must be found");
-  assert(projs->fallthrough_memproj   != NULL, "must be found");
-  assert(projs->fallthrough_ioproj    != NULL, "must be found");
-  assert(projs->catchall_catchproj    != NULL, "must be found");
+  assert(Compile::current()->inlining_incrementally() || projs->fallthrough_catchproj != NULL, "must be found");
+  assert(Compile::current()->inlining_incrementally() || projs->fallthrough_memproj   != NULL, "must be found");
+  assert(Compile::current()->inlining_incrementally() || projs->fallthrough_ioproj    != NULL, "must be found");
+  assert(Compile::current()->inlining_incrementally() || projs->catchall_catchproj    != NULL, "must be found");
   if (separate_io_proj) {
-    assert(projs->catchall_memproj      != NULL, "must be found");
-    assert(projs->catchall_ioproj       != NULL, "must be found");
+    assert(Compile::current()->inlining_incrementally() || projs->catchall_memproj    != NULL, "must be found");
+    assert(Compile::current()->inlining_incrementally() || projs->catchall_ioproj     != NULL, "must be found");
   }
+}
+
+Node *CallNode::Ideal(PhaseGVN *phase, bool can_reshape) {
+  CallGenerator* cg = generator();
+  if (can_reshape && cg != NULL && cg->is_mh_late_inline() && !cg->already_attempted()) {
+    // Check whether this MH handle call becomes a candidate for inlining
+    ciMethod* callee = cg->method();
+    vmIntrinsics::ID iid = callee->intrinsic_id();
+    if (iid == vmIntrinsics::_invokeBasic) {
+      if (in(TypeFunc::Parms)->Opcode() == Op_ConP) {
+        phase->C->prepend_late_inline(cg);
+        set_generator(NULL);
+      }
+    } else {
+      assert(callee->has_member_arg(), "wrong type of call?");
+      if (in(TypeFunc::Parms + callee->arg_size() - 1)->Opcode() == Op_ConP) {
+        phase->C->prepend_late_inline(cg);
+        set_generator(NULL);
+      }
+    }
+  }
+  return SafePointNode::Ideal(phase, can_reshape);
 }
 
 
@@ -1071,8 +1093,11 @@ SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp,
   init_class_id(Class_SafePointScalarObject);
 }
 
-bool SafePointScalarObjectNode::pinned() const { return true; }
-bool SafePointScalarObjectNode::depends_only_on_test() const { return false; }
+// Do not allow value-numbering for SafePointScalarObject node.
+uint SafePointScalarObjectNode::hash() const { return NO_HASH; }
+uint SafePointScalarObjectNode::cmp( const Node &n ) const {
+  return (&n == this); // Always fail except on self
+}
 
 uint SafePointScalarObjectNode::ideal_reg() const {
   return 0; // No matching to machine instruction
@@ -1096,7 +1121,6 @@ SafePointScalarObjectNode::clone(int jvms_adj, Dict* sosn_map) const {
   if (cached != NULL) {
     return (SafePointScalarObjectNode*)cached;
   }
-  Compile* C = Compile::current();
   SafePointScalarObjectNode* res = (SafePointScalarObjectNode*)Node::clone();
   res->_first_index += jvms_adj;
   sosn_map->Insert((void*)this, (void*)res);
@@ -1142,6 +1166,8 @@ uint AllocateArrayNode::size_of() const { return sizeof(*this); }
 
 Node* AllocateArrayNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   if (remove_dead_region(phase, can_reshape))  return this;
+  // Don't bother trying to transform a dead node
+  if (in(0) && in(0)->is_top())  return NULL;
 
   const Type* type = phase->type(Ideal_length());
   if (type->isa_int() && type->is_int()->_hi < 0) {
@@ -1167,10 +1193,10 @@ Node* AllocateArrayNode::Ideal(PhaseGVN *phase, bool can_reshape) {
         Node* nproj = catchproj->clone();
         igvn->register_new_node_with_optimizer(nproj);
 
-        Node *frame = new (phase->C, 1) ParmNode( phase->C->start(), TypeFunc::FramePtr );
+        Node *frame = new (phase->C) ParmNode( phase->C->start(), TypeFunc::FramePtr );
         frame = phase->transform(frame);
         // Halt & Catch Fire
-        Node *halt = new (phase->C, TypeFunc::Parms) HaltNode( nproj, frame );
+        Node *halt = new (phase->C) HaltNode( nproj, frame );
         phase->C->root()->add_req(halt);
         phase->transform(halt);
 
@@ -1210,7 +1236,7 @@ Node *AllocateArrayNode::make_ideal_length(const TypeOopPtr* oop_type, PhaseTran
       if (!allow_new_nodes) return NULL;
       // Create a cast which is control dependent on the initialization to
       // propagate the fact that the array length must be positive.
-      length = new (phase->C, 2) CastIINode(length, narrow_length_type);
+      length = new (phase->C) CastIINode(length, narrow_length_type);
       length->set_req(0, initialization()->proj_out(0));
     }
   }
@@ -1383,8 +1409,9 @@ bool AbstractLockNode::find_matching_unlock(const Node* ctrl, LockNode* lock,
     Node *n = ctrl_proj->in(0);
     if (n != NULL && n->is_Unlock()) {
       UnlockNode *unlock = n->as_Unlock();
-      if ((lock->obj_node() == unlock->obj_node()) &&
-          (lock->box_node() == unlock->box_node()) && !unlock->is_eliminated()) {
+      if (lock->obj_node()->eqv_uncast(unlock->obj_node()) &&
+          BoxLockNode::same_slot(lock->box_node(), unlock->box_node()) &&
+          !unlock->is_eliminated()) {
         lock_ops.append(unlock);
         return true;
       }
@@ -1427,8 +1454,8 @@ LockNode *AbstractLockNode::find_matching_lock(UnlockNode* unlock) {
   }
   if (ctrl->is_Lock()) {
     LockNode *lock = ctrl->as_Lock();
-    if ((lock->obj_node() == unlock->obj_node()) &&
-            (lock->box_node() == unlock->box_node())) {
+    if (lock->obj_node()->eqv_uncast(unlock->obj_node()) &&
+        BoxLockNode::same_slot(lock->box_node(), unlock->box_node())) {
       lock_result = lock;
     }
   }
@@ -1458,8 +1485,9 @@ bool AbstractLockNode::find_lock_and_unlock_through_if(Node* node, LockNode* loc
       }
       if (lock1_node != NULL && lock1_node->is_Lock()) {
         LockNode *lock1 = lock1_node->as_Lock();
-        if ((lock->obj_node() == lock1->obj_node()) &&
-            (lock->box_node() == lock1->box_node()) && !lock1->is_eliminated()) {
+        if (lock->obj_node()->eqv_uncast(lock1->obj_node()) &&
+            BoxLockNode::same_slot(lock->box_node(), lock1->box_node()) &&
+            !lock1->is_eliminated()) {
           lock_ops.append(lock1);
           return true;
         }
@@ -1503,42 +1531,42 @@ bool AbstractLockNode::find_unlocks_for_region(const RegionNode* region, LockNod
 void AbstractLockNode::create_lock_counter(JVMState* state) {
   _counter = OptoRuntime::new_named_counter(state, NamedCounter::LockCounter);
 }
-#endif
 
-void AbstractLockNode::set_eliminated() {
-  _eliminate = true;
-#ifndef PRODUCT
+void AbstractLockNode::set_eliminated_lock_counter() {
   if (_counter) {
     // Update the counter to indicate that this lock was eliminated.
     // The counter update code will stay around even though the
     // optimizer will eliminate the lock operation itself.
     _counter->set_tag(NamedCounter::EliminatedLockCounter);
   }
-#endif
 }
+#endif
 
 //=============================================================================
 Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
 
   // perform any generic optimizations first (returns 'this' or NULL)
   Node *result = SafePointNode::Ideal(phase, can_reshape);
+  if (result != NULL)  return result;
+  // Don't bother trying to transform a dead node
+  if (in(0) && in(0)->is_top())  return NULL;
 
   // Now see if we can optimize away this lock.  We don't actually
   // remove the locking here, we simply set the _eliminate flag which
   // prevents macro expansion from expanding the lock.  Since we don't
   // modify the graph, the value returned from this function is the
   // one computed above.
-  if (result == NULL && can_reshape && EliminateLocks && !is_eliminated()) {
+  if (can_reshape && EliminateLocks && !is_non_esc_obj()) {
     //
     // If we are locking an unescaped object, the lock/unlock is unnecessary
     //
     ConnectionGraph *cgr = phase->C->congraph();
-    PointsToNode::EscapeState es = PointsToNode::GlobalEscape;
-    if (cgr != NULL)
-      es = cgr->escape_state(obj_node());
-    if (es != PointsToNode::UnknownEscape && es != PointsToNode::GlobalEscape) {
-      // Mark it eliminated to update any counters
-      this->set_eliminated();
+    if (cgr != NULL && cgr->not_global_escape(obj_node())) {
+      assert(!is_eliminated() || is_coarsened(), "sanity");
+      // The lock could be marked eliminated by lock coarsening
+      // code during first IGVN before EA. Replace coarsened flag
+      // to eliminate all associated locks/unlocks.
+      this->set_non_esc_obj();
       return result;
     }
 
@@ -1546,7 +1574,7 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
     // Try lock coarsening
     //
     PhaseIterGVN* iter = phase->is_IterGVN();
-    if (iter != NULL) {
+    if (iter != NULL && !is_eliminated()) {
 
       GrowableArray<AbstractLockNode*>   lock_ops;
 
@@ -1598,11 +1626,10 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
         for (int i = 0; i < lock_ops.length(); i++) {
           AbstractLockNode* lock = lock_ops.at(i);
 
-          // Mark it eliminated to update any counters
-          lock->set_eliminated();
+          // Mark it eliminated by coarsening and update any counters
           lock->set_coarsened();
         }
-      } else if (result != NULL && ctrl->is_Region() &&
+      } else if (ctrl->is_Region() &&
                  iter->_worklist.member(ctrl)) {
         // We weren't able to find any opportunities but the region this
         // lock is control dependent on hasn't been processed yet so put
@@ -1617,13 +1644,50 @@ Node *LockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
 }
 
 //=============================================================================
+bool LockNode::is_nested_lock_region() {
+  BoxLockNode* box = box_node()->as_BoxLock();
+  int stk_slot = box->stack_slot();
+  if (stk_slot <= 0)
+    return false; // External lock or it is not Box (Phi node).
+
+  // Ignore complex cases: merged locks or multiple locks.
+  Node* obj = obj_node();
+  LockNode* unique_lock = NULL;
+  if (!box->is_simple_lock_region(&unique_lock, obj) ||
+      (unique_lock != this)) {
+    return false;
+  }
+
+  // Look for external lock for the same object.
+  SafePointNode* sfn = this->as_SafePoint();
+  JVMState* youngest_jvms = sfn->jvms();
+  int max_depth = youngest_jvms->depth();
+  for (int depth = 1; depth <= max_depth; depth++) {
+    JVMState* jvms = youngest_jvms->of_depth(depth);
+    int num_mon  = jvms->nof_monitors();
+    // Loop over monitors
+    for (int idx = 0; idx < num_mon; idx++) {
+      Node* obj_node = sfn->monitor_obj(jvms, idx);
+      BoxLockNode* box_node = sfn->monitor_box(jvms, idx)->as_BoxLock();
+      if ((box_node->stack_slot() < stk_slot) && obj_node->eqv_uncast(obj)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+//=============================================================================
 uint UnlockNode::size_of() const { return sizeof(*this); }
 
 //=============================================================================
 Node *UnlockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
 
   // perform any generic optimizations first (returns 'this' or NULL)
-  Node * result = SafePointNode::Ideal(phase, can_reshape);
+  Node *result = SafePointNode::Ideal(phase, can_reshape);
+  if (result != NULL)  return result;
+  // Don't bother trying to transform a dead node
+  if (in(0) && in(0)->is_top())  return NULL;
 
   // Now see if we can optimize away this unlock.  We don't actually
   // remove the unlocking here, we simply set the _eliminate flag which
@@ -1631,17 +1695,17 @@ Node *UnlockNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   // modify the graph, the value returned from this function is the
   // one computed above.
   // Escape state is defined after Parse phase.
-  if (result == NULL && can_reshape && EliminateLocks && !is_eliminated()) {
+  if (can_reshape && EliminateLocks && !is_non_esc_obj()) {
     //
     // If we are unlocking an unescaped object, the lock/unlock is unnecessary.
     //
     ConnectionGraph *cgr = phase->C->congraph();
-    PointsToNode::EscapeState es = PointsToNode::GlobalEscape;
-    if (cgr != NULL)
-      es = cgr->escape_state(obj_node());
-    if (es != PointsToNode::UnknownEscape && es != PointsToNode::GlobalEscape) {
-      // Mark it eliminated to update any counters
-      this->set_eliminated();
+    if (cgr != NULL && cgr->not_global_escape(obj_node())) {
+      assert(!is_eliminated() || is_coarsened(), "sanity");
+      // The lock could be marked eliminated by lock coarsening
+      // code during first IGVN before EA. Replace coarsened flag
+      // to eliminate all associated locks/unlocks.
+      this->set_non_esc_obj();
     }
   }
   return result;

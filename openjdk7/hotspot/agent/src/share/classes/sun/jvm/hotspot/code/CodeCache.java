@@ -57,8 +57,8 @@ public class CodeCache {
     virtualConstructor.addMapping("BufferBlob", BufferBlob.class);
     virtualConstructor.addMapping("nmethod", NMethod.class);
     virtualConstructor.addMapping("RuntimeStub", RuntimeStub.class);
-    virtualConstructor.addMapping("RicochetBlob", RicochetBlob.class);
     virtualConstructor.addMapping("AdapterBlob", AdapterBlob.class);
+    virtualConstructor.addMapping("MethodHandlesAdapterBlob", MethodHandlesAdapterBlob.class);
     virtualConstructor.addMapping("SafepointBlob", SafepointBlob.class);
     virtualConstructor.addMapping("DeoptimizationBlob", DeoptimizationBlob.class);
     if (VM.getVM().isServerCompiler()) {

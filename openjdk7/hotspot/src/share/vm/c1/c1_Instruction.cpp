@@ -161,6 +161,12 @@ ciType* Local::exact_type() const {
   return NULL;
 }
 
+ciType* Constant::exact_type() const {
+  if (type()->is_object()) {
+    return type()->as_ObjectType()->exact_type();
+  }
+  return NULL;
+}
 
 ciType* LoadIndexed::exact_type() const {
   ciType* array_type = array()->exact_type();
@@ -363,9 +369,6 @@ Invoke::Invoke(Bytecodes::Code code, ValueType* result_type, Value recv, Values*
   _signature = new BasicTypeList(number_of_arguments() + (has_receiver() ? 1 : 0));
   if (has_receiver()) {
     _signature->append(as_BasicType(receiver()->type()));
-  } else if (is_invokedynamic()) {
-    // Add the synthetic MethodHandle argument to the signature.
-    _signature->append(T_OBJECT);
   }
   for (int i = 0; i < number_of_arguments(); i++) {
     ValueType* t = argument_at(i)->type();
@@ -514,33 +517,38 @@ Constant::CompareResult Constant::compare(Instruction::Condition cond, Value rig
 
 void BlockBegin::set_end(BlockEnd* end) {
   assert(end != NULL, "should not reset block end to NULL");
-  BlockEnd* old_end = _end;
-  if (end == old_end) {
+  if (end == _end) {
     return;
   }
-  // Must make the predecessors/successors match up with the
-  // BlockEnd's notion.
-  int i, n;
-  if (old_end != NULL) {
-    // disconnect from the old end
-    old_end->set_begin(NULL);
+  clear_end();
 
-    // disconnect this block from it's current successors
-    for (i = 0; i < _successors.length(); i++) {
-      _successors.at(i)->remove_predecessor(this);
-    }
-  }
+  // Set the new end
   _end = end;
 
   _successors.clear();
   // Now reset successors list based on BlockEnd
-  n = end->number_of_sux();
-  for (i = 0; i < n; i++) {
+  for (int i = 0; i < end->number_of_sux(); i++) {
     BlockBegin* sux = end->sux_at(i);
     _successors.append(sux);
     sux->_predecessors.append(this);
   }
   _end->set_begin(this);
+}
+
+
+void BlockBegin::clear_end() {
+  // Must make the predecessors/successors match up with the
+  // BlockEnd's notion.
+  if (_end != NULL) {
+    // disconnect from the old end
+    _end->set_begin(NULL);
+
+    // disconnect this block from it's current successors
+    for (int i = 0; i < _successors.length(); i++) {
+      _successors.at(i)->remove_predecessor(this);
+    }
+    _end = NULL;
+  }
 }
 
 

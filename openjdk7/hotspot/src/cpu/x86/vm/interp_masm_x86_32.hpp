@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -77,12 +77,14 @@ class InterpreterMacroAssembler: public MacroAssembler {
 
   // Helpers for runtime call arguments/results
   void get_method(Register reg)                            { movptr(reg, Address(rbp, frame::interpreter_frame_method_offset * wordSize)); }
-  void get_constant_pool(Register reg)                     { get_method(reg); movptr(reg, Address(reg, methodOopDesc::constants_offset())); }
+  void get_const(Register reg)                             { get_method(reg); movptr(reg, Address(reg, methodOopDesc::const_offset())); }
+  void get_constant_pool(Register reg)                     { get_const(reg); movptr(reg, Address(reg, constMethodOopDesc::constants_offset())); }
   void get_constant_pool_cache(Register reg)               { get_constant_pool(reg); movptr(reg, Address(reg, constantPoolOopDesc::cache_offset_in_bytes())); }
   void get_cpool_and_tags(Register cpool, Register tags)   { get_constant_pool(cpool); movptr(tags, Address(cpool, constantPoolOopDesc::tags_offset_in_bytes()));
   }
   void get_unsigned_2_byte_index_at_bcp(Register reg, int bcp_offset);
   void get_cache_and_index_at_bcp(Register cache, Register index, int bcp_offset, size_t index_size = sizeof(u2));
+  void get_cache_and_index_and_bytecode_at_bcp(Register cache, Register index, Register bytecode, int byte_no, int bcp_offset, size_t index_size = sizeof(u2));
   void get_cache_entry_pointer_at_bcp(Register cache, Register tmp, int bcp_offset, size_t index_size = sizeof(u2));
   void get_cache_index_at_bcp(Register index, int bcp_offset, size_t index_size = sizeof(u2));
 

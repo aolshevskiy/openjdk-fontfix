@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ import java.net.ProtocolException;
 import java.net.HttpRetryException;
 import java.net.PasswordAuthentication;
 import java.net.Authenticator;
+import java.net.HttpCookie;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.net.SocketTimeoutException;
@@ -45,6 +46,8 @@ import java.net.SecureCacheResponse;
 import java.net.CacheRequest;
 import java.net.Authenticator.RequestorType;
 import java.io.*;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Map;
 import java.util.List;
@@ -346,7 +349,7 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
     private HttpClient reuseClient = null;
 
     /* Tunnel states */
-    enum TunnelState {
+    public enum TunnelState {
         /* No tunnel */
         NONE,
 
@@ -657,7 +660,7 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
      */
     protected void setNewClient (URL url, boolean useCache)
         throws IOException {
-        http = HttpClient.New(url, null, -1, useCache, connectTimeout);
+        http = HttpClient.New(url, null, -1, useCache, connectTimeout, this);
         http.setReadTimeout(readTimeout);
     }
 
@@ -698,7 +701,8 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
                                            String proxyHost, int proxyPort,
                                            boolean useCache)
         throws IOException {
-        http = HttpClient.New (url, proxyHost, proxyPort, useCache, connectTimeout);
+        http = HttpClient.New (url, proxyHost, proxyPort, useCache,
+            connectTimeout, this);
         http.setReadTimeout(readTimeout);
     }
 
@@ -989,14 +993,14 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
     // subclass HttpsClient will overwrite & return an instance of HttpsClient
     protected HttpClient getNewHttpClient(URL url, Proxy p, int connectTimeout)
         throws IOException {
-        return HttpClient.New(url, p, connectTimeout);
+        return HttpClient.New(url, p, connectTimeout, this);
     }
 
     // subclass HttpsClient will overwrite & return an instance of HttpsClient
     protected HttpClient getNewHttpClient(URL url, Proxy p,
                                           int connectTimeout, boolean useCache)
         throws IOException {
-        return HttpClient.New(url, p, connectTimeout, useCache);
+        return HttpClient.New(url, p, connectTimeout, useCache, this);
     }
 
     private void expect100Continue() throws IOException {
@@ -1139,7 +1143,7 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
         }
     }
 
-    private boolean streaming () {
+    public boolean streaming () {
         return (fixedContentLength != -1) || (fixedContentLengthLong != -1) ||
                (chunkLength != -1);
     }
@@ -1320,6 +1324,16 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
                 if (logger.isLoggable(PlatformLogger.FINE)) {
                     logger.fine(responses.toString());
                 }
+
+                boolean b1 = responses.filterNTLMResponses("WWW-Authenticate");
+                boolean b2 = responses.filterNTLMResponses("Proxy-Authenticate");
+                if (b1 || b2) {
+                    if (logger.isLoggable(PlatformLogger.FINE)) {
+                        logger.fine(">>>> Headers are filtered");
+                        logger.fine(responses.toString());
+                    }
+                }
+
                 inputStream = http.getInputStream();
 
                 respCode = getResponseCode();
@@ -1735,7 +1749,7 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
      *
      * @param  the state
      */
-    void setTunnelState(TunnelState tunnelState) {
+    public void setTunnelState(TunnelState tunnelState) {
         this.tunnelState = tunnelState;
     }
 
@@ -1777,6 +1791,13 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
                 /* Log the response to the CONNECT */
                 if (logger.isLoggable(PlatformLogger.FINE)) {
                     logger.fine(responses.toString());
+                }
+
+                if (responses.filterNTLMResponses("Proxy-Authenticate")) {
+                    if (logger.isLoggable(PlatformLogger.FINE)) {
+                        logger.fine(">>>> Headers are filtered");
+                        logger.fine(responses.toString());
+                    }
                 }
 
                 statusLine = responses.getValue(0);
@@ -1880,14 +1901,7 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
     private void sendCONNECTRequest() throws IOException {
         int port = url.getPort();
 
-        // setRequests == true indicates the std. request headers
-        // have been set in (previous) requests.
-        // so the first one must be the http method (GET, etc.).
-        // we need to set it to CONNECT soon, remove this one first.
-        // otherwise, there may have 2 http methods in headers
-        if (setRequests) requests.set(0, null, null);
-
-        requests.prepend(HTTP_CONNECT + " " + connectRequestURI(url)
+        requests.set(0, HTTP_CONNECT + " " + connectRequestURI(url)
                          + " " + httpVersion, null);
         requests.setIfNotSet("User-Agent", userAgent);
 
@@ -1912,8 +1926,6 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
         }
 
         http.writeRequests(requests, null);
-        // remove CONNECT header
-        requests.set(0, null, null);
     }
 
     /**
@@ -2584,6 +2596,78 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
         return false;
     }
 
+    // constant strings represent set-cookie header names
+    private final static String SET_COOKIE = "set-cookie";
+    private final static String SET_COOKIE2 = "set-cookie2";
+
+    /**
+     * Returns a filtered version of the given headers value.
+     *
+     * Note: The implementation currently only filters out HttpOnly cookies
+     *       from Set-Cookie and Set-Cookie2 headers.
+     */
+    private String filterHeaderField(String name, String value) {
+        if (value == null)
+            return null;
+
+        if (SET_COOKIE.equalsIgnoreCase(name) ||
+            SET_COOKIE2.equalsIgnoreCase(name)) {
+            // Filtering only if there is a cookie handler. [Assumption: the
+            // cookie handler will store/retrieve the HttpOnly cookies]
+            if (cookieHandler == null)
+                return value;
+
+            sun.misc.JavaNetHttpCookieAccess access =
+                    sun.misc.SharedSecrets.getJavaNetHttpCookieAccess();
+            StringBuilder retValue = new StringBuilder();
+            List<HttpCookie> cookies = access.parse(value);
+            boolean multipleCookies = false;
+            for (HttpCookie cookie : cookies) {
+                // skip HttpOnly cookies
+                if (cookie.isHttpOnly())
+                    continue;
+                if (multipleCookies)
+                    retValue.append(',');  // RFC 2965, comma separated
+                retValue.append(access.header(cookie));
+                multipleCookies = true;
+            }
+
+            return retValue.length() == 0 ? null : retValue.toString();
+        }
+
+        return value;
+    }
+
+    // Cache the filtered response headers so that they don't need
+    // to be generated for every getHeaderFields() call.
+    private Map<String, List<String>> filteredHeaders;  // null
+
+    private Map<String, List<String>> getFilteredHeaderFields() {
+        if (filteredHeaders != null)
+            return filteredHeaders;
+
+        Map<String, List<String>> headers, tmpMap = new HashMap<>();
+
+        if (cachedHeaders != null)
+            headers = cachedHeaders.getHeaders();
+        else
+            headers = responses.getHeaders();
+
+        for (Map.Entry<String, List<String>> e: headers.entrySet()) {
+            String key = e.getKey();
+            List<String> values = e.getValue(), filteredVals = new ArrayList<>();
+            for (String value : values) {
+                String fVal = filterHeaderField(key, value);
+                if (fVal != null)
+                    filteredVals.add(fVal);
+            }
+            if (!filteredVals.isEmpty())
+                tmpMap.put(key, Collections.unmodifiableList(filteredVals));
+        }
+
+        return filteredHeaders = Collections.unmodifiableMap(tmpMap);
+    }
+
     /**
      * Gets a header field by name. Returns null if not known.
      * @param name the name of the header field
@@ -2595,10 +2679,10 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
         } catch (IOException e) {}
 
         if (cachedHeaders != null) {
-            return cachedHeaders.findValue(name);
+            return filterHeaderField(name, cachedHeaders.findValue(name));
         }
 
-        return responses.findValue(name);
+        return filterHeaderField(name, responses.findValue(name));
     }
 
     /**
@@ -2617,11 +2701,7 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
             getInputStream();
         } catch (IOException e) {}
 
-        if (cachedHeaders != null) {
-            return cachedHeaders.getHeaders();
-        }
-
-        return responses.getHeaders();
+        return getFilteredHeaderFields();
     }
 
     /**
@@ -2635,9 +2715,10 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
         } catch (IOException e) {}
 
         if (cachedHeaders != null) {
-           return cachedHeaders.getValue(n);
+           return filterHeaderField(cachedHeaders.getKey(n),
+                                    cachedHeaders.getValue(n));
         }
-        return responses.getValue(n);
+        return filterHeaderField(responses.getKey(n), responses.getValue(n));
     }
 
     /**
@@ -2833,6 +2914,10 @@ public class HttpURLConnection extends java.net.HttpURLConnection {
     @Override
     public int getReadTimeout() {
         return readTimeout < 0 ? 0 : readTimeout;
+    }
+
+    public CookieHandler getCookieHandler() {
+        return cookieHandler;
     }
 
     String getMethod() {

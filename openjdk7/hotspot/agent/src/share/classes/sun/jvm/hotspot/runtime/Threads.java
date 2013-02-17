@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,6 +37,8 @@ import sun.jvm.hotspot.runtime.linux_x86.LinuxX86JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.linux_ia64.LinuxIA64JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.linux_amd64.LinuxAMD64JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.linux_sparc.LinuxSPARCJavaThreadPDAccess;
+import sun.jvm.hotspot.runtime.bsd_x86.BsdX86JavaThreadPDAccess;
+import sun.jvm.hotspot.runtime.bsd_amd64.BsdAMD64JavaThreadPDAccess;
 import sun.jvm.hotspot.utilities.*;
 
 public class Threads {
@@ -89,8 +91,23 @@ public class Threads {
                 access = new LinuxAMD64JavaThreadPDAccess();
             } else if (cpu.equals("sparc")) {
                 access = new LinuxSPARCJavaThreadPDAccess();
+            } else {
+              try {
+                access = (JavaThreadPDAccess)
+                  Class.forName("sun.jvm.hotspot.runtime.linux_" +
+                     cpu.toLowerCase() + ".Linux" + cpu.toUpperCase() +
+                     "JavaThreadPDAccess").newInstance();
+              } catch (Exception e) {
+                throw new RuntimeException("OS/CPU combination " + os + "/" + cpu +
+                                           " not yet supported");
+              }
             }
-
+        } else if (os.equals("bsd")) {
+            if (cpu.equals("x86")) {
+                access = new BsdX86JavaThreadPDAccess();
+            } else if (cpu.equals("amd64") || cpu.equals("x86_64")) {
+                access = new BsdAMD64JavaThreadPDAccess();
+            }
         }
 
         if (access == null) {

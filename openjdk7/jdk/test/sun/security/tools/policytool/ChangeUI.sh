@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug  6296772 6293981 6290216
+# @bug  6296772 6293981 6290216 7083664
 # @summary FilePermission and DelegationPermission, and cancel button
 #
 # @run applet/manual=done ChangeUI.html
@@ -46,17 +46,20 @@ fi
 # set platform-dependent variables
 OS=`uname -s`
 case "$OS" in
-  SunOS | Linux )
+  SunOS | Linux | Darwin )
     NULL=/dev/null
     PS=":"
     FS="/"
-    TMP=/tmp
+    ;;
+  CYGWIN* )
+    NULL=/dev/null
+    PS=";"
+    FS="/"
     ;;
   Windows* )
     NULL=NUL
     PS=";"
     FS="\\"
-    TMP="c:/temp"
     ;;
   * )
     echo "Unrecognized system!"

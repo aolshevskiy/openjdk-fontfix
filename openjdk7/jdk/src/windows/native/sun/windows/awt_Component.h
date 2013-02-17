@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -119,6 +119,7 @@ public:
     static jmethodID getLocationOnScreenMID;
     static jmethodID replaceSurfaceDataMID;
     static jmethodID replaceSurfaceDataLaterMID;
+    static jmethodID disposeLaterMID;
 
     static const UINT WmAwtIsComponent;
     static jint * masks; //InputEvent mask array
@@ -440,7 +441,7 @@ public:
     static jint GetJavaModifiers();
     static jint GetButton(int mouseButton);
     static UINT GetButtonMK(int mouseButton);
-    static UINT WindowsKeyToJavaKey(UINT windowsKey, UINT modifiers);
+    static UINT WindowsKeyToJavaKey(UINT windowsKey, UINT modifiers, UINT character, BOOL isDeadKey);
     static void JavaKeyToWindowsKey(UINT javaKey, UINT *windowsKey, UINT *modifiers, UINT originalWindowsKey);
     static void UpdateDynPrimaryKeymap(UINT wkey, UINT jkeyLegacy, jint keyLocation, UINT modifiers);
 
@@ -452,7 +453,7 @@ public:
 
     enum TransOps {NONE, LOAD, SAVE};
 
-    UINT WindowsKeyToJavaChar(UINT wkey, UINT modifiers, TransOps ops);
+    UINT WindowsKeyToJavaChar(UINT wkey, UINT modifiers, TransOps ops, BOOL &isDeadKey);
 
     /* routines used for input method support */
     void SetInputMethod(jobject im, BOOL useNativeCompWindow);
@@ -463,7 +464,7 @@ public:
                               int caretPos, int visiblePos);
     void InquireCandidatePosition();
     INLINE LPARAM GetCandidateType() { return m_bitsCandType; }
-    HIMC ImmGetContext();
+    HWND ImmGetHWnd();
     HIMC ImmAssociateContext(HIMC himc);
     HWND GetProxyFocusOwner();
 
@@ -490,6 +491,7 @@ public:
     virtual MsgRouting WmCreate() {return mrDoDefault;}
     virtual MsgRouting WmClose() {return mrDoDefault;}
     virtual MsgRouting WmDestroy();
+    virtual MsgRouting WmNcDestroy();
 
     virtual MsgRouting WmActivate(UINT nState, BOOL fMinimized, HWND opposite)
     {
@@ -711,6 +713,10 @@ public:
         return m_MessagesProcessing == 0;
     }
 
+    BOOL IsDestroyPaused() const {
+        return m_bPauseDestroy;
+    }
+
 protected:
     static AwtComponent* GetComponentImpl(HWND hWnd);
 
@@ -752,6 +758,7 @@ private:
     UINT m_mouseButtonClickAllowed;
 
     BOOL m_bSubclassed;
+    BOOL m_bPauseDestroy;
 
     COLORREF m_colorForeground;
     COLORREF m_colorBackground;

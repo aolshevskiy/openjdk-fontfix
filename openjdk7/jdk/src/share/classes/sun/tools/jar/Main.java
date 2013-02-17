@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -839,8 +839,8 @@ class Main {
 
     void replaceFSC(String files[]) {
         if (files != null) {
-            for (String file : files) {
-                file = file.replace(File.separatorChar, '/');
+            for (int i = 0; i < files.length; i++) {
+                files[i] = files[i].replace(File.separatorChar, '/');
             }
         }
     }

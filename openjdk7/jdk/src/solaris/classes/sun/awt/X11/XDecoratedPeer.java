@@ -721,15 +721,17 @@ abstract class XDecoratedPeer extends XWindowPeer {
             // Location, Client size + insets
             newLocation = new Point(xe.get_x() - currentInsets.left, xe.get_y() - currentInsets.top);
         } else {
-            // CDE/MWM/Metacity/Sawfish bug: if shell is resized using
-            // top or left border, we don't receive synthetic
-            // ConfigureNotify, only the one from X with zero
-            // coordinates.  This is the workaround to get real
-            // location, 6261336
+            // ICCCM 4.1.5 states that a real ConfigureNotify will be sent when
+            // a window is resized but the client can not tell if the window was
+            // moved or not. The client should consider the position as unkown
+            // and use TranslateCoordinates to find the actual position.
+            //
+            // TODO this should be the default for every case.
             switch (XWM.getWMID()) {
                 case XWM.CDE_WM:
                 case XWM.MOTIF_WM:
                 case XWM.METACITY_WM:
+                case XWM.MUTTER_WM:
                 case XWM.SAWFISH_WM:
                 {
                     Point xlocation = queryXLocation();
@@ -1106,7 +1108,7 @@ abstract class XDecoratedPeer extends XWindowPeer {
         focusLog.fine("Request for decorated window focus");
         // If this is Frame or Dialog we can't assure focus request success - but we still can try
         // If this is Window and its owner Frame is active we can be sure request succedded.
-        Window focusedWindow = XKeyboardFocusManagerPeer.getCurrentNativeFocusedWindow();
+        Window focusedWindow = XKeyboardFocusManagerPeer.getInstance().getCurrentFocusedWindow();
         Window activeWindow = XWindowPeer.getDecoratedOwner(focusedWindow);
 
         focusLog.finer("Current window is: active={0}, focused={1}",
@@ -1199,7 +1201,7 @@ abstract class XDecoratedPeer extends XWindowPeer {
     }
 
     public void handleWindowFocusOut(Window oppositeWindow, long serial) {
-        Window actualFocusedWindow = XKeyboardFocusManagerPeer.getCurrentNativeFocusedWindow();
+        Window actualFocusedWindow = XKeyboardFocusManagerPeer.getInstance().getCurrentFocusedWindow();
 
         // If the actual focused window is not this decorated window then retain it.
         if (actualFocusedWindow != null && actualFocusedWindow != target) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -79,7 +79,7 @@ ciMethod::ciMethod(methodHandle h_m) : ciObject(h_m) {
   _max_locals         = h_m()->max_locals();
   _code_size          = h_m()->code_size();
   _intrinsic_id       = h_m()->intrinsic_id();
-  _handler_count      = h_m()->exception_table()->length() / 4;
+  _handler_count      = h_m()->exception_table_length();
   _uses_monitors      = h_m()->access_flags().has_monitor_bytecodes();
   _balanced_monitors  = !_uses_monitors || h_m()->access_flags().is_monitor_matching();
   _is_c1_compilable   = !h_m()->is_not_c1_compilable();
@@ -125,7 +125,8 @@ ciMethod::ciMethod(methodHandle h_m) : ciObject(h_m) {
   _name = env->get_symbol(h_m()->name());
   _holder = env->get_object(h_m()->method_holder())->as_instance_klass();
   ciSymbol* sig_symbol = env->get_symbol(h_m()->signature());
-  _signature = new (env->arena()) ciSignature(_holder, sig_symbol);
+  constantPoolHandle cpool = h_m()->constants();
+  _signature = new (env->arena()) ciSignature(_holder, cpool, sig_symbol);
   _method_data = NULL;
   // Take a snapshot of these values, so they will be commensurate with the MDO.
   if (ProfileInterpreter || TieredCompilation) {
@@ -147,21 +148,27 @@ ciMethod::ciMethod(methodHandle h_m) : ciObject(h_m) {
 //
 // Unloaded method.
 ciMethod::ciMethod(ciInstanceKlass* holder,
-                   ciSymbol* name,
-                   ciSymbol* signature) : ciObject(ciMethodKlass::make()) {
-  // These fields are always filled in.
-  _name = name;
-  _holder = holder;
-  _signature = new (CURRENT_ENV->arena()) ciSignature(_holder, signature);
-  _intrinsic_id = vmIntrinsics::_none;
-  _liveness = NULL;
-  _can_be_statically_bound = false;
-  _method_blocks = NULL;
-  _method_data = NULL;
+                   ciSymbol*        name,
+                   ciSymbol*        signature,
+                   ciInstanceKlass* accessor) :
+  ciObject(ciMethodKlass::make()),
+  _name(                   name),
+  _holder(                 holder),
+  _intrinsic_id(           vmIntrinsics::_none),
+  _liveness(               NULL),
+  _can_be_statically_bound(false),
+  _method_blocks(          NULL),
+  _method_data(            NULL)
 #if defined(COMPILER2) || defined(SHARK)
-  _flow = NULL;
-  _bcea = NULL;
+  ,
+  _flow(                   NULL),
+  _bcea(                   NULL)
 #endif // COMPILER2 || SHARK
+{
+  // Usually holder and accessor are the same type but in some cases
+  // the holder has the wrong class loader (e.g. invokedynamic call
+  // sites) so we pass the accessor.
+  _signature = new (CURRENT_ENV->arena()) ciSignature(accessor, constantPoolHandle(), signature);
 }
 
 
@@ -191,7 +198,7 @@ void ciMethod::load_code() {
   }
 
   // And load the exception table.
-  typeArrayOop exc_table = me->exception_table();
+  ExceptionTable exc_table(me);
 
   // Allocate one extra spot in our list of exceptions.  This
   // last entry will be used to represent the possibility that
@@ -202,13 +209,12 @@ void ciMethod::load_code() {
                                          * (_handler_count + 1));
   if (_handler_count > 0) {
     for (int i=0; i<_handler_count; i++) {
-      int base = i*4;
       _exception_handlers[i] = new (arena) ciExceptionHandler(
                                 holder(),
-            /* start    */      exc_table->int_at(base),
-            /* limit    */      exc_table->int_at(base+1),
-            /* goto pc  */      exc_table->int_at(base+2),
-            /* cp index */      exc_table->int_at(base+3));
+            /* start    */      exc_table.start_pc(i),
+            /* limit    */      exc_table.end_pc(i),
+            /* goto pc  */      exc_table.handler_pc(i),
+            /* cp index */      exc_table.catch_type_index(i));
     }
   }
 
@@ -729,6 +735,24 @@ int ciMethod::interpreter_call_site_count(int bci) {
 }
 
 // ------------------------------------------------------------------
+// ciMethod::get_field_at_bci
+ciField* ciMethod::get_field_at_bci(int bci, bool &will_link) {
+  ciBytecodeStream iter(this);
+  iter.reset_to_bci(bci);
+  iter.next();
+  return iter.get_field(will_link);
+}
+
+// ------------------------------------------------------------------
+// ciMethod::get_method_at_bci
+ciMethod* ciMethod::get_method_at_bci(int bci, bool &will_link, ciSignature* *declared_signature) {
+  ciBytecodeStream iter(this);
+  iter.reset_to_bci(bci);
+  iter.next();
+  return iter.get_method(will_link, declared_signature);
+}
+
+// ------------------------------------------------------------------
 // Adjust a CounterData count to be commensurate with
 // interpreter_invocation_count.  If the MDO exists for
 // only 25% of the time the method exists, then the
@@ -763,38 +787,36 @@ int ciMethod::scale_count(int count, float prof_factor) {
 // invokedynamic support
 
 // ------------------------------------------------------------------
-// ciMethod::is_method_handle_invoke
+// ciMethod::is_method_handle_intrinsic
 //
-// Return true if the method is an instance of one of the two
-// signature-polymorphic MethodHandle methods, invokeExact or invokeGeneric.
-bool ciMethod::is_method_handle_invoke() const {
-  if (!is_loaded()) {
-    bool flag = (holder()->name() == ciSymbol::java_lang_invoke_MethodHandle() &&
-                 methodOopDesc::is_method_handle_invoke_name(name()->sid()));
-    return flag;
-  }
-  VM_ENTRY_MARK;
-  return get_methodOop()->is_method_handle_invoke();
+// Return true if the method is an instance of the JVM-generated
+// signature-polymorphic MethodHandle methods, _invokeBasic, _linkToVirtual, etc.
+bool ciMethod::is_method_handle_intrinsic() const {
+  vmIntrinsics::ID iid = _intrinsic_id;  // do not check if loaded
+  return (MethodHandles::is_signature_polymorphic(iid) &&
+          MethodHandles::is_signature_polymorphic_intrinsic(iid));
 }
 
 // ------------------------------------------------------------------
-// ciMethod::is_method_handle_adapter
+// ciMethod::is_compiled_lambda_form
 //
 // Return true if the method is a generated MethodHandle adapter.
-// These are built by MethodHandleCompiler.
-bool ciMethod::is_method_handle_adapter() const {
-  if (!is_loaded())  return false;
-  VM_ENTRY_MARK;
-  return get_methodOop()->is_method_handle_adapter();
+// These are built by Java code.
+bool ciMethod::is_compiled_lambda_form() const {
+  vmIntrinsics::ID iid = _intrinsic_id;  // do not check if loaded
+  return iid == vmIntrinsics::_compiledLambdaForm;
 }
 
-ciInstance* ciMethod::method_handle_type() {
-  check_is_loaded();
-  VM_ENTRY_MARK;
-  oop mtype = get_methodOop()->method_handle_type();
-  return CURRENT_THREAD_ENV->get_object(mtype)->as_instance();
+// ------------------------------------------------------------------
+// ciMethod::has_member_arg
+//
+// Return true if the method is a linker intrinsic like _linkToVirtual.
+// These are built by the JVM.
+bool ciMethod::has_member_arg() const {
+  vmIntrinsics::ID iid = _intrinsic_id;  // do not check if loaded
+  return (MethodHandles::is_signature_polymorphic(iid) &&
+          MethodHandles::has_member_arg(iid));
 }
-
 
 // ------------------------------------------------------------------
 // ciMethod::ensure_method_data
@@ -862,25 +884,6 @@ ciMethodData* ciMethod::method_data_or_null() {
   ciMethodData *md = method_data();
   if (md->is_empty()) return NULL;
   return md;
-}
-
-// ------------------------------------------------------------------
-// ciMethod::will_link
-//
-// Will this method link in a specific calling context?
-bool ciMethod::will_link(ciKlass* accessing_klass,
-                         ciKlass* declared_method_holder,
-                         Bytecodes::Code bc) {
-  if (!is_loaded()) {
-    // Method lookup failed.
-    return false;
-  }
-
-  // The link checks have been front-loaded into the get_method
-  // call.  This method (ciMethod::will_link()) will be removed
-  // in the future.
-
-  return true;
 }
 
 // ------------------------------------------------------------------
@@ -1009,6 +1012,25 @@ int ciMethod::comp_level() {
   return 0;
 }
 
+int ciMethod::highest_osr_comp_level() {
+  check_is_loaded();
+  VM_ENTRY_MARK;
+  return get_methodOop()->highest_osr_comp_level();
+}
+
+// ------------------------------------------------------------------
+// ciMethod::code_size_for_inlining
+//
+// Code size for inlining decisions.  This method returns a code
+// size of 1 for methods which has the ForceInline annotation.
+int ciMethod::code_size_for_inlining() {
+  check_is_loaded();
+  if (get_methodOop()->force_inline()) {
+    return 1;
+  }
+  return code_size();
+}
+
 // ------------------------------------------------------------------
 // ciMethod::instructions_size
 //
@@ -1087,7 +1109,8 @@ bool ciMethod::check_call(int refinfo_index, bool is_static) const {
     constantPoolHandle pool (THREAD, get_methodOop()->constants());
     methodHandle spec_method;
     KlassHandle  spec_klass;
-    LinkResolver::resolve_method(spec_method, spec_klass, pool, refinfo_index, THREAD);
+    Bytecodes::Code code = (is_static ? Bytecodes::_invokestatic : Bytecodes::_invokevirtual);
+    LinkResolver::resolve_method_statically(spec_method, spec_klass, code, pool, refinfo_index, THREAD);
     if (HAS_PENDING_EXCEPTION) {
       CLEAR_PENDING_EXCEPTION;
       return false;
@@ -1167,8 +1190,16 @@ void ciMethod::print_name(outputStream* st) {
 //
 // Print the name of this method, without signature.
 void ciMethod::print_short_name(outputStream* st) {
-  check_is_loaded();
-  GUARDED_VM_ENTRY(get_methodOop()->print_short_name(st);)
+  if (is_loaded()) {
+    GUARDED_VM_ENTRY(get_methodOop()->print_short_name(st););
+  } else {
+    // Fall back if method is not loaded.
+    holder()->print_name_on(st);
+    st->print("::");
+    name()->print_symbol_on(st);
+    if (WizardMode)
+      signature()->as_symbol()->print_symbol_on(st);
+  }
 }
 
 // ------------------------------------------------------------------
@@ -1184,7 +1215,9 @@ void ciMethod::print_impl(outputStream* st) {
   st->print(" signature=");
   signature()->as_symbol()->print_symbol_on(st);
   if (is_loaded()) {
-    st->print(" loaded=true flags=");
+    st->print(" loaded=true");
+    st->print(" arg_size=%d", arg_size());
+    st->print(" flags=");
     flags().print_member_flags(st);
   } else {
     st->print(" loaded=false");

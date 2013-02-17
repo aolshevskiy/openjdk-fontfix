@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -373,7 +373,7 @@ JvmtiExport::get_jvmti_interface(JavaVM *jvm, void **penv, jint version) {
     JavaThread* current_thread = (JavaThread*) ThreadLocalStorage::thread();
     // transition code: native to VM
     ThreadInVMfromNative __tiv(current_thread);
-    __ENTRY(jvmtiEnv*, JvmtiExport::get_jvmti_interface, current_thread)
+    VM_ENTRY_BASE(jvmtiEnv*, JvmtiExport::get_jvmti_interface, current_thread)
     debug_only(VMNativeEntryWrapper __vew;)
 
     JvmtiEnv *jvmti_env = JvmtiEnv::create_a_jvmti(version);
@@ -538,8 +538,6 @@ class JvmtiClassFileLoadHookPoster : public StackObj {
     _curr_env = NULL;
     _cached_length_ptr = cached_length_ptr;
     _cached_data_ptr = cached_data_ptr;
-    *_cached_length_ptr = 0;
-    *_cached_data_ptr = NULL;
 
     _state = _thread->jvmti_thread_state();
     if (_state != NULL) {
@@ -619,7 +617,7 @@ class JvmtiClassFileLoadHookPoster : public StackObj {
       if (caching_needed && *_cached_data_ptr == NULL) {
         // data has been changed by the new retransformable agent
         // and it hasn't already been cached, cache it
-        *_cached_data_ptr = (unsigned char *)os::malloc(_curr_len);
+        *_cached_data_ptr = (unsigned char *)os::malloc(_curr_len, mtInternal);
         memcpy(*_cached_data_ptr, _curr_data, _curr_len);
         *_cached_length_ptr = _curr_len;
       }
@@ -670,16 +668,6 @@ void JvmtiExport::post_class_file_load_hook(Symbol* h_name,
   poster.post();
 }
 
-void JvmtiExport::report_unsupported(bool on) {
-  // If any JVMTI service is turned on, we need to exit before native code
-  // tries to access nonexistant services.
-  if (on) {
-    vm_exit_during_initialization("Java Kernel does not support JVMTI.");
-  }
-}
-
-
-#ifndef JVMTI_KERNEL
 static inline klassOop oop_to_klassOop(oop obj) {
   klassOop k = obj->klass();
 
@@ -722,7 +710,7 @@ class JvmtiCompiledMethodLoadEventMark : public JvmtiMethodEventMark {
     JvmtiCodeBlobEvents::build_jvmti_addr_location_map(nm, &_map, &_map_length);
   }
   ~JvmtiCompiledMethodLoadEventMark() {
-     FREE_C_HEAP_ARRAY(jvmtiAddrLocationMap, _map);
+     FREE_C_HEAP_ARRAY(jvmtiAddrLocationMap, _map, mtInternal);
   }
 
   jint code_size() { return _code_size; }
@@ -1307,15 +1295,17 @@ void JvmtiExport::post_exception_throw(JavaThread *thread, methodOop method, add
         vframeStream st(thread);
         assert(!st.at_end(), "cannot be at end");
         methodOop current_method = NULL;
+        methodHandle current_mh = methodHandle(thread, current_method);
         int current_bci = -1;
         do {
           current_method = st.method();
+          current_mh = methodHandle(thread, current_method);
           current_bci = st.bci();
           do {
             should_repeat = false;
             KlassHandle eh_klass(thread, exception_handle()->klass());
-            current_bci = current_method->fast_exception_handler_bci_for(
-              eh_klass, current_bci, THREAD);
+            current_bci = methodOopDesc::fast_exception_handler_bci_for(
+              current_mh, eh_klass, current_bci, THREAD);
             if (HAS_PENDING_EXCEPTION) {
               exception_handle = KlassHandle(thread, PENDING_EXCEPTION);
               CLEAR_PENDING_EXCEPTION;
@@ -1330,8 +1320,7 @@ void JvmtiExport::post_exception_throw(JavaThread *thread, methodOop method, add
           catch_jmethodID = 0;
           current_bci = 0;
         } else {
-          catch_jmethodID = jem.to_jmethodID(
-                                     methodHandle(thread, current_method));
+          catch_jmethodID = jem.to_jmethodID(current_mh);
         }
 
         JvmtiJavaThreadEventTransition jet(thread);
@@ -2175,7 +2164,6 @@ extern "C" {
   typedef jint (JNICALL *OnAttachEntry_t)(JavaVM*, char *, void *);
 }
 
-#ifndef SERVICES_KERNEL
 jint JvmtiExport::load_agent_library(AttachOperation* op, outputStream* st) {
   char ebuf[1024];
   char buffer[JVM_MAXPATHLEN];
@@ -2253,7 +2241,6 @@ jint JvmtiExport::load_agent_library(AttachOperation* op, outputStream* st) {
   }
   return result;
 }
-#endif // SERVICES_KERNEL
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -2325,7 +2312,7 @@ JvmtiDynamicCodeEventCollector::~JvmtiDynamicCodeEventCollector() {
 // register a stub
 void JvmtiDynamicCodeEventCollector::register_stub(const char* name, address start, address end) {
  if (_code_blobs == NULL) {
-   _code_blobs = new (ResourceObj::C_HEAP) GrowableArray<JvmtiCodeBlobDesc*>(1,true);
+   _code_blobs = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<JvmtiCodeBlobDesc*>(1,true);
  }
  _code_blobs->append(new JvmtiCodeBlobDesc(name, start, end));
 }
@@ -2359,7 +2346,7 @@ JvmtiVMObjectAllocEventCollector::~JvmtiVMObjectAllocEventCollector() {
 void JvmtiVMObjectAllocEventCollector::record_allocation(oop obj) {
   assert(is_enabled(), "VM object alloc event collector is not enabled");
   if (_allocated == NULL) {
-    _allocated = new (ResourceObj::C_HEAP) GrowableArray<oop>(1, true);
+    _allocated = new (ResourceObj::C_HEAP, mtInternal) GrowableArray<oop>(1, true);
   }
   _allocated->push(obj);
 }
@@ -2451,4 +2438,3 @@ JvmtiGCMarker::~JvmtiGCMarker() {
     JvmtiExport::post_garbage_collection_finish();
   }
 }
-#endif // JVMTI_KERNEL

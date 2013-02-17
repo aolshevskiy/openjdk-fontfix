@@ -31,8 +31,13 @@
 // A GenerationCounter is a holder class for performance counters
 // that track a generation
 
-class GenerationCounters: public CHeapObj {
+class GenerationCounters: public CHeapObj<mtGC> {
   friend class VMStructs;
+
+private:
+  void initialize(const char* name, int ordinal, int spaces,
+                  size_t min_capacity, size_t max_capacity,
+                  size_t curr_capacity);
 
  protected:
   PerfVariable*      _current_size;
@@ -48,22 +53,26 @@ class GenerationCounters: public CHeapObj {
   char*              _name_space;
 
   // This constructor is only meant for use with the PSGenerationCounters
-  // constructor.  The need for such an constructor should be eliminated
+  // constructor. The need for such an constructor should be eliminated
   // when VirtualSpace and PSVirtualSpace are unified.
-  GenerationCounters() : _name_space(NULL), _current_size(NULL), _virtual_space(NULL) {}
- public:
+  GenerationCounters()
+             : _name_space(NULL), _current_size(NULL), _virtual_space(NULL) {}
 
+  // This constructor is used for subclasses that do not have a space
+  // associated with them (e.g, in G1).
+  GenerationCounters(const char* name, int ordinal, int spaces,
+                     size_t min_capacity, size_t max_capacity,
+                     size_t curr_capacity);
+
+ public:
   GenerationCounters(const char* name, int ordinal, int spaces,
                      VirtualSpace* v);
 
   ~GenerationCounters() {
-    if (_name_space != NULL) FREE_C_HEAP_ARRAY(char, _name_space);
+    if (_name_space != NULL) FREE_C_HEAP_ARRAY(char, _name_space, mtGC);
   }
 
-  virtual void update_all() {
-    _current_size->set_value(_virtual_space == NULL ? 0 :
-                             _virtual_space->committed_size());
-  }
+  virtual void update_all();
 
   const char* name_space() const        { return _name_space; }
 

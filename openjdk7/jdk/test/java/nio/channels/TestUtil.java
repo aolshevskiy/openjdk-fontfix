@@ -27,7 +27,6 @@
 
 import java.io.*;
 import java.net.*;
-import java.nio.*;
 import java.nio.channels.*;
 import java.util.Random;
 
@@ -36,9 +35,6 @@ public class TestUtil {
 
     // Test hosts used by the channels tests - change these when
     // executing in a different network.
-    public static final String HOST = "javaweb.sfbay.sun.com";
-    public static final String REFUSING_HOST = "jano1.sfbay.sun.com";
-    public static final String FAR_HOST = "irejano.ireland.sun.com";
     public static final String UNRESOLVABLE_HOST = "blah-blah.blah-blah.blah";
 
     private TestUtil() { }
@@ -80,20 +76,6 @@ public class TestUtil {
     }
 
     private static String osName = System.getProperty("os.name");
-
-    // Examines os.name property to determine if running on 95/98/ME.
-    //
-    // Returns true if running on windows95/98/ME.
-    //
-    static boolean onME() {
-        if (osName.startsWith("Windows")) {
-            if (osName.indexOf("9") > 0)
-                return true;
-            if (osName.indexOf("M") > 0)
-                return true;
-        }
-        return false;
-    }
 
     static boolean onSolaris() {
         return osName.startsWith("SunOS");

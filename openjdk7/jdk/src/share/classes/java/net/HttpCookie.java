@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,8 @@ import java.util.StringTokenizer;
 import java.util.NoSuchElementException;
 import java.text.SimpleDateFormat;
 import java.util.TimeZone;
+import java.util.Calendar;
+import java.util.GregorianCalendar;
 import java.util.Date;
 
 import java.lang.NullPointerException;  // for javadoc
@@ -80,6 +82,10 @@ public final class HttpCookie implements Cloneable {
     private boolean httpOnly;   // HttpOnly ... i.e. not accessible to scripts
     private int version = 1;    // Version=1 ... RFC 2965 style
 
+    // The original header this cookie was consructed from, if it was
+    // constructed by parsing a header, otherwise null.
+    private final String header;
+
     //
     // Hold the creation time (in seconds) of the http cookie for later
     // expiration calculation
@@ -101,7 +107,10 @@ public final class HttpCookie implements Cloneable {
     private final static String[] COOKIE_DATE_FORMATS = {
         "EEE',' dd-MMM-yyyy HH:mm:ss 'GMT'",
         "EEE',' dd MMM yyyy HH:mm:ss 'GMT'",
-        "EEE MMM dd yyyy HH:mm:ss 'GMT'Z"
+        "EEE MMM dd yyyy HH:mm:ss 'GMT'Z",
+        "EEE',' dd-MMM-yy HH:mm:ss 'GMT'",
+        "EEE',' dd MMM yy HH:mm:ss 'GMT'",
+        "EEE MMM dd yy HH:mm:ss 'GMT'Z"
     };
 
     //
@@ -145,8 +154,12 @@ public final class HttpCookie implements Cloneable {
      */
 
     public HttpCookie(String name, String value) {
+        this(name, value, null /*header*/);
+    }
+
+    private HttpCookie(String name, String value, String header) {
         name = name.trim();
-        if (name.length() == 0 || !isToken(name) || isReserved(name)) {
+        if (name.length() == 0 || !isToken(name) || name.charAt(0) == '$') {
             throw new IllegalArgumentException("Illegal cookie name");
         }
 
@@ -157,6 +170,7 @@ public final class HttpCookie implements Cloneable {
 
         whenCreated = System.currentTimeMillis();
         portlist = null;
+        this.header = header;
     }
 
 
@@ -178,6 +192,15 @@ public final class HttpCookie implements Cloneable {
      * @throws NullPointerException     if the header string is <tt>null</tt>
      */
     public static List<HttpCookie> parse(String header) {
+        return parse(header, false);
+    }
+
+    // Private version of parse() that will store the original header used to
+    // create the cookie, in the cookie itself. This can be useful for filtering
+    // Set-Cookie[2] headers, using the internal parsing logic defined in this
+    // class.
+    private static List<HttpCookie> parse(String header, boolean retainHeader) {
+
         int version = guessCookieVersion(header);
 
         // if header start with set-cookie or set-cookie2, strip it off
@@ -194,7 +217,7 @@ public final class HttpCookie implements Cloneable {
         // so the parse logic is slightly different
         if (version == 0) {
             // Netscape draft cookie
-            HttpCookie cookie = parseInternal(header);
+            HttpCookie cookie = parseInternal(header, retainHeader);
             cookie.setVersion(0);
             cookies.add(cookie);
         } else {
@@ -203,7 +226,7 @@ public final class HttpCookie implements Cloneable {
             // it'll separate them with comma
             List<String> cookieStrings = splitMultiCookies(header);
             for (String cookieStr : cookieStrings) {
-                HttpCookie cookie = parseInternal(cookieStr);
+                HttpCookie cookie = parseInternal(cookieStr, retainHeader);
                 cookie.setVersion(1);
                 cookies.add(cookie);
             }
@@ -891,32 +914,6 @@ public final class HttpCookie implements Cloneable {
 
 
     /*
-     * @param name      the name to be tested
-     * @return          <tt>true</tt> if the name is reserved by cookie
-     *                  specification, <tt>false</tt> if it is not
-     */
-    private static boolean isReserved(String name) {
-        if (name.equalsIgnoreCase("Comment")
-            || name.equalsIgnoreCase("CommentURL")      // rfc2965 only
-            || name.equalsIgnoreCase("Discard")         // rfc2965 only
-            || name.equalsIgnoreCase("Domain")
-            || name.equalsIgnoreCase("Expires")         // netscape draft only
-            || name.equalsIgnoreCase("Max-Age")
-            || name.equalsIgnoreCase("Path")
-            || name.equalsIgnoreCase("Port")            // rfc2965 only
-            || name.equalsIgnoreCase("Secure")
-            || name.equalsIgnoreCase("Version")
-            || name.equalsIgnoreCase("HttpOnly")
-            || name.charAt(0) == '$')
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-
-    /*
      * Parse header string to cookie object.
      *
      * @param header    header string; should contain only one NAME=VALUE pair
@@ -926,7 +923,8 @@ public final class HttpCookie implements Cloneable {
      * @throws IllegalArgumentException if header string violates the cookie
      *                                  specification
      */
-    private static HttpCookie parseInternal(String header)
+    private static HttpCookie parseInternal(String header,
+                                            boolean retainHeader)
     {
         HttpCookie cookie = null;
         String namevaluePair = null;
@@ -941,7 +939,13 @@ public final class HttpCookie implements Cloneable {
             if (index != -1) {
                 String name = namevaluePair.substring(0, index).trim();
                 String value = namevaluePair.substring(index + 1).trim();
-                cookie = new HttpCookie(name, stripOffSurroundingQuote(value));
+                if (retainHeader)
+                    cookie = new HttpCookie(name,
+                                            stripOffSurroundingQuote(value),
+                                            header);
+                else
+                    cookie = new HttpCookie(name,
+                                            stripOffSurroundingQuote(value));
             } else {
                 // no "=" in name-value pair; it's an error
                 throw new IllegalArgumentException("Invalid cookie name-value pair");
@@ -1064,6 +1068,28 @@ public final class HttpCookie implements Cloneable {
         }
     }
 
+    static {
+        sun.misc.SharedSecrets.setJavaNetHttpCookieAccess(
+            new sun.misc.JavaNetHttpCookieAccess() {
+                public List<HttpCookie> parse(String header) {
+                    return HttpCookie.parse(header, true);
+                }
+
+                public String header(HttpCookie cookie) {
+                    return cookie.header;
+                }
+            }
+        );
+    }
+
+    /*
+     * Returns the original header this cookie was consructed from, if it was
+     * constructed by parsing a header, otherwise null.
+     */
+    private String header() {
+        return header;
+    }
+
     /*
      * Constructs a string representation of this cookie. The string format is
      * as Netscape spec, but without leading "Cookie:" token.
@@ -1104,19 +1130,35 @@ public final class HttpCookie implements Cloneable {
      *                          time and the time specified by dateString
      */
     private long expiryDate2DeltaSeconds(String dateString) {
+        Calendar cal = new GregorianCalendar(GMT);
         for (int i = 0; i < COOKIE_DATE_FORMATS.length; i++) {
-            SimpleDateFormat df = new SimpleDateFormat(COOKIE_DATE_FORMATS[i], Locale.US);
+            SimpleDateFormat df = new SimpleDateFormat(COOKIE_DATE_FORMATS[i],
+                                                       Locale.US);
+            cal.set(1970, 0, 1, 0, 0, 0);
             df.setTimeZone(GMT);
+            df.setLenient(false);
+            df.set2DigitYearStart(cal.getTime());
             try {
-                Date date = df.parse(dateString);
-                return (date.getTime() - whenCreated) / 1000;
+                cal.setTime(df.parse(dateString));
+                if (!COOKIE_DATE_FORMATS[i].contains("yyyy")) {
+                    // 2-digit years following the standard set
+                    // out it rfc 6265
+                    int year = cal.get(Calendar.YEAR);
+                    year %= 100;
+                    if (year < 70) {
+                        year += 2000;
+                    } else {
+                        year += 1900;
+                    }
+                    cal.set(Calendar.YEAR, year);
+                }
+                return (cal.getTimeInMillis() - whenCreated) / 1000;
             } catch (Exception e) {
                 // Ignore, try the next date format
             }
         }
         return 0;
     }
-
 
 
     /*

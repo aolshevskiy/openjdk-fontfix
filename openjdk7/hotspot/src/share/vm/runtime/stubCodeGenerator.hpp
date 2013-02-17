@@ -36,7 +36,7 @@
 // Currently, code descriptors are simply chained in a linked list,
 // this may have to change if searching becomes too slow.
 
-class StubCodeDesc: public CHeapObj {
+class StubCodeDesc: public CHeapObj<mtCode> {
  protected:
   static StubCodeDesc* _list;                  // the list of all descriptors
   static int           _count;                 // length of list
@@ -98,9 +98,10 @@ class StubCodeGenerator: public StackObj {
 
   StubCodeDesc* _first_stub;
   StubCodeDesc* _last_stub;
+  bool _print_code;
 
  public:
-  StubCodeGenerator(CodeBuffer* code);
+  StubCodeGenerator(CodeBuffer* code, bool print_code = false);
   ~StubCodeGenerator();
 
   MacroAssembler* assembler() const              { return _masm; }

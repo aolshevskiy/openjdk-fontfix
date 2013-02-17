@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -47,6 +47,7 @@
 # flags.make	- with macro settings
 # vm.make	- to support making "$(MAKE) -v vm.make" in makefiles
 # adlc.make	- 
+# trace.make	- generate tracing event and type definitions
 # jvmti.make	- generate JVMTI bindings from the spec (JSR-163)
 # sa.make	- generate SA jar file and natives
 # env.[ck]sh	- environment settings
@@ -55,6 +56,7 @@
 # The makefiles are split this way so that "make foo" will run faster by not
 # having to read the dependency files for the vm.
 
+-include $(SPEC)
 include $(GAMMADIR)/make/scm.make
 include $(GAMMADIR)/make/altsrc.make
 
@@ -109,7 +111,8 @@ COMPILER	= $(shell sed -n 's/^compiler[ 	]*=[ 	]*//p' $(PLATFORM_FILE))
 SIMPLE_DIRS	= \
 	$(PLATFORM_DIR)/generated/dependencies \
 	$(PLATFORM_DIR)/generated/adfiles \
-	$(PLATFORM_DIR)/generated/jvmtifiles
+	$(PLATFORM_DIR)/generated/jvmtifiles \
+	$(PLATFORM_DIR)/generated/tracefiles
 
 TARGETS      = debug fastdebug jvmg optimized product profiled
 SUBMAKE_DIRS = $(addprefix $(PLATFORM_DIR)/,$(TARGETS))
@@ -117,8 +120,8 @@ SUBMAKE_DIRS = $(addprefix $(PLATFORM_DIR)/,$(TARGETS))
 # For dependencies and recursive makes.
 BUILDTREE_MAKE	= $(GAMMADIR)/make/$(OS_FAMILY)/makefiles/buildtree.make
 
-BUILDTREE_TARGETS = Makefile flags.make flags_vm.make vm.make adlc.make jvmti.make sa.make \
-        env.ksh env.csh jdkpath.sh .dbxrc test_gamma
+BUILDTREE_TARGETS = Makefile flags.make flags_vm.make vm.make adlc.make trace.make jvmti.make sa.make \
+        env.sh env.csh jdkpath.sh .dbxrc test_gamma
 
 BUILDTREE_VARS	= GAMMADIR=$(GAMMADIR) OS_FAMILY=$(OS_FAMILY) \
 	ARCH=$(ARCH) BUILDARCH=$(BUILDARCH) LIBARCH=$(LIBARCH) VARIANT=$(VARIANT)
@@ -144,6 +147,13 @@ ifndef HOTSPOT_VM_DISTRO
     include $(GAMMADIR)/make/hotspot_distro
   else
     include $(GAMMADIR)/make/openjdk_distro
+  endif
+endif
+
+# if hotspot-only build and/or OPENJDK isn't passed down, need to set OPENJDK
+ifndef OPENJDK
+  ifneq ($(call if-has-altsrc,$(HS_COMMON_SRC)/,true,false),true)
+    OPENJDK=true
   endif
 endif
 
@@ -189,6 +199,7 @@ flags.make: $(BUILDTREE_MAKE) ../shared_dirs.lst
 	echo "SA_BUILD_VERSION = $(HS_BUILD_VER)"; \
 	echo "HOTSPOT_BUILD_USER = $(HOTSPOT_BUILD_USER)"; \
 	echo "HOTSPOT_VM_DISTRO = $(HOTSPOT_VM_DISTRO)"; \
+	echo "OPENJDK = $(OPENJDK)"; \
 	echo "$(LP64_SETTING/$(DATA_MODE))"; \
 	echo; \
 	echo "# Used for platform dispatching"; \
@@ -216,6 +227,8 @@ flags.make: $(BUILDTREE_MAKE) ../shared_dirs.lst
 	echo "$(call gamma-path,commonsrc,share/vm/prims) \\"; \
 	echo "$(call gamma-path,altsrc,share/vm) \\"; \
 	echo "$(call gamma-path,commonsrc,share/vm) \\"; \
+	echo "$(call gamma-path,altsrc,share/vm/precompiled) \\"; \
+	echo "$(call gamma-path,commonsrc,share/vm/precompiled) \\"; \
 	echo "$(call gamma-path,altsrc,cpu/$(ARCH)/vm) \\"; \
 	echo "$(call gamma-path,commonsrc,cpu/$(ARCH)/vm) \\"; \
 	echo "$(call gamma-path,altsrc,os_cpu/$(OS_FAMILY)_$(ARCH)/vm) \\"; \
@@ -226,11 +239,23 @@ flags.make: $(BUILDTREE_MAKE) ../shared_dirs.lst
 	echo "$(call gamma-path,commonsrc,os/posix/vm)"; \
 	[ -n "$(CFLAGS_BROWSE)" ] && \
 	    echo && echo "CFLAGS_BROWSE = $(CFLAGS_BROWSE)"; \
+	[ -n "$(ENABLE_FULL_DEBUG_SYMBOLS)" ] && \
+	    echo && echo "ENABLE_FULL_DEBUG_SYMBOLS = $(ENABLE_FULL_DEBUG_SYMBOLS)"; \
+	[ -n "$(OBJCOPY)" ] && \
+	    echo && echo "OBJCOPY = $(OBJCOPY)"; \
+	[ -n "$(STRIP_POLICY)" ] && \
+	    echo && echo "STRIP_POLICY = $(STRIP_POLICY)"; \
+	[ -n "$(ZIP_DEBUGINFO_FILES)" ] && \
+	    echo && echo "ZIP_DEBUGINFO_FILES = $(ZIP_DEBUGINFO_FILES)"; \
+	[ -n "$(ZIPEXE)" ] && \
+	    echo && echo "ZIPEXE = $(ZIPEXE)"; \
 	[ -n "$(HOTSPOT_EXTRA_SYSDEFS)" ] && \
 	    echo && \
 	    echo "HOTSPOT_EXTRA_SYSDEFS\$$(HOTSPOT_EXTRA_SYSDEFS) = $(HOTSPOT_EXTRA_SYSDEFS)" && \
 	    echo "SYSDEFS += \$$(HOTSPOT_EXTRA_SYSDEFS)"; \
 	echo; \
+	[ -n "$(SPEC)" ] && \
+	    echo "include $(SPEC)"; \
 	echo "include \$$(GAMMADIR)/make/$(OS_FAMILY)/makefiles/$(VARIANT).make"; \
 	echo "include \$$(GAMMADIR)/make/$(OS_FAMILY)/makefiles/$(COMPILER).make"; \
 	) > $@
@@ -297,6 +322,16 @@ jvmti.make: $(BUILDTREE_MAKE)
 	echo "include \$$(GAMMADIR)/make/$(OS_FAMILY)/makefiles/$(@F)"; \
 	) > $@
 
+trace.make: $(BUILDTREE_MAKE)
+	@echo Creating $@ ...
+	$(QUIETLY) ( \
+	$(BUILDTREE_COMMENT); \
+	echo; \
+	echo include flags.make; \
+	echo; \
+	echo "include \$$(GAMMADIR)/make/$(OS_FAMILY)/makefiles/$(@F)"; \
+	) > $@
+
 sa.make: $(BUILDTREE_MAKE)
 	@echo Creating $@ ...
 	$(QUIETLY) ( \
@@ -307,22 +342,19 @@ sa.make: $(BUILDTREE_MAKE)
 	echo "include \$$(GAMMADIR)/make/$(OS_FAMILY)/makefiles/$(@F)"; \
 	) > $@
 
-env.ksh: $(BUILDTREE_MAKE)
+env.sh: $(BUILDTREE_MAKE)
 	@echo Creating $@ ...
 	$(QUIETLY) ( \
 	$(BUILDTREE_COMMENT); \
 	[ -n "$$JAVA_HOME" ] && { echo ": \$${JAVA_HOME:=$${JAVA_HOME}}"; }; \
 	{ \
-	echo "LD_LIBRARY_PATH=.:$${LD_LIBRARY_PATH:+$$LD_LIBRARY_PATH:}\$${JAVA_HOME}/jre/lib/${LIBARCH}/native_threads:\$${JAVA_HOME}/jre/lib/${LIBARCH}:${GCC_LIB}"; \
-	echo "unset LD_LIBRARY_PATH_32"; \
-	echo "unset LD_LIBRARY_PATH_64"; \
 	echo "CLASSPATH=$${CLASSPATH:+$$CLASSPATH:}.:\$${JAVA_HOME}/jre/lib/rt.jar:\$${JAVA_HOME}/jre/lib/i18n.jar"; \
 	} | sed s:$${JAVA_HOME:--------}:\$${JAVA_HOME}:g; \
 	echo "HOTSPOT_BUILD_USER=\"$${LOGNAME:-$$USER} in `basename $(GAMMADIR)`\""; \
 	echo "export JAVA_HOME LD_LIBRARY_PATH CLASSPATH HOTSPOT_BUILD_USER"; \
 	) > $@
 
-env.csh: env.ksh
+env.csh: env.sh
 	@echo Creating $@ ...
 	$(QUIETLY) ( \
 	$(BUILDTREE_COMMENT); \
@@ -378,23 +410,86 @@ JAVA_FLAG/32 = -d32
 JAVA_FLAG/64 = -d64
 
 WRONG_DATA_MODE_MSG = \
-	echo "JAVA_HOME must point to $(DATA_MODE)bit JDK."
+	echo "JAVA_HOME must point to a $(DATA_MODE)-bit OpenJDK."
+
+CROSS_COMPILING_MSG = \
+	echo "Cross compiling for ARCH $(CROSS_COMPILE_ARCH), skipping gamma run."
 
 test_gamma:  $(BUILDTREE_MAKE) $(GAMMADIR)/make/test/Queens.java
 	@echo Creating $@ ...
 	$(QUIETLY) ( \
-	echo '#!/bin/ksh'; \
+	echo "#!/bin/sh"; \
+	echo ""; \
 	$(BUILDTREE_COMMENT); \
-	echo '. ./env.ksh'; \
-	echo "if [ -z \$$JAVA_HOME ]; then { $(NO_JAVA_HOME_MSG); exit 0; }; fi"; \
-	echo "if ! \$${JAVA_HOME}/bin/java $(JAVA_FLAG) -fullversion 2>&1 > /dev/null"; \
-	echo "then"; \
-	echo "  $(WRONG_DATA_MODE_MSG); exit 0;"; \
+	echo ""; \
+	echo "# Include environment settings for gamma run"; \
+	echo ""; \
+	echo ". ./env.sh"; \
+	echo ""; \
+	echo "# Do not run gamma test for cross compiles"; \
+	echo ""; \
+	echo "if [ -n \"$(CROSS_COMPILE_ARCH)\" ]; then "; \
+	echo "  $(CROSS_COMPILING_MSG)"; \
+	echo "  exit 0"; \
 	echo "fi"; \
+	echo ""; \
+	echo "# Make sure JAVA_HOME is set as it is required for gamma"; \
+	echo ""; \
+	echo "if [ -z \"\$${JAVA_HOME}\" ]; then "; \
+	echo "  $(NO_JAVA_HOME_MSG)"; \
+	echo "  exit 0"; \
+	echo "fi"; \
+	echo ""; \
+	echo "# Check JAVA_HOME version to be used for the test"; \
+	echo ""; \
+	echo "\$${JAVA_HOME}/bin/java $(JAVA_FLAG) -fullversion > /dev/null 2>&1"; \
+	echo "if [ \$$? -ne 0 ]; then "; \
+	echo "  $(WRONG_DATA_MODE_MSG)"; \
+	echo "  exit 0"; \
+	echo "fi"; \
+	echo ""; \
+	echo "# Use gamma_g if it exists"; \
+	echo ""; \
+	echo "GAMMA_PROG=gamma"; \
+	echo "if [ -f gamma_g ]; then "; \
+	echo "  GAMMA_PROG=gamma_g"; \
+	echo "fi"; \
+	echo ""; \
+	echo "if [ \"$(OS_VENDOR)\" = \"Darwin\" ]; then "; \
+	echo "  # Ensure architecture for gamma and JAVA_HOME is the same."; \
+	echo "  # NOTE: gamma assumes the OpenJDK directory layout."; \
+	echo ""; \
+	echo "  GAMMA_ARCH=\"\`file \$${GAMMA_PROG} | awk '{print \$$NF}'\`\""; \
+	echo "  JVM_LIB=\"\$${JAVA_HOME}/jre/lib/libjava.$(LIBRARY_SUFFIX)\""; \
+	echo "  if [ ! -f \$${JVM_LIB} ]; then"; \
+	echo "    JVM_LIB=\"\$${JAVA_HOME}/jre/lib/$${LIBARCH}/libjava.$(LIBRARY_SUFFIX)\""; \
+	echo "  fi"; \
+	echo "  if [ ! -f \$${JVM_LIB} ] || [ -z \"\`file \$${JVM_LIB} | grep \$${GAMMA_ARCH}\`\" ]; then "; \
+	echo "    $(WRONG_DATA_MODE_MSG)"; \
+	echo "    exit 0"; \
+	echo "  fi"; \
+	echo "fi"; \
+	echo ""; \
+	echo "# Compile Queens program for test"; \
+	echo ""; \
 	echo "rm -f Queens.class"; \
 	echo "\$${JAVA_HOME}/bin/javac -d . $(GAMMADIR)/make/test/Queens.java"; \
-	echo '[ -f gamma_g ] && { gamma=gamma_g; }'; \
-	echo './$${gamma:-gamma} $(TESTFLAGS) Queens < /dev/null'; \
+	echo ""; \
+	echo "# Set library path solely for gamma launcher test run"; \
+	echo ""; \
+	echo "LD_LIBRARY_PATH=.:$${LD_LIBRARY_PATH:+$$LD_LIBRARY_PATH:}\$${JAVA_HOME}/jre/lib/${LIBARCH}/native_threads:\$${JAVA_HOME}/jre/lib/${LIBARCH}:${GCC_LIB}"; \
+	echo "export LD_LIBRARY_PATH"; \
+	echo "unset LD_LIBRARY_PATH_32"; \
+	echo "unset LD_LIBRARY_PATH_64"; \
+	echo ""; \
+	echo "if [ \"$(OS_VENDOR)\" = \"Darwin\" ]; then "; \
+	echo "  DYLD_LIBRARY_PATH=.:$${DYLD_LIBRARY_PATH:+$$DYLD_LIBRARY_PATH:}\$${JAVA_HOME}/jre/lib/native_threads:\$${JAVA_HOME}/jre/lib:$${DYLD_LIBRARY_PATH:+$$DYLD_LIBRARY_PATH:}\$${JAVA_HOME}/jre/lib/${LIBARCH}/native_threads:\$${JAVA_HOME}/jre/lib/${LIBARCH}:${GCC_LIB}"; \
+	echo "  export DYLD_LIBRARY_PATH"; \
+	echo "fi"; \
+	echo ""; \
+	echo "# Use the gamma launcher and JAVA_HOME to run the test"; \
+	echo ""; \
+	echo "./\$${GAMMA_PROG} $(TESTFLAGS) Queens < /dev/null"; \
 	) > $@
 	$(QUIETLY) chmod +x $@
 

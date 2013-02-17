@@ -29,7 +29,15 @@
 extern jfieldID IO_fd_fdID;
 extern jfieldID IO_handle_fdID;
 
-#if !defined(O_DSYNC) || !defined(O_SYNC)
+#ifdef _ALLBSD_SOURCE
+#include <fcntl.h>
+#ifndef O_SYNC
+#define O_SYNC  O_FSYNC
+#endif
+#ifndef O_DSYNC
+#define O_DSYNC O_FSYNC
+#endif
+#elif !defined(O_DSYNC) || !defined(O_SYNC)
 #define O_SYNC  (0x0800)
 #define O_DSYNC (0x2000)
 #endif
@@ -46,7 +54,6 @@ void writeBytes(JNIEnv *env, jobject this, jbyteArray bytes, jint off,
                 jint len, jboolean append, jfieldID fid);
 void fileOpen(JNIEnv *env, jobject this, jstring path, jfieldID fid, int flags);
 void throwFileNotFoundException(JNIEnv *env, jstring path);
-
 
 
 /*
@@ -99,6 +106,7 @@ void throwFileNotFoundException(JNIEnv *env, jstring path);
         JNU_ReleaseStringPlatformChars(env, _##var##str, var);                \
     _##var##end: ;                                                            \
     } else ((void)NULL)
+
 
 /* Macros for transforming Java Strings into native Unicode strings.
  * Works analogously to WITH_PLATFORM_STRING.

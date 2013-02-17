@@ -37,15 +37,15 @@ ifeq ($(COMPILER_REV_NUMERIC),508)
 endif
 endif
 
-CFLAGS += $(DEBUG_CFLAGS/BYFILE)
+# _NMT_NOINLINE_ informs NMT that no inlining by Compiler
+CFLAGS += $(DEBUG_CFLAGS/BYFILE) -D_NMT_NOINLINE_
 
 # Set the environment variable HOTSPARC_GENERIC to "true"
 # to inhibit the effect of the previous line on CFLAGS.
 
 # Linker mapfiles
 MAPFILE = $(GAMMADIR)/make/solaris/makefiles/mapfile-vers \
-          $(GAMMADIR)/make/solaris/makefiles/mapfile-vers-debug \
-          $(GAMMADIR)/make/solaris/makefiles/mapfile-vers-nonproduct
+          $(GAMMADIR)/make/solaris/makefiles/mapfile-vers-debug
 
 # This mapfile is only needed when compiling with dtrace support,
 # and mustn't be otherwise.

@@ -33,6 +33,8 @@
 import javax.swing.*;
 import java.awt.*;
 import sun.awt.SunToolkit;
+import java.security.Permission;
+import sun.security.util.SecurityConstants;
 
 public class bug6694823 {
     private static JFrame frame;
@@ -48,6 +50,8 @@ public class bug6694823 {
             }
         });
 
+        toolkit.realSync();
+
         // Get screen insets
         screenInsets = toolkit.getScreenInsets(frame.getGraphicsConfiguration());
         if (screenInsets.bottom == 0) {
@@ -55,21 +59,23 @@ public class bug6694823 {
             return;
         }
 
-        // Show popup as if from a standalone application
-        // The popup should be able to overlap the task bar
-        showPopup(false);
+        System.setSecurityManager(new SecurityManager(){
 
-        // Emulate applet security restrictions
-        toolkit.realSync();
-        System.setSecurityManager(new SecurityManager());
+            private String allowsAlwaysOnTopPermission = SecurityConstants.AWT.SET_WINDOW_ALWAYS_ON_TOP_PERMISSION.getName();
+
+            @Override
+            public void checkPermission(Permission perm) {
+                if (allowsAlwaysOnTopPermission.equals(perm.getName())) {
+                    throw new SecurityException();
+                }
+            }
+
+        });
 
         // Show popup as if from an applet
         // The popup shouldn't overlap the task bar. It should be shifted up.
-        showPopup(true);
+        checkPopup();
 
-        toolkit.realSync();
-        System.out.println("Test passed!");
-        frame.dispose();
     }
 
     private static void createGui() {
@@ -88,34 +94,42 @@ public class bug6694823 {
         frame.setSize(200, 200);
     }
 
-    private static void showPopup(final boolean shouldBeShifted) {
-        SwingUtilities.invokeLater(new Runnable() {
+    private static void checkPopup() throws Exception {
+        SwingUtilities.invokeAndWait(new Runnable() {
             public void run() {
                 // Place frame just above the task bar
                 Dimension screenSize = toolkit.getScreenSize();
                 frame.setLocation(screenSize.width / 2,
                         screenSize.height - frame.getHeight() - screenInsets.bottom);
                 frame.setVisible(true);
+            }
+        });
 
+        // Ensure frame is visible
+        toolkit.realSync();
+
+        final Point point = new Point();
+        SwingUtilities.invokeAndWait(new Runnable() {
+            public void run() {
                 // Place popup over the task bar
-                Point frameLoc = frame.getLocationOnScreen();
-                int x = 0;
-                int y = frame.getHeight()
-                        - popup.getPreferredSize().height + screenInsets.bottom;
-                popup.show(frame, x, y);
+                point.x = 0;
+                point.y = frame.getHeight() - popup.getPreferredSize().height + screenInsets.bottom;
+                popup.show(frame, point.x, point.y);
+            }
+        });
 
-                if (shouldBeShifted) {
-                    if (popup.getLocationOnScreen()
-                            .equals(new Point(frameLoc.x, frameLoc.y + y))) {
-                        throw new RuntimeException("Popup is not shifted");
-                    }
-                } else {
-                    if (!popup.getLocationOnScreen()
-                            .equals(new Point(frameLoc.x, frameLoc.y + y))) {
-                        throw new RuntimeException("Popup is unexpectedly shifted");
-                    }
+        // Ensure popup is visible
+        toolkit.realSync();
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+
+            public void run() {
+                Point frameLoc = frame.getLocationOnScreen();
+                if (popup.getLocationOnScreen().equals(new Point(frameLoc.x, frameLoc.y + point.y))) {
+                    throw new RuntimeException("Popup is not shifted");
                 }
                 popup.setVisible(false);
+                frame.dispose();
             }
         });
     }

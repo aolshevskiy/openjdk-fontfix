@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -89,6 +89,10 @@ class Linux {
 
   static bool hugetlbfs_sanity_check(bool warn, size_t page_size);
 
+  static void print_full_memory_info(outputStream* st);
+  static void print_distro_info(outputStream* st);
+  static void print_libversion_info(outputStream* st);
+
  public:
   static void init_thread_fpu_state();
   static int  get_fpu_control_word();
@@ -174,7 +178,7 @@ class Linux {
   // fast POSIX clocks support
   static void fast_thread_clock_init(void);
 
-  static bool supports_monotonic_clock() {
+  static inline bool supports_monotonic_clock() {
     return _clock_gettime != NULL;
   }
 
@@ -199,47 +203,6 @@ class Linux {
   // LinuxThreads work-around for 6292965
   static int safe_cond_timedwait(pthread_cond_t *_cond, pthread_mutex_t *_mutex, const struct timespec *_abstime);
 
-
-  // Linux suspend/resume support - this helper is a shadow of its former
-  // self now that low-level suspension is barely used, and old workarounds
-  // for LinuxThreads are no longer needed.
-  class SuspendResume {
-  private:
-    volatile int _suspend_action;
-    // values for suspend_action:
-    #define SR_NONE               (0x00)
-    #define SR_SUSPEND            (0x01)  // suspend request
-    #define SR_CONTINUE           (0x02)  // resume request
-
-    volatile jint _state;
-    // values for _state: + SR_NONE
-    #define SR_SUSPENDED          (0x20)
-  public:
-    SuspendResume() { _suspend_action = SR_NONE; _state = SR_NONE; }
-
-    int suspend_action() const     { return _suspend_action; }
-    void set_suspend_action(int x) { _suspend_action = x;    }
-
-    // atomic updates for _state
-    void set_suspended()           {
-      jint temp, temp2;
-      do {
-        temp = _state;
-        temp2 = Atomic::cmpxchg(temp | SR_SUSPENDED, &_state, temp);
-      } while (temp2 != temp);
-    }
-    void clear_suspended()        {
-      jint temp, temp2;
-      do {
-        temp = _state;
-        temp2 = Atomic::cmpxchg(temp & ~SR_SUSPENDED, &_state, temp);
-      } while (temp2 != temp);
-    }
-    bool is_suspended()            { return _state & SR_SUSPENDED;       }
-
-    #undef SR_SUSPENDED
-  };
-
 private:
   typedef int (*sched_getcpu_func_t)(void);
   typedef int (*numa_node_to_cpus_func_t)(int node, unsigned long *buffer, int bufferlen);
@@ -263,6 +226,7 @@ private:
   static void set_numa_tonode_memory(numa_tonode_memory_func_t func) { _numa_tonode_memory = func; }
   static void set_numa_interleave_memory(numa_interleave_memory_func_t func) { _numa_interleave_memory = func; }
   static void set_numa_all_nodes(unsigned long* ptr) { _numa_all_nodes = ptr; }
+  static int sched_getcpu_syscall(void);
 public:
   static int sched_getcpu()  { return _sched_getcpu != NULL ? _sched_getcpu() : -1; }
   static int numa_node_to_cpus(int node, unsigned long *buffer, int bufferlen) {
@@ -282,7 +246,7 @@ public:
 };
 
 
-class PlatformEvent : public CHeapObj {
+class PlatformEvent : public CHeapObj<mtInternal> {
   private:
     double CachePad [4] ;   // increase odds that _mutex is sole occupant of cache line
     volatile int _Event ;
@@ -317,7 +281,7 @@ class PlatformEvent : public CHeapObj {
     void SetAssociation (Thread * a) { _Assoc = a ; }
 } ;
 
-class PlatformParker : public CHeapObj {
+class PlatformParker : public CHeapObj<mtInternal> {
   protected:
     pthread_mutex_t _mutex [1] ;
     pthread_cond_t  _cond  [1] ;

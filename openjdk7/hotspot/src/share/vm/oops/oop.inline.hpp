@@ -87,6 +87,14 @@ inline klassOop oopDesc::klass_or_null() const volatile {
   }
 }
 
+inline klassOop oopDesc::unsafe_klass_or_null() const volatile {
+  if (UseCompressedOops) {
+    return (klassOop)unsafe_decode_heap_oop(_metadata._compressed_klass);
+  } else {
+    return _metadata._klass;
+  }
+}
+
 inline int oopDesc::klass_gap_offset_in_bytes() {
   assert(UseCompressedOops, "only applicable to compressed headers");
   return oopDesc::klass_offset_in_bytes() + sizeof(narrowOop);
@@ -205,14 +213,26 @@ inline narrowOop oopDesc::encode_heap_oop(oop v) {
   return (is_null(v)) ? (narrowOop)0 : encode_heap_oop_not_null(v);
 }
 
-inline oop oopDesc::decode_heap_oop_not_null(narrowOop v) {
+inline oop oopDesc::unsafe_decode_heap_oop_not_null(narrowOop v) {
   assert(!is_null(v), "narrow oop value can never be zero");
   address base = Universe::narrow_oop_base();
   int    shift = Universe::narrow_oop_shift();
   oop result = (oop)(void*)((uintptr_t)base + ((uintptr_t)v << shift));
+  return result;
+}
+
+inline oop oopDesc::unsafe_decode_heap_oop_not_null(oop v) { return v; }
+
+inline oop oopDesc::decode_heap_oop_not_null(narrowOop v) {
+  oop result = unsafe_decode_heap_oop_not_null(v);
   assert(check_obj_alignment(result), err_msg("address not aligned: " PTR_FORMAT, (void*) result));
   return result;
 }
+
+inline oop oopDesc::unsafe_decode_heap_oop(narrowOop v) {
+  return is_null(v) ? (oop)NULL : unsafe_decode_heap_oop_not_null(v);
+}
+inline oop oopDesc::unsafe_decode_heap_oop(oop v)  { return v; }
 
 inline oop oopDesc::decode_heap_oop(narrowOop v) {
   return is_null(v) ? (oop)NULL : decode_heap_oop_not_null(v);
@@ -321,14 +341,24 @@ inline oop oopDesc::obj_field(int offset) const {
     load_decode_heap_oop(obj_field_addr<narrowOop>(offset)) :
     load_decode_heap_oop(obj_field_addr<oop>(offset));
 }
+inline volatile oop oopDesc::obj_field_volatile(int offset) const {
+  volatile oop value = obj_field(offset);
+  OrderAccess::acquire();
+  return value;
+}
 inline void oopDesc::obj_field_put(int offset, oop value) {
   UseCompressedOops ? oop_store(obj_field_addr<narrowOop>(offset), value) :
                       oop_store(obj_field_addr<oop>(offset),       value);
 }
-inline void oopDesc::obj_field_raw_put(int offset, oop value) {
+inline void oopDesc::obj_field_put_raw(int offset, oop value) {
   UseCompressedOops ?
     encode_store_heap_oop(obj_field_addr<narrowOop>(offset), value) :
     encode_store_heap_oop(obj_field_addr<oop>(offset),       value);
+}
+inline void oopDesc::obj_field_put_volatile(int offset, oop value) {
+  OrderAccess::release();
+  obj_field_put(offset, value);
+  OrderAccess::fence();
 }
 
 inline jbyte oopDesc::byte_field(int offset) const                  { return (jbyte) *byte_field_addr(offset);    }

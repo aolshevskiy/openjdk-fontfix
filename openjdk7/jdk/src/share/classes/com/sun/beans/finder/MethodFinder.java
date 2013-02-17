@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,8 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.Arrays;
+
+import static sun.reflect.misc.ReflectUtil.isPackageAccessible;
 
 /**
  * This utility class provides {@code static} methods
@@ -120,7 +122,7 @@ public final class MethodFinder extends AbstractFinder<Method> {
      */
     public static Method findAccessibleMethod(Method method) throws NoSuchMethodException {
         Class<?> type = method.getDeclaringClass();
-        if (Modifier.isPublic(type.getModifiers())) {
+        if (Modifier.isPublic(type.getModifiers()) && isPackageAccessible(type)) {
             return method;
         }
         if (Modifier.isStatic(method.getModifiers())) {
@@ -164,8 +166,10 @@ public final class MethodFinder extends AbstractFinder<Method> {
                             return findAccessibleMethod(m);
                         }
                         Type[] gpts = m.getGenericParameterTypes();
-                        if (Arrays.equals(params, TypeResolver.erase(TypeResolver.resolve(pt, gpts)))) {
-                            return findAccessibleMethod(m);
+                        if (params.length == gpts.length) {
+                            if (Arrays.equals(params, TypeResolver.erase(TypeResolver.resolve(pt, gpts)))) {
+                                return findAccessibleMethod(m);
+                            }
                         }
                     }
                 }
@@ -190,7 +194,7 @@ public final class MethodFinder extends AbstractFinder<Method> {
 
     /**
      * Returns an array of {@code Class} objects
-     * that represent the formal parameter types of the method
+     * that represent the formal parameter types of the method.
      * Returns an empty array if the method takes no parameters.
      *
      * @param method  the object that represents method
@@ -226,6 +230,6 @@ public final class MethodFinder extends AbstractFinder<Method> {
      */
     @Override
     protected boolean isValid(Method method) {
-        return Modifier.isPublic(method.getModifiers()) && method.getName().equals(this.name);
+        return !method.isBridge() && Modifier.isPublic(method.getModifiers()) && method.getName().equals(this.name);
     }
 }

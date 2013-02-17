@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -183,6 +183,7 @@ jmethodID AwtComponent::isEnabledMID;
 jmethodID AwtComponent::getLocationOnScreenMID;
 jmethodID AwtComponent::replaceSurfaceDataMID;
 jmethodID AwtComponent::replaceSurfaceDataLaterMID;
+jmethodID AwtComponent::disposeLaterMID;
 
 HKL    AwtComponent::m_hkl = ::GetKeyboardLayout(0);
 LANGID AwtComponent::m_idLang = LOWORD(::GetKeyboardLayout(0));
@@ -246,6 +247,7 @@ AwtComponent::AwtComponent()
     m_hCursorCache = NULL;
 
     m_bSubclassed = FALSE;
+    m_bPauseDestroy = FALSE;
 
     m_MessagesProcessing = 0;
     m_wheelRotationAmount = 0;
@@ -300,6 +302,7 @@ void AwtComponent::Dispose()
         delete m_childList;
 
     DestroyDropTarget();
+    ReleaseDragCapture(0);
 
     if (m_myControlID != 0) {
         AwtComponent* parent = GetParent();
@@ -317,6 +320,12 @@ void AwtComponent::Dispose()
     if (m_brushBackground != NULL) {
         m_brushBackground->Release();
         m_brushBackground = NULL;
+    }
+
+    if (m_bPauseDestroy) {
+        // AwtComponent::WmNcDestroy could be released now
+        m_bPauseDestroy = FALSE;
+        m_hwnd = NULL;
     }
 
     // The component instance is deleted using AwtObject::Dispose() method
@@ -364,6 +373,7 @@ AwtComponent* AwtComponent::GetComponentImpl(HWND hWnd) {
     AwtComponent *component =
         (AwtComponent *)::GetWindowLongPtr(hWnd, GWLP_USERDATA);
     DASSERT(!component || !IsBadReadPtr(component, sizeof(AwtComponent)) );
+    DASSERT(!component || component->GetHWnd() == hWnd );
     return component;
 }
 
@@ -547,6 +557,8 @@ AwtComponent::CreateHWnd(JNIEnv *env, LPCWSTR title,
     }
 
     m_hwnd = hwnd;
+
+    ::ImmAssociateContext(m_hwnd, NULL);
 
     SetDrawState((jint)JAWT_LOCK_SURFACE_CHANGED |
         (jint)JAWT_LOCK_BOUNDS_CHANGED |
@@ -1376,6 +1388,7 @@ LRESULT AwtComponent::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
       case WM_CREATE: mr = WmCreate(); break;
       case WM_CLOSE:      mr = WmClose(); break;
       case WM_DESTROY:    mr = WmDestroy(); break;
+      case WM_NCDESTROY:  mr = WmNcDestroy(); break;
 
       case WM_ERASEBKGND:
           mr = WmEraseBkgnd((HDC)wParam, *(BOOL*)&retValue); break;
@@ -1461,9 +1474,7 @@ LRESULT AwtComponent::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
           ::GetClientRect( GetHWnd(), &r );
           mr = WmSize(static_cast<UINT>(wParam), r.right - r.left, r.bottom - r.top);
           //mr = WmSize(wParam, LOWORD(lParam), HIWORD(lParam));
-          if (ImmGetContext() != NULL) {
-              SetCompositionWindow(r);
-          }
+          SetCompositionWindow(r);
           break;
       }
       case WM_SIZING:
@@ -1522,7 +1533,10 @@ LRESULT AwtComponent::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
               // When the window is deactivated, send WM_IME_ENDCOMPOSITION
               // message to deactivate the composition window so that
               // it won't receive keyboard input focus.
-              if (ImmGetContext() != NULL) {
+              HIMC hIMC;
+              HWND hwnd = ImmGetHWnd();
+              if ((hIMC = ImmGetContext(hwnd)) != NULL) {
+                  ImmReleaseContext(hwnd, hIMC);
                   DefWindowProc(WM_IME_ENDCOMPOSITION, 0, 0);
               }
           }
@@ -1705,11 +1719,9 @@ LRESULT AwtComponent::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
       case WM_IME_SETCONTEXT:
           // lParam is passed as pointer and it can be modified.
           mr = WmImeSetContext(static_cast<BOOL>(wParam), &lParam);
-          CallProxyDefWindowProc(message, wParam, lParam, retValue, mr);
           break;
       case WM_IME_NOTIFY:
           mr = WmImeNotify(wParam, lParam);
-          CallProxyDefWindowProc(message, wParam, lParam, retValue, mr);
           break;
       case WM_IME_STARTCOMPOSITION:
           mr = WmImeStartComposition();
@@ -1964,10 +1976,24 @@ LRESULT AwtComponent::DefWindowProc(UINT msg, WPARAM wParam, LPARAM lParam)
  */
 MsgRouting AwtComponent::WmDestroy()
 {
-    // fix for 6259348: we should enter the SyncCall critical section before
-    // disposing the native object, that is value 1 of lParam is intended for
-    if(m_peerObject != NULL) { // is not being terminating
-        AwtToolkit::GetInstance().SendMessage(WM_AWT_DISPOSE, (WPARAM)m_peerObject, (LPARAM)1);
+    return mrConsume;
+}
+
+/*
+ * This message should only be received when a window is destroyed by
+ * Windows, and not Java. It is sent only after child windows were destroyed.
+ */
+MsgRouting AwtComponent::WmNcDestroy()
+{
+    if (m_peerObject != NULL) { // is not being terminating
+        // Stay in this handler until AwtComponent::Dispose is called.
+        m_bPauseDestroy = TRUE;
+
+        JNIEnv *env = (JNIEnv *)JNU_GetEnv(jvm, JNI_VERSION_1_2);
+        // Post invocation event for WObjectPeer.dispose to EDT
+        env->CallVoidMethod(m_peerObject, AwtComponent::disposeLaterMID);
+        // Wait until AwtComponent::Dispose is called
+        AwtToolkit::GetInstance().PumpToDestroy(this);
     }
 
     return mrConsume;
@@ -3118,7 +3144,8 @@ void AwtComponent::JavaKeyToWindowsKey(UINT javaKey,
     return;
 }
 
-UINT AwtComponent::WindowsKeyToJavaKey(UINT windowsKey, UINT modifiers)
+UINT AwtComponent::WindowsKeyToJavaKey(UINT windowsKey, UINT modifiers, UINT character, BOOL isDeadKey)
+
 {
     // Handle the few cases where we need to take the modifier into
     // consideration for the Java VK code or where we have to take the keyboard
@@ -3144,6 +3171,15 @@ UINT AwtComponent::WindowsKeyToJavaKey(UINT windowsKey, UINT modifiers)
             }
             break;
     };
+
+    // check dead key
+    if (isDeadKey) {
+      for (int i = 0; charToDeadVKTable[i].c != 0; i++) {
+        if (charToDeadVKTable[i].c == character) {
+            return charToDeadVKTable[i].javaKey;
+        }
+      }
+    }
 
     // for the general case, use a bi-directional table
     for (int i = 0; keyMapTable[i].windowsKey != 0; i++) {
@@ -3358,14 +3394,18 @@ AwtComponent::UpdateDynPrimaryKeymap(UINT wkey, UINT jkeyLegacy, jint keyLocatio
     }
 }
 
-UINT AwtComponent::WindowsKeyToJavaChar(UINT wkey, UINT modifiers, TransOps ops)
+UINT AwtComponent::WindowsKeyToJavaChar(UINT wkey, UINT modifiers, TransOps ops, BOOL &isDeadKey)
 {
     static Hashtable transTable("VKEY translations");
+    static Hashtable deadKeyFlagTable("Dead Key Flags");
+    isDeadKey = FALSE;
 
     // Try to translate using last saved translation
     if (ops == LOAD) {
+       void* deadKeyFlag = deadKeyFlagTable.remove(reinterpret_cast<void*>(static_cast<INT_PTR>(wkey)));
        void* value = transTable.remove(reinterpret_cast<void*>(static_cast<INT_PTR>(wkey)));
        if (value != NULL) {
+           isDeadKey = static_cast<BOOL>(reinterpret_cast<INT_PTR>(deadKeyFlag));
            return static_cast<UINT>(reinterpret_cast<INT_PTR>(value));
        }
     }
@@ -3458,12 +3498,13 @@ UINT AwtComponent::WindowsKeyToJavaChar(UINT wkey, UINT modifiers, TransOps ops)
 
     // instead of creating our own conversion tables, I'll let Win32
     // convert the character for me.
-    WORD mbChar;
+    WORD wChar[2];
     UINT scancode = ::MapVirtualKey(wkey, 0);
-    int converted = ::ToAsciiEx(wkey, scancode, keyboardState,
-                                &mbChar, 0, GetKeyboardLayout());
+    int converted = ::ToUnicodeEx(wkey, scancode, keyboardState,
+                                  wChar, 2, 0, GetKeyboardLayout());
 
     UINT translation;
+    BOOL deadKeyFlag = (converted == 2);
 
     // Dead Key
     if (converted < 0) {
@@ -3482,16 +3523,16 @@ UINT AwtComponent::WindowsKeyToJavaChar(UINT wkey, UINT modifiers, TransOps ops)
     } else
     // the caller expects a Unicode character.
     if (converted > 0) {
-        WCHAR unicodeChar[2];
-        VERIFY(::MultiByteToWideChar(GetCodePage(), MB_PRECOMPOSED,
-        (LPCSTR)&mbChar, 1, unicodeChar, 1));
-
-        translation = unicodeChar[0];
+        translation = wChar[0];
     }
     if (ops == SAVE) {
         transTable.put(reinterpret_cast<void*>(static_cast<INT_PTR>(wkey)),
                        reinterpret_cast<void*>(static_cast<INT_PTR>(translation)));
+        deadKeyFlagTable.put(reinterpret_cast<void*>(static_cast<INT_PTR>(wkey)),
+                       reinterpret_cast<void*>(static_cast<INT_PTR>(deadKeyFlag)));
     }
+
+    isDeadKey = deadKeyFlag;
     return translation;
 }
 
@@ -3511,8 +3552,9 @@ MsgRouting AwtComponent::WmKeyDown(UINT wkey, UINT repCnt,
 
     UINT modifiers = GetJavaModifiers();
     jint keyLocation = GetKeyLocation(wkey, flags);
-    UINT jkey = WindowsKeyToJavaKey(wkey, modifiers);
-    UINT character = WindowsKeyToJavaChar(wkey, modifiers, SAVE);
+    BOOL isDeadKey = FALSE;
+    UINT character = WindowsKeyToJavaChar(wkey, modifiers, SAVE, isDeadKey);
+    UINT jkey = WindowsKeyToJavaKey(wkey, modifiers, character, isDeadKey);
     UpdateDynPrimaryKeymap(wkey, jkey, keyLocation, modifiers);
 
 
@@ -3553,8 +3595,9 @@ MsgRouting AwtComponent::WmKeyUp(UINT wkey, UINT repCnt,
 
     UINT modifiers = GetJavaModifiers();
     jint keyLocation = GetKeyLocation(wkey, flags);
-    UINT jkey = WindowsKeyToJavaKey(wkey, modifiers);
-    UINT character = WindowsKeyToJavaChar(wkey, modifiers, LOAD);
+    BOOL isDeadKey = FALSE;
+    UINT character = WindowsKeyToJavaChar(wkey, modifiers, LOAD, isDeadKey);
+    UINT jkey = WindowsKeyToJavaKey(wkey, modifiers, character, isDeadKey);
     UpdateDynPrimaryKeymap(wkey, jkey, keyLocation, modifiers);
 
     SendKeyEventToFocusOwner(java_awt_event_KeyEvent_KEY_RELEASED,
@@ -3696,12 +3739,14 @@ MsgRouting AwtComponent::WmPaste()
 // support IME Composition messages
 void AwtComponent::SetCompositionWindow(RECT& r)
 {
-    HIMC hIMC = ImmGetContext();
+    HWND hwnd = ImmGetHWnd();
+    HIMC hIMC = ImmGetContext(hwnd);
     if (hIMC == NULL) {
         return;
     }
     COMPOSITIONFORM cf = {CFS_DEFAULT, {0, 0}, {0, 0, 0, 0}};
     ImmSetCompositionWindow(hIMC, &cf);
+    ImmReleaseContext(hwnd, hIMC);
 }
 
 void AwtComponent::OpenCandidateWindow(int x, int y)
@@ -3715,16 +3760,16 @@ void AwtComponent::OpenCandidateWindow(int x, int y)
             SetCandidateWindow(iCandType, x-rc.left, y-rc.top);
     }
     if (m_bitsCandType != 0) {
-        HWND proxy = GetProxyFocusOwner();
         // REMIND: is there any chance GetProxyFocusOwner() returns NULL here?
-        ::DefWindowProc((proxy != NULL) ? proxy : GetHWnd(),
+        ::DefWindowProc(ImmGetHWnd(),
                         WM_IME_NOTIFY, IMN_OPENCANDIDATE, m_bitsCandType);
     }
 }
 
 void AwtComponent::SetCandidateWindow(int iCandType, int x, int y)
 {
-    HIMC hIMC = ImmGetContext();
+    HWND hwnd = ImmGetHWnd();
+    HIMC hIMC = ImmGetContext(hwnd);
     CANDIDATEFORM cf;
     cf.dwIndex = iCandType;
     cf.dwStyle = CFS_CANDIDATEPOS;
@@ -3732,17 +3777,20 @@ void AwtComponent::SetCandidateWindow(int iCandType, int x, int y)
     cf.ptCurrentPos.y = y;
 
     ImmSetCandidateWindow(hIMC, &cf);
+    ImmReleaseContext(hwnd, hIMC);
 }
 
 MsgRouting AwtComponent::WmImeSetContext(BOOL fSet, LPARAM *lplParam)
 {
     // If the Windows input context is disabled, do not let Windows
     // display any UIs.
-    HIMC hIMC = ImmGetContext();
+    HWND hwnd = ImmGetHWnd();
+    HIMC hIMC = ImmGetContext(hwnd);
     if (hIMC == NULL) {
         *lplParam = 0;
         return mrDoDefault;
     }
+    ImmReleaseContext(hwnd, hIMC);
 
     if (fSet) {
         LPARAM lParam = *lplParam;
@@ -3797,11 +3845,13 @@ MsgRouting AwtComponent::WmImeComposition(WORD wChar, LPARAM flags)
     AwtInputTextInfor* textInfor = NULL;
 
     try {
-        HIMC hIMC = ImmGetContext();
+        HWND hwnd = ImmGetHWnd();
+        HIMC hIMC = ImmGetContext(hwnd);
         DASSERT(hIMC!=0);
 
         textInfor = new AwtInputTextInfor;
         textInfor->GetContextData(hIMC, flags);
+        ImmReleaseContext(hwnd, hIMC);
 
         jstring jtextString = textInfor->GetText();
         /* The conditions to send the input method event to AWT EDT are:
@@ -3985,16 +4035,15 @@ void AwtComponent::InquireCandidatePosition()
     DASSERT(!safe_ExceptionOccurred(env));
 }
 
-HIMC AwtComponent::ImmGetContext()
+HWND AwtComponent::ImmGetHWnd()
 {
     HWND proxy = GetProxyFocusOwner();
-    return ::ImmGetContext((proxy != NULL) ? proxy : GetHWnd());
+    return (proxy != NULL) ? proxy : GetHWnd();
 }
 
 HIMC AwtComponent::ImmAssociateContext(HIMC himc)
 {
-    HWND proxy = GetProxyFocusOwner();
-    return ::ImmAssociateContext((proxy != NULL) ? proxy : GetHWnd(), himc);
+    return ::ImmAssociateContext(ImmGetHWnd(), himc);
 }
 
 HWND AwtComponent::GetProxyFocusOwner()
@@ -5596,7 +5645,8 @@ void AwtComponent::_NativeHandleEvent(void *param)
                         }
                     }
 
-                    modifiedChar = p->WindowsKeyToJavaChar(winKey, modifiers, AwtComponent::NONE);
+                    BOOL isDeadKey = FALSE;
+                    modifiedChar = p->WindowsKeyToJavaChar(winKey, modifiers, AwtComponent::NONE, isDeadKey);
                     bCharChanged = (keyChar != modifiedChar);
                 }
                 break;
@@ -6299,6 +6349,7 @@ Java_java_awt_Component_initIDs(JNIEnv *env, jclass cls)
         env->GetMethodID(peerCls, "replaceSurfaceData", "()V");
     AwtComponent::replaceSurfaceDataLaterMID =
         env->GetMethodID(peerCls, "replaceSurfaceDataLater", "()V");
+    AwtComponent::disposeLaterMID = env->GetMethodID(peerCls, "disposeLater", "()V");
 
     DASSERT(AwtComponent::xID);
     DASSERT(AwtComponent::yID);
@@ -6317,6 +6368,7 @@ Java_java_awt_Component_initIDs(JNIEnv *env, jclass cls)
     DASSERT(AwtComponent::getLocationOnScreenMID);
     DASSERT(AwtComponent::replaceSurfaceDataMID);
     DASSERT(AwtComponent::replaceSurfaceDataLaterMID);
+    DASSERT(AwtComponent::disposeLaterMID);
 
     CATCH_BAD_ALLOC;
 }

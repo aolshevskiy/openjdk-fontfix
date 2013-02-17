@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 #include "precompiled.hpp"
 #include "code/codeCache.hpp"
 #include "code/compiledIC.hpp"
+#include "code/dependencies.hpp"
 #include "code/nmethod.hpp"
 #include "code/scopeDesc.hpp"
 #include "compiler/abstractCompiler.hpp"
@@ -49,6 +50,7 @@
 
 // Only bother with this argument setup if dtrace is available
 
+#ifndef USDT2
 HS_DTRACE_PROBE_DECL8(hotspot, compiled__method__load,
   const char*, int, const char*, int, const char*, int, void*, size_t);
 
@@ -68,6 +70,21 @@ HS_DTRACE_PROBE_DECL6(hotspot, compiled__method__unload,
         signature->bytes(), signature->utf8_length());                    \
     }                                                                     \
   }
+#else /* USDT2 */
+#define DTRACE_METHOD_UNLOAD_PROBE(method)                                \
+  {                                                                       \
+    methodOop m = (method);                                               \
+    if (m != NULL) {                                                      \
+      Symbol* klass_name = m->klass_name();                               \
+      Symbol* name = m->name();                                           \
+      Symbol* signature = m->signature();                                 \
+      HOTSPOT_COMPILED_METHOD_UNLOAD(                                     \
+        (char *) klass_name->bytes(), klass_name->utf8_length(),                   \
+        (char *) name->bytes(), name->utf8_length(),                               \
+        (char *) signature->bytes(), signature->utf8_length());                    \
+    }                                                                     \
+  }
+#endif /* USDT2 */
 
 #else //  ndef DTRACE_ENABLED
 
@@ -445,12 +462,13 @@ void nmethod::init_defaults() {
   _speculatively_disconnected = 0;
   _has_unsafe_access          = 0;
   _has_method_handle_invokes  = 0;
+  _lazy_critical_native       = 0;
+  _has_wide_vectors           = 0;
   _marked_for_deoptimization  = 0;
   _lock_count                 = 0;
   _stack_traversal_mark       = 0;
   _unload_reported            = false;           // jvmti state
 
-  NOT_PRODUCT(_has_debug_info = false);
 #ifdef ASSERT
   _oops_are_stale             = false;
 #endif
@@ -679,7 +697,9 @@ nmethod::nmethod(
     // then print the requested information
     if (PrintNativeNMethods) {
       print_code();
-      oop_maps->print();
+      if (oop_maps != NULL) {
+        oop_maps->print();
+      }
     }
     if (PrintRelocations) {
       print_relocations();
@@ -688,7 +708,6 @@ nmethod::nmethod(
       xtty->tail("print_native_nmethod");
     }
   }
-  Events::log("Create nmethod " INTPTR_FORMAT, this);
 }
 
 // For dtrace wrappers
@@ -765,7 +784,6 @@ nmethod::nmethod(
       xtty->tail("print_dtrace_nmethod");
     }
   }
-  Events::log("Create nmethod " INTPTR_FORMAT, this);
 }
 #endif // def HAVE_DTRACE_H
 
@@ -873,13 +891,6 @@ nmethod::nmethod(
   if (printnmethods || PrintDebugInfo || PrintRelocations || PrintDependencies || PrintExceptionHandlers) {
     print_nmethod(printnmethods);
   }
-
-  // Note: Do not verify in here as the CodeCache_lock is
-  //       taken which would conflict with the CompiledIC_lock
-  //       which taken during the verification of call sites.
-  //       (was bug - gri 10/25/99)
-
-  Events::log("Create nmethod " INTPTR_FORMAT, this);
 }
 
 
@@ -937,8 +948,12 @@ void nmethod::log_new_nmethod() const {
 void nmethod::print_on(outputStream* st, const char* msg) const {
   if (st != NULL) {
     ttyLocker ttyl;
-    CompileTask::print_compilation(st, this, msg);
-    if (WizardMode) st->print(" (" INTPTR_FORMAT ")", this);
+    if (WizardMode) {
+      CompileTask::print_compilation(st, this, msg, /*short_form:*/ true);
+      st->print_cr(" (" INTPTR_FORMAT ")", this);
+    } else {
+      CompileTask::print_compilation(st, this, msg, /*short_form:*/ false);
+    }
   }
 }
 
@@ -956,7 +971,9 @@ void nmethod::print_nmethod(bool printmethod) {
   if (printmethod) {
     print_code();
     print_pcs();
-    oop_maps()->print();
+    if (oop_maps()) {
+      oop_maps()->print();
+    }
   }
   if (PrintDebugInfo) {
     print_scopes();
@@ -1370,7 +1387,7 @@ void nmethod::flush() {
   assert_locked_or_safepoint(CodeCache_lock);
 
   // completely deallocate this method
-  EventMark m("flushing nmethod " INTPTR_FORMAT " %s", this, "");
+  Events::log(JavaThread::current(), "flushing nmethod " INTPTR_FORMAT, this);
   if (PrintMethodFlushing) {
     tty->print_cr("*flushing nmethod %3d/" INTPTR_FORMAT ". Live blobs:" UINT32_FORMAT "/Free CodeCache:" SIZE_FORMAT "Kb",
         _compile_id, this, CodeCache::nof_blobs(), CodeCache::unallocated_capacity()/1024);
@@ -1473,6 +1490,7 @@ bool nmethod::can_unload(BoolObjectClosure* is_alive,
 void nmethod::post_compiled_method_load_event() {
 
   methodOop moop = method();
+#ifndef USDT2
   HS_DTRACE_PROBE8(hotspot, compiled__method__load,
       moop->klass_name()->bytes(),
       moop->klass_name()->utf8_length(),
@@ -1481,6 +1499,16 @@ void nmethod::post_compiled_method_load_event() {
       moop->signature()->bytes(),
       moop->signature()->utf8_length(),
       insts_begin(), insts_size());
+#else /* USDT2 */
+  HOTSPOT_COMPILED_METHOD_LOAD(
+      (char *) moop->klass_name()->bytes(),
+      moop->klass_name()->utf8_length(),
+      (char *) moop->name()->bytes(),
+      moop->name()->utf8_length(),
+      (char *) moop->signature()->bytes(),
+      moop->signature()->utf8_length(),
+      insts_begin(), insts_size());
+#endif /* USDT2 */
 
   if (JvmtiExport::should_post_compiled_method_load() ||
       JvmtiExport::should_post_compiled_method_unload()) {
@@ -1832,7 +1860,9 @@ void nmethod::preserve_callee_argument_oops(frame fr, const RegisterMap *reg_map
   if (!method()->is_native()) {
     SimpleScopeDesc ssd(this, fr.pc());
     Bytecode_invoke call(ssd.method(), ssd.bci());
-    bool has_receiver = call.has_receiver();
+    // compiled invokedynamic call sites have an implicit receiver at
+    // resolution time, so make sure it gets GC'ed.
+    bool has_receiver = !call.is_invokestatic();
     Symbol* signature = call.signature();
     fr.oops_compiled_arguments_do(signature, has_receiver, reg_map, f);
   }
@@ -2528,7 +2558,7 @@ ScopeDesc* nmethod::scope_desc_in(address begin, address end) {
   return NULL;
 }
 
-void nmethod::print_nmethod_labels(outputStream* stream, address block_begin) {
+void nmethod::print_nmethod_labels(outputStream* stream, address block_begin) const {
   if (block_begin == entry_point())             stream->print_cr("[Entry Point]");
   if (block_begin == verified_entry_point())    stream->print_cr("[Verified Entry Point]");
   if (block_begin == exception_begin())         stream->print_cr("[Exception Handler]");
