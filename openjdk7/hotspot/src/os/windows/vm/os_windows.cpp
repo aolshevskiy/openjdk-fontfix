@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -1927,7 +1927,7 @@ int os::sigexitnum_pd(){
 
 // a counter for each possible signal value, including signal_thread exit signal
 static volatile jint pending_signals[NSIG+1] = { 0 };
-static HANDLE sig_sem;
+static HANDLE sig_sem = NULL;
 
 void os::signal_init_pd() {
   // Initialize signal structures
@@ -1957,10 +1957,11 @@ void os::signal_init_pd() {
 
 void os::signal_notify(int signal_number) {
   BOOL ret;
-
-  Atomic::inc(&pending_signals[signal_number]);
-  ret = ::ReleaseSemaphore(sig_sem, 1, NULL);
-  assert(ret != 0, "ReleaseSemaphore() failed");
+  if (sig_sem != NULL) {
+    Atomic::inc(&pending_signals[signal_number]);
+    ret = ::ReleaseSemaphore(sig_sem, 1, NULL);
+    assert(ret != 0, "ReleaseSemaphore() failed");
+  }
 }
 
 static int check_pending_signals(bool wait_for_signal) {
@@ -4637,6 +4638,7 @@ int os::PlatformEvent::park (jlong Millis) {
     }
     v = _Event ;
     _Event = 0 ;
+    // see comment at end of os::PlatformEvent::park() below:
     OrderAccess::fence() ;
     // If we encounter a nearly simultanous timeout expiry and unpark()
     // we return OS_OK indicating we awoke via unpark().
@@ -4674,25 +4676,25 @@ void os::PlatformEvent::park () {
 
 void os::PlatformEvent::unpark() {
   guarantee (_ParkHandle != NULL, "Invariant") ;
-  int v ;
-  for (;;) {
-      v = _Event ;      // Increment _Event if it's < 1.
-      if (v > 0) {
-         // If it's already signaled just return.
-         // The LD of _Event could have reordered or be satisfied
-         // by a read-aside from this processor's write buffer.
-         // To avoid problems execute a barrier and then
-         // ratify the value.  A degenerate CAS() would also work.
-         // Viz., CAS (v+0, &_Event, v) == v).
-         OrderAccess::fence() ;
-         if (_Event == v) return ;
-         continue ;
-      }
-      if (Atomic::cmpxchg (v+1, &_Event, v) == v) break ;
-  }
-  if (v < 0) {
-     ::SetEvent (_ParkHandle) ;
-  }
+
+  // Transitions for _Event:
+  //    0 :=> 1
+  //    1 :=> 1
+  //   -1 :=> either 0 or 1; must signal target thread
+  //          That is, we can safely transition _Event from -1 to either
+  //          0 or 1. Forcing 1 is slightly more efficient for back-to-back
+  //          unpark() calls.
+  // See also: "Semaphores in Plan 9" by Mullender & Cox
+  //
+  // Note: Forcing a transition from "-1" to "1" on an unpark() means
+  // that it will take two back-to-back park() calls for the owning
+  // thread to block. This has the benefit of forcing a spurious return
+  // from the first park() call after an unpark() call which will help
+  // shake out uses of park() and unpark() without condition variables.
+
+  if (Atomic::xchg(1, &_Event) >= 0) return;
+
+  ::SetEvent(_ParkHandle);
 }
 
 
