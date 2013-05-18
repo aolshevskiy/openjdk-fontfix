@@ -53,12 +53,12 @@ void SyncThreadRecorderClosure::do_thread(Thread* thread) {
 }
 
 
-MemRecorder*                    MemTracker::_global_recorder = NULL;
+MemRecorder* volatile           MemTracker::_global_recorder = NULL;
 MemSnapshot*                    MemTracker::_snapshot = NULL;
 MemBaseline                     MemTracker::_baseline;
 Mutex*                          MemTracker::_query_lock = NULL;
-volatile MemRecorder*           MemTracker::_merge_pending_queue = NULL;
-volatile MemRecorder*           MemTracker::_pooled_recorders = NULL;
+MemRecorder* volatile           MemTracker::_merge_pending_queue = NULL;
+MemRecorder* volatile           MemTracker::_pooled_recorders = NULL;
 MemTrackWorker*                 MemTracker::_worker_thread = NULL;
 int                             MemTracker::_sync_point_skip_count = 0;
 MemTracker::NMTLevel            MemTracker::_tracking_level = MemTracker::NMT_off;
@@ -68,6 +68,7 @@ int                             MemTracker::_thread_count = 255;
 volatile jint                   MemTracker::_pooled_recorder_count = 0;
 volatile unsigned long          MemTracker::_processing_generation = 0;
 volatile bool                   MemTracker::_worker_thread_idle = false;
+volatile bool                   MemTracker::_slowdown_calling_thread = false;
 debug_only(intx                 MemTracker::_main_thread_tid = 0;)
 NOT_PRODUCT(volatile jint       MemTracker::_pending_recorder_count = 0;)
 
@@ -126,12 +127,15 @@ void MemTracker::start() {
   assert(_state == NMT_bootstrapping_multi_thread, "wrong state");
 
   _snapshot = new (std::nothrow)MemSnapshot();
-  if (_snapshot != NULL && !_snapshot->out_of_memory()) {
-    if (start_worker()) {
+  if (_snapshot != NULL) {
+    if (!_snapshot->out_of_memory() && start_worker(_snapshot)) {
       _state = NMT_started;
       NMT_track_callsite = (_tracking_level == NMT_detail && can_walk_stack());
       return;
     }
+
+    delete _snapshot;
+    _snapshot = NULL;
   }
 
   // fail to start native memory tracking, shut it down
@@ -205,7 +209,7 @@ void MemTracker::final_shutdown() {
 // delete all pooled recorders
 void MemTracker::delete_all_pooled_recorders() {
   // free all pooled recorders
-  volatile MemRecorder* cur_head = _pooled_recorders;
+  MemRecorder* volatile cur_head = _pooled_recorders;
   if (cur_head != NULL) {
     MemRecorder* null_ptr = NULL;
     while (cur_head != NULL && (void*)cur_head != Atomic::cmpxchg_ptr((void*)null_ptr,
@@ -364,6 +368,12 @@ void MemTracker::create_memory_record(address addr, MEMFLAGS flags,
     }
 
     if (thread != NULL) {
+      // slow down all calling threads except NMT worker thread, so it
+      // can catch up.
+      if (_slowdown_calling_thread && thread != _worker_thread) {
+        os::yield_all();
+      }
+
       if (thread->is_Java_thread() && ((JavaThread*)thread)->is_safepoint_visible()) {
         JavaThread*      java_thread = (JavaThread*)thread;
         JavaThreadState  state = java_thread->thread_state();
@@ -442,6 +452,7 @@ void MemTracker::enqueue_pending_recorder(MemRecorder* rec) {
 #define MAX_SAFEPOINTS_TO_SKIP     128
 #define SAFE_SEQUENCE_THRESHOLD    30
 #define HIGH_GENERATION_THRESHOLD  60
+#define MAX_RECORDER_THREAD_RATIO  30
 
 void MemTracker::sync() {
   assert(_tracking_level > NMT_off, "NMT is not enabled");
@@ -487,6 +498,13 @@ void MemTracker::sync() {
         pending_recorders = _global_recorder;
         _global_recorder = NULL;
       }
+
+      // see if NMT has too many outstanding recorder instances, it usually
+      // means that worker thread is lagging behind in processing them.
+      if (!AutoShutdownNMT) {
+        _slowdown_calling_thread = (MemRecorder::_instance_count > MAX_RECORDER_THREAD_RATIO * _thread_count);
+      }
+
       // check _worker_thread with lock to avoid racing condition
       if (_worker_thread != NULL) {
         _worker_thread->at_sync_point(pending_recorders, instanceKlass::number_of_instance_classes());
@@ -525,11 +543,14 @@ void MemTracker::sync() {
 /*
  * Start worker thread.
  */
-bool MemTracker::start_worker() {
-  assert(_worker_thread == NULL, "Just Check");
-  _worker_thread = new (std::nothrow) MemTrackWorker();
-  if (_worker_thread == NULL || _worker_thread->has_error()) {
-    shutdown(NMT_initialization);
+bool MemTracker::start_worker(MemSnapshot* snapshot) {
+  assert(_worker_thread == NULL && _snapshot != NULL, "Just Check");
+  _worker_thread = new (std::nothrow) MemTrackWorker(snapshot);
+  if (_worker_thread == NULL) {
+    return false;
+  } else if (_worker_thread->has_error()) {
+    delete _worker_thread;
+    _worker_thread = NULL;
     return false;
   }
   _worker_thread->start();
@@ -552,7 +573,7 @@ void MemTracker::thread_exiting(JavaThread* thread) {
 
 // baseline current memory snapshot
 bool MemTracker::baseline() {
-  MutexLockerEx lock(_query_lock, true);
+  MutexLocker lock(_query_lock);
   MemSnapshot* snapshot = get_snapshot();
   if (snapshot != NULL) {
     return _baseline.baseline(*snapshot, false);
@@ -563,7 +584,7 @@ bool MemTracker::baseline() {
 // print memory usage from current snapshot
 bool MemTracker::print_memory_usage(BaselineOutputer& out, size_t unit, bool summary_only) {
   MemBaseline  baseline;
-  MutexLockerEx lock(_query_lock, true);
+  MutexLocker  lock(_query_lock);
   MemSnapshot* snapshot = get_snapshot();
   if (snapshot != NULL && baseline.baseline(*snapshot, summary_only)) {
     BaselineReporter reporter(out, unit);
@@ -576,7 +597,7 @@ bool MemTracker::print_memory_usage(BaselineOutputer& out, size_t unit, bool sum
 // Whitebox API for blocking until the current generation of NMT data has been merged
 bool MemTracker::wbtest_wait_for_data_merge() {
   // NMT can't be shutdown while we're holding _query_lock
-  MutexLockerEx lock(_query_lock, true);
+  MutexLocker lock(_query_lock);
   assert(_worker_thread != NULL, "Invalid query");
   // the generation at query time, so NMT will spin till this generation is processed
   unsigned long generation_at_query_time = SequenceGenerator::current_generation();
@@ -620,7 +641,7 @@ bool MemTracker::wbtest_wait_for_data_merge() {
 
 // compare memory usage between current snapshot and baseline
 bool MemTracker::compare_memory_usage(BaselineOutputer& out, size_t unit, bool summary_only) {
-  MutexLockerEx lock(_query_lock, true);
+  MutexLocker lock(_query_lock);
   if (_baseline.baselined()) {
     MemBaseline baseline;
     MemSnapshot* snapshot = get_snapshot();

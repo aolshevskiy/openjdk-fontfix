@@ -148,11 +148,13 @@ void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
   assert(rp == G1CollectedHeap::heap()->ref_processor_stw(), "Sanity");
 
   rp->setup_policy(clear_all_softrefs);
-  rp->process_discovered_references(&GenMarkSweep::is_alive,
-                                    &GenMarkSweep::keep_alive,
-                                    &GenMarkSweep::follow_stack_closure,
-                                    NULL,
-                                    gc_timer());
+  const ReferenceProcessorStats& stats =
+    rp->process_discovered_references(&GenMarkSweep::is_alive,
+                                      &GenMarkSweep::keep_alive,
+                                      &GenMarkSweep::follow_stack_closure,
+                                      NULL,
+                                      gc_timer());
+  gc_tracer()->report_gc_reference_stats(stats);
 
   // Follow system dictionary roots and unload classes
   bool purged_class = SystemDictionary::do_unloading(&GenMarkSweep::is_alive);
@@ -204,6 +206,8 @@ void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
     G1CollectedHeap* g1h = G1CollectedHeap::heap();
     gclog_or_tty->print_cr("]");
   }
+
+  gc_tracer()->report_object_count_after_gc(&GenMarkSweep::is_alive);
 }
 
 class G1PrepareCompactClosure: public HeapRegionClosure {

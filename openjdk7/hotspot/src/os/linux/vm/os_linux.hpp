@@ -94,6 +94,10 @@ class Linux {
   static void print_libversion_info(outputStream* st);
 
  public:
+  static bool _stack_is_executable;
+  static void *dlopen_helper(const char *name, char *ebuf, int ebuflen);
+  static void *dll_load_in_vmthread(const char *name, char *ebuf, int ebuflen);
+
   static void init_thread_fpu_state();
   static int  get_fpu_control_word();
   static void set_fpu_control_word(int fpu_control);
@@ -297,6 +301,6 @@ class PlatformParker : public CHeapObj<mtInternal> {
       status = pthread_mutex_init (_mutex, NULL);
       assert_status(status == 0, status, "mutex_init");
     }
-} ;
+};
 
 #endif // OS_LINUX_VM_OS_LINUX_HPP

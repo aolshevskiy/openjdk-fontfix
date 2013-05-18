@@ -2086,7 +2086,7 @@ bool PSParallelCompact::invoke_no_policy(bool maximum_heap_compaction) {
     bool marked_for_unloading = false;
 
     marking_start.update();
-    marking_phase(vmthread_cm, maximum_heap_compaction, &_gc_tracer);
+    marking_phase(vmthread_cm, maximum_heap_compaction);
 
 #ifndef PRODUCT
     if (TraceParallelOldGCMarkingPhase) {
@@ -2361,9 +2361,7 @@ GCTaskManager* const PSParallelCompact::gc_task_manager() {
   return ParallelScavengeHeap::gc_task_manager();
 }
 
-void PSParallelCompact::marking_phase(ParCompactionManager* cm,
-                                      bool maximum_heap_compaction,
-                                      ParallelOldTracer *gc_tracer) {
+void PSParallelCompact::marking_phase(ParCompactionManager* cm, bool maximum_heap_compaction) {
   // Recursively traverse all live objects and mark them
   GCTraceTime tm("marking phase", print_phases(), true, &_gc_timer);
 
@@ -2407,18 +2405,19 @@ void PSParallelCompact::marking_phase(ParCompactionManager* cm,
   {
     GCTraceTime tm_r("reference processing", print_phases(), true, &_gc_timer);
 
+    ReferenceProcessorStats stats;
     if (ref_processor()->processing_is_mt()) {
       RefProcTaskExecutor task_executor;
-      ref_processor()->process_discovered_references(
+      stats = ref_processor()->process_discovered_references(
         is_alive_closure(), &mark_and_push_closure, &follow_stack_closure,
         &task_executor, &_gc_timer);
     } else {
-      ref_processor()->process_discovered_references(
+      stats = ref_processor()->process_discovered_references(
         is_alive_closure(), &mark_and_push_closure, &follow_stack_closure, NULL,
         &_gc_timer);
     }
 
-    gc_tracer->report_gc_reference_processing(ref_processor()->collect_statistics());
+    _gc_tracer.report_gc_reference_stats(stats);
   }
 
   GCTraceTime tm_c("class unloading", print_phases(), true, &_gc_timer);
@@ -2444,6 +2443,7 @@ void PSParallelCompact::marking_phase(ParCompactionManager* cm,
   SymbolTable::unlink();
 
   assert(cm->marking_stacks_empty(), "marking stacks should be empty");
+  _gc_tracer.report_object_count_after_gc(is_alive_closure());
 }
 
 // This should be moved to the shared markSweep code!

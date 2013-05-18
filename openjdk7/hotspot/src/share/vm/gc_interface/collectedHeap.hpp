@@ -92,6 +92,8 @@ class CollectedHeap : public CHeapObj<mtInternal> {
   // Used for filler objects (static, but initialized in ctor).
   static size_t _filler_array_max_size;
 
+  const static char* OverflowMessage;
+
   GCHeapLog* _gc_heap_log;
 
   // Used in support of ReduceInitialCardMarks; only consulted if COMPILER2 is being used
@@ -134,17 +136,27 @@ class CollectedHeap : public CHeapObj<mtInternal> {
   // Reinitialize tlabs before resuming mutators.
   virtual void resize_all_tlabs();
 
+  // Returns the sum of total and size if the sum does not overflow;
+  // Otherwise, call vm_exit_during_initialization().
+  // The overflow check is performed by comparing the result of the sum against size, which is assumed to be non-zero.
+  size_t add_and_check_overflow(size_t total, size_t size);
+
+  // Round up total against size and return the value, if the result does not overflow;
+  // Otherwise, call vm_exit_during_initialization().
+  // The overflow check is performed by comparing the round-up result against size, which is assumed to be non-zero.
+  size_t round_up_and_check_overflow(size_t total, size_t size);
+
   // Allocate from the current thread's TLAB, with broken-out slow path.
-  inline static HeapWord* allocate_from_tlab(Thread* thread, size_t size);
-  static HeapWord* allocate_from_tlab_slow(Thread* thread, size_t size);
+  inline static HeapWord* allocate_from_tlab(KlassHandle klass, Thread* thread, size_t size);
+  static HeapWord* allocate_from_tlab_slow(KlassHandle klass, Thread* thread, size_t size);
 
   // Allocate an uninitialized block of the given size, or returns NULL if
   // this is impossible.
-  inline static HeapWord* common_mem_allocate_noinit(size_t size, TRAPS);
+  inline static HeapWord* common_mem_allocate_noinit(KlassHandle klass, size_t size, TRAPS);
 
   // Like allocate_init, but the block returned by a successful allocation
   // is guaranteed initialized to zeros.
-  inline static HeapWord* common_mem_allocate_init(size_t size, TRAPS);
+  inline static HeapWord* common_mem_allocate_init(KlassHandle klass, size_t size, TRAPS);
 
   // Same as common_mem version, except memory is allocated in the permanent area
   // If there is no permanent area, revert to common_mem_allocate_noinit

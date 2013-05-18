@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -254,7 +254,7 @@ class Thread: public ThreadShadow {
   jlong _allocated_bytes;                       // Cumulative number of bytes allocated on
                                                 // the Java heap
 
-  TRACE_BUFFER _trace_buffer;                   // Thread-local buffer for tracing
+  TRACE_DATA _trace_data;                       // Thread-local data for tracing
 
   int   _vm_operation_started_count;            // VM_Operation support
   int   _vm_operation_completed_count;          // VM_Operation support
@@ -442,8 +442,7 @@ class Thread: public ThreadShadow {
     return allocated_bytes;
   }
 
-  TRACE_BUFFER trace_buffer()              { return _trace_buffer; }
-  void set_trace_buffer(TRACE_BUFFER buf)  { _trace_buffer = buf; }
+  TRACE_DATA* trace_data()              { return &_trace_data; }
 
   // VM operation support
   int vm_operation_ticket()                      { return ++_vm_operation_started_count; }
@@ -1042,11 +1041,11 @@ class JavaThread: public Thread {
 
   // native memory tracking
   inline MemRecorder* get_recorder() const          { return (MemRecorder*)_recorder; }
-  inline void         set_recorder(MemRecorder* rc) { _recorder = (volatile MemRecorder*)rc; }
+  inline void         set_recorder(MemRecorder* rc) { _recorder = rc; }
 
  private:
   // per-thread memory recorder
-  volatile MemRecorder* _recorder;
+  MemRecorder* volatile _recorder;
 
   // Suspend/resume support for JavaThread
  private:
@@ -1274,6 +1273,7 @@ class JavaThread: public Thread {
   void enable_stack_red_zone();
   void disable_stack_red_zone();
 
+  inline bool stack_guard_zone_unused();
   inline bool stack_yellow_zone_disabled();
   inline bool stack_yellow_zone_enabled();
 
@@ -1739,6 +1739,10 @@ inline JavaThread* JavaThread::current() {
 inline CompilerThread* JavaThread::as_CompilerThread() {
   assert(is_Compiler_thread(), "just checking");
   return (CompilerThread*)this;
+}
+
+inline bool JavaThread::stack_guard_zone_unused() {
+  return _stack_guard_state == stack_guard_unused;
 }
 
 inline bool JavaThread::stack_yellow_zone_disabled() {

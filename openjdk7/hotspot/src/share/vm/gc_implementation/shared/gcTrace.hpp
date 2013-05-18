@@ -28,6 +28,7 @@
 #include "gc_interface/gcCause.hpp"
 #include "gc_interface/gcName.hpp"
 #include "gc_implementation/shared/gcWhen.hpp"
+#include "gc_implementation/shared/copyFailedInfo.hpp"
 #include "memory/allocation.hpp"
 #include "memory/referenceType.hpp"
 #ifndef SERIALGC
@@ -36,11 +37,13 @@
 
 typedef uint GCId;
 
+class EvacuationInfo;
 class GCHeapSummary;
 class PermGenSummary;
 class PSHeapSummary;
 class ReferenceProcessorStats;
 class TimePartitions;
+class BoolObjectClosure;
 
 class SharedGCInfo VALUE_OBJ_CLASS_SPEC {
   static const jlong UNSET_TIMESTAMP = -1;
@@ -93,16 +96,6 @@ class ParallelOldGCInfo VALUE_OBJ_CLASS_SPEC {
   void* dense_prefix() const { return _dense_prefix; }
 };
 
-class YoungGCInfo VALUE_OBJ_CLASS_SPEC {
-  bool _promotion_failed;
- public:
-  YoungGCInfo() : _promotion_failed(false) {}
-  void register_promotion_failed() {
-    _promotion_failed = true;
-  }
-  bool promotion_failed() const { return _promotion_failed; }
-};
-
 #ifndef SERIALGC
 
 class G1YoungGCInfo VALUE_OBJ_CLASS_SPEC {
@@ -118,6 +111,7 @@ class G1YoungGCInfo VALUE_OBJ_CLASS_SPEC {
 #endif // SERIALGC
 
 class GCTracer : public ResourceObj {
+  friend class ObjectCountEventSenderClosure;
  protected:
   SharedGCInfo _shared_gc_info;
 
@@ -125,7 +119,8 @@ class GCTracer : public ResourceObj {
   void report_gc_start(GCCause::Cause cause, jlong timestamp);
   void report_gc_end(jlong timestamp, TimePartitions* time_partitions);
   void report_gc_heap_summary(GCWhen::Type when, const GCHeapSummary& heap_summary, const PermGenSummary& perm_gen_summary) const;
-  void report_gc_reference_processing(const ReferenceProcessorStats& rp) const;
+  void report_gc_reference_stats(const ReferenceProcessorStats& rp) const;
+  void report_object_count_after_gc(BoolObjectClosure* object_filter);
 
   bool has_reported_gc_start() const;
 
@@ -138,37 +133,41 @@ class GCTracer : public ResourceObj {
   void send_garbage_collection_event() const;
   void send_gc_heap_summary_event(GCWhen::Type when, const GCHeapSummary& heap_summary) const;
   void send_perm_gen_summary_event(GCWhen::Type when, const PermGenSummary& perm_gen_summary) const;
-  void send_reference_processing_event(ReferenceType type, size_t count) const;
+  void send_reference_stats_event(ReferenceType type, size_t count) const;
   void send_phase_events(TimePartitions* time_partitions) const;
+  void send_object_count_after_gc_event(klassOop klass, jlong count, julong total_size) const;
+  bool should_send_object_count_after_gc_event() const;
 };
 
 class YoungGCTracer : public GCTracer {
-  YoungGCInfo _young_gc_info;
+  static const uint UNSET_TENURING_THRESHOLD = (uint) -1;
+
+  uint _tenuring_threshold;
 
  protected:
-  YoungGCTracer(GCName name) : GCTracer(name) {}
-  virtual YoungGCInfo& young_gc_info() { return _young_gc_info; }
+  YoungGCTracer(GCName name) : GCTracer(name), _tenuring_threshold(UNSET_TENURING_THRESHOLD) {}
+  virtual void report_gc_end_impl(jlong timestamp, TimePartitions* time_partitions);
 
  public:
-  virtual void report_promotion_failed(size_t size, uint count);
-
- protected:
-  virtual void report_gc_end_impl(jlong timestamp, TimePartitions* time_partitions);
+  void report_promotion_failed(const PromotionFailedInfo& pf_info);
+  void report_tenuring_threshold(const uint tenuring_threshold);
 
  private:
   void send_young_gc_event() const;
-  void send_promotion_failed_event(size_t size, uint count) const;
+  void send_promotion_failed_event(const PromotionFailedInfo& pf_info) const;
 };
 
 class OldGCTracer : public GCTracer {
  protected:
   OldGCTracer(GCName name) : GCTracer(name) {}
-
- protected:
   virtual void report_gc_end_impl(jlong timestamp, TimePartitions* time_partitions);
+
+ public:
+  void report_concurrent_mode_failure();
 
  private:
   void send_old_gc_event() const;
+  void send_concurrent_mode_failure_event();
 };
 
 class ParallelOldTracer : public OldGCTracer {
@@ -214,9 +213,13 @@ class G1NewTracer : public YoungGCTracer {
 
   void report_yc_type(G1YCType type);
   void report_gc_end_impl(jlong timestamp, TimePartitions* time_partitions);
+  void report_evacuation_info(EvacuationInfo* info);
+  void report_evacuation_failed(EvacuationFailedInfo& ef_info);
 
  private:
   void send_g1_young_gc_event();
+  void send_evacuation_info_event(EvacuationInfo* info);
+  void send_evacuation_failed_event(const EvacuationFailedInfo& ef_info) const;
 };
 #endif
 

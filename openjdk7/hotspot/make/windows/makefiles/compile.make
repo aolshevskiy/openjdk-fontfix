@@ -52,7 +52,7 @@ CXX=cl.exe
 # improving the quality of crash log stack traces involving jvm.dll.
 
 # These are always used in all compiles
-CXX_FLAGS=/nologo /W3 /WX
+CXX_FLAGS=$(EXTRA_CFLAGS) /nologo /W3 /WX
 
 # Let's add debug information when Full Debug Symbols is enabled
 !if "$(ENABLE_FULL_DEBUG_SYMBOLS)" == "1"
@@ -219,13 +219,6 @@ MT=mt.exe
 !if "$(BUILDARCH)" == "i486"
 LD_FLAGS = /SAFESEH $(LD_FLAGS)
 !endif
-!endif
-
-# Compile for space above time.
-!if "$(Variant)" == "kernel"
-PRODUCT_OPT_OPTION   = /O1 /Oy-
-FASTDEBUG_OPT_OPTION = /O1 /Oy-
-DEBUG_OPT_OPTION     = /Od
 !endif
 
 # If NO_OPTIMIZATIONS is defined in the environment, turn everything off
