@@ -167,6 +167,16 @@ class MemTracker : AllStatic {
   // if native memory tracking tracks callsite
   static inline bool track_callsite() { return _tracking_level == NMT_detail; }
 
+  // NMT automatically shuts itself down under extreme situation by default.
+  // When the value is set to false,  NMT will try its best to stay alive,
+  // even it has to slow down VM.
+  static inline void set_autoShutdown(bool value) {
+    AutoShutdownNMT = value;
+    if (AutoShutdownNMT && _slowdown_calling_thread) {
+      _slowdown_calling_thread = false;
+    }
+  }
+
   // shutdown native memory tracking capability. Native memory tracking
   // can be shutdown by VM when it encounters low memory scenarios.
   // Memory tracker should gracefully shutdown itself, and preserve the
@@ -339,7 +349,7 @@ class MemTracker : AllStatic {
 
  private:
   // start native memory tracking worker thread
-  static bool start_worker();
+  static bool start_worker(MemSnapshot* snapshot);
 
   // called by worker thread to complete shutdown process
   static void final_shutdown();
@@ -393,18 +403,18 @@ class MemTracker : AllStatic {
   // a thread can start to allocate memory before it is attached
   // to VM 'Thread', those memory activities are recorded here.
   // ThreadCritical is required to guard this global recorder.
-  static MemRecorder*     _global_recorder;
+  static MemRecorder* volatile _global_recorder;
 
   // main thread id
   debug_only(static intx   _main_thread_tid;)
 
   // pending recorders to be merged
-  static volatile MemRecorder*      _merge_pending_queue;
+  static MemRecorder* volatile     _merge_pending_queue;
 
   NOT_PRODUCT(static volatile jint   _pending_recorder_count;)
 
   // pooled memory recorders
-  static volatile MemRecorder*      _pooled_recorders;
+  static MemRecorder* volatile     _pooled_recorders;
 
   // memory recorder pool management, uses following
   // counter to determine if a released memory recorder
@@ -436,6 +446,10 @@ class MemTracker : AllStatic {
   // although NMT is still procesing current generation, but
   // there is not more recorder to process, set idle state
   static volatile bool             _worker_thread_idle;
+
+  // if NMT should slow down calling thread to allow
+  // worker thread to catch up
+  static volatile bool             _slowdown_calling_thread;
 };
 
 #endif // SHARE_VM_SERVICES_MEM_TRACKER_HPP

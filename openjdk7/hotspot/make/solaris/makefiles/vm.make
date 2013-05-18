@@ -135,9 +135,7 @@ else
 LIBS += -lsocket -lsched -ldl $(LIBM) -lthread -lc -ldemangle
 endif # sparcWorks
 
-ifeq ("${Platform_arch}", "sparc")
 LIBS += -lkstat
-endif
 
 # By default, link the *.o into the library, not the executable.
 LINK_INTO$(LINK_INTO) = LIBJVM
@@ -352,12 +350,9 @@ include $(MAKEFILES_DIR)/jsig.make
 # Serviceability agent
 include $(MAKEFILES_DIR)/saproc.make
 
-# Whitebox testing API
-include $(MAKEFILES_DIR)/wb.make
-
 #----------------------------------------------------------------------
 
-build: $(LIBJVM) $(LAUNCHER) $(LIBJSIG) $(LIBJVM_DB) $(LIBJVM_DTRACE) $(BUILDLIBSAPROC) dtraceCheck $(WB_JAR)
+build: $(LIBJVM) $(LAUNCHER) $(LIBJSIG) $(LIBJVM_DB) $(LIBJVM_DTRACE) $(BUILDLIBSAPROC) dtraceCheck
 
 install: install_jvm install_jsig install_saproc
 

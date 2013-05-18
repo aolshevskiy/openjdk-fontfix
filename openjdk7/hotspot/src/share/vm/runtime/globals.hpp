@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -868,6 +868,11 @@ class CommandLineFlags {
                                                                             \
   diagnostic(bool, PrintNMTStatistics, false,                               \
           "Print native memory tracking summary data if it is on")          \
+                                                                            \
+  diagnostic(bool, AutoShutdownNMT, true,                                   \
+          "Automatically shutdown native memory tracking under stress "     \
+          "situation. When set to false, native memory tracking tries to "  \
+          "stay alive at the expense of JVM performance")                   \
                                                                             \
   diagnostic(bool, LogCompilation, false,                                   \
           "Log compilation activity in detail to hotspot.log or LogFile")   \
@@ -3611,7 +3616,7 @@ class CommandLineFlags {
   diagnostic(bool, PrintDTraceDOF, false,                                   \
              "Print the DTrace DOF passed to the system for JSDT probes")   \
                                                                             \
-  product(uintx, StringTableSize, 1009,                                     \
+  product(uintx, StringTableSize, NOT_LP64(1009) LP64_ONLY(60013),          \
           "Number of buckets in the interned String table")                 \
                                                                             \
   product(bool, UseVMInterruptibleIO, false,                                \
