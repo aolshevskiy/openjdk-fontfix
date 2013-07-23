@@ -1987,7 +1987,7 @@ ifeq ($(OPENJDK_TARGET_OS_API),posix)
 
   ifneq ($(OPENJDK_TARGET_OS),macosx)
 
-    SCTP_WERROR := -Werror
+    SCTP_WERROR :=
     ifeq ($(OPENJDK_TARGET_CPU_ARCH), ppc)
       SCTP_WERROR :=
     endif
