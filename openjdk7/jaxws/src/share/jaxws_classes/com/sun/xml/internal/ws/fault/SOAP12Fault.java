@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -187,7 +187,7 @@ class SOAP12Fault extends SOAPFaultBuilder {
 
      protected Throwable getProtocolException() {
         try {
-            SOAPFault fault = SOAPVersion.SOAP_12.saajSoapFactory.createFault();;
+            SOAPFault fault = SOAPVersion.SOAP_12.getSOAPFactory().createFault();;
             if(reason != null){
                 for(TextType tt : reason.texts()){
                     fault.setFaultString(tt.getText());
@@ -211,7 +211,7 @@ class SOAP12Fault extends SOAPFaultBuilder {
                 fault.setFaultNode(node);
             }
 
-            return new SOAPFaultException(fault);
+            return new ServerSOAPFaultException(fault);
         } catch (SOAPException e) {
             throw new WebServiceException(e);
         }

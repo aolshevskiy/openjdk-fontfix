@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,6 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.security.NoSuchAlgorithmException;
 
-import java.util.logging.Logger;
 import java.util.logging.Level;
 
 /**
@@ -59,16 +58,14 @@ final class CramMD5Server extends CramMD5Base implements SaslServer {
     private CallbackHandler cbh;
 
     /**
-     * Creates a SASL mechanism with client credentials that it needs
-     * to participate in CRAM-MD5 authentication exchange with the server.
+     * Creates a CRAM-MD5 SASL server.
      *
-     * @param authID A  non-null string representing the principal
-     * being authenticated.
-     *
-     * @param pw A non-null String or byte[]
-     * containing the password. If it is an array, it is first cloned.
+     * @param protocol ignored in CRAM-MD5
+     * @param serverFqdn non-null, used in generating a challenge
+     * @param props ignored in CRAM-MD5
+     * @param cbh find password, authorize user
      */
-    CramMD5Server(String protocol, String serverFqdn, Map props,
+    CramMD5Server(String protocol, String serverFqdn, Map<String, ?> props,
         CallbackHandler cbh) throws SaslException {
         if (serverFqdn == null) {
             throw new SaslException(

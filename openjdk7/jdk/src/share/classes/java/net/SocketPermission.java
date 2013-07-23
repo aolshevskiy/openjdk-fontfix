@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -138,7 +138,7 @@ import sun.security.util.Debug;
  */
 
 public final class SocketPermission extends Permission
-implements java.io.Serializable
+    implements java.io.Serializable
 {
     private static final long serialVersionUID = -7204263841984476862L;
 
@@ -232,8 +232,7 @@ implements java.io.Serializable
         trustNameService = tmp.booleanValue();
     }
 
-    private static synchronized Debug getDebug()
-    {
+    private static synchronized Debug getDebug() {
         if (!debugInit) {
             debug = Debug.getInstance("access");
             debugInit = true;
@@ -288,8 +287,7 @@ implements java.io.Serializable
         defaultDeny = true;
     }
 
-    private static String getHost(String host)
-    {
+    private static String getHost(String host) {
         if (host.equals("")) {
             return "localhost";
         } else {
@@ -479,7 +477,8 @@ implements java.io.Serializable
 
         int mask = NONE;
 
-        // Check against use of constants (used heavily within the JDK)
+        // Use object identity comparison against known-interned strings for
+        // performance benefit (these values are used heavily within the JDK).
         if (action == SecurityConstants.SOCKET_RESOLVE_ACTION) {
             return RESOLVE;
         } else if (action == SecurityConstants.SOCKET_CONNECT_ACTION) {
@@ -567,7 +566,7 @@ implements java.io.Serializable
                 switch(a[i-matchlen]) {
                 case ',':
                     seencomma = true;
-                    /*FALLTHROUGH*/
+                    break;
                 case ' ': case '\r': case '\n':
                 case '\f': case '\t':
                     break;
@@ -678,8 +677,8 @@ implements java.io.Serializable
     }
 
     private boolean authorizedIPv4(String cname, byte[] addr) {
-            String authHost = "";
-            InetAddress auth;
+        String authHost = "";
+        InetAddress auth;
 
         try {
             authHost = "auth." +
@@ -707,8 +706,8 @@ implements java.io.Serializable
     }
 
     private boolean authorizedIPv6(String cname, byte[] addr) {
-            String authHost = "";
-            InetAddress auth;
+        String authHost = "";
+        InetAddress auth;
 
         try {
             StringBuffer sb = new StringBuffer(39);
@@ -809,7 +808,6 @@ implements java.io.Serializable
      * @return true if the specified permission is implied by this object,
      * false if not.
      */
-
     public boolean implies(Permission p) {
         int i,j;
 
@@ -843,12 +841,11 @@ implements java.io.Serializable
      *      to find a match based on the IP addresses in both objects.
      * <li> Attempt to match on the canonical hostnames of both objects.
      * </ul>
-     * @param p the incoming permission request
+     * @param that the incoming permission request
      *
      * @return true if "permission" is a proper subset of the current object,
      * false if not.
      */
-
     boolean impliesIgnoreMask(SocketPermission that) {
         int i,j;
 
@@ -956,10 +953,16 @@ implements java.io.Serializable
         String thisHost = hostname;
         String thatHost = that.hostname;
 
-        if (thisHost == null)
+        if (thisHost == null) {
             return false;
-        else
+        } else if (this.wildcard) {
+            final int cnameLength = this.cname.length();
+            return thatHost.regionMatches(true,
+                                          (thatHost.length() - cnameLength),
+                                          this.cname, 0, cnameLength);
+        } else {
             return thisHost.equalsIgnoreCase(thatHost);
+        }
     }
 
     /**
@@ -1222,10 +1225,10 @@ else its the cname?
  */
 
 final class SocketPermissionCollection extends PermissionCollection
-implements Serializable
+    implements Serializable
 {
     // Not serialized; see serialization section at end of class
-    private transient List perms;
+    private transient List<SocketPermission> perms;
 
     /**
      * Create an empty SocketPermissions object.
@@ -1233,7 +1236,7 @@ implements Serializable
      */
 
     public SocketPermissionCollection() {
-        perms = new ArrayList();
+        perms = new ArrayList<SocketPermission>();
     }
 
     /**
@@ -1248,9 +1251,7 @@ implements Serializable
      * @exception SecurityException - if this SocketPermissionCollection object
      *                                has been marked readonly
      */
-
-    public void add(Permission permission)
-    {
+    public void add(Permission permission) {
         if (! (permission instanceof SocketPermission))
             throw new IllegalArgumentException("invalid permission: "+
                                                permission);
@@ -1261,7 +1262,7 @@ implements Serializable
         // optimization to ensure perms most likely to be tested
         // show up early (4301064)
         synchronized (this) {
-            perms.add(0, permission);
+            perms.add(0, (SocketPermission)permission);
         }
     }
 
@@ -1269,7 +1270,7 @@ implements Serializable
      * Check and see if this collection of permissions implies the permissions
      * expressed in "permission".
      *
-     * @param p the Permission object to compare
+     * @param permission the Permission object to compare
      *
      * @return true if "permission" is a proper subset of a permission in
      * the collection, false if not.
@@ -1290,7 +1291,7 @@ implements Serializable
             int len = perms.size();
             //System.out.println("implies "+np);
             for (int i = 0; i < len; i++) {
-                SocketPermission x = (SocketPermission) perms.get(i);
+                SocketPermission x = perms.get(i);
                 //System.out.println("  trying "+x);
                 if (((needed & x.getMask()) != 0) && x.impliesIgnoreMask(np)) {
                     effective |=  x.getMask();
@@ -1310,10 +1311,11 @@ implements Serializable
      * @return an enumeration of all the SocketPermission objects.
      */
 
-    public Enumeration elements() {
+    @SuppressWarnings("unchecked")
+    public Enumeration<Permission> elements() {
         // Convert Iterator into Enumeration
         synchronized (this) {
-            return Collections.enumeration(perms);
+            return Collections.enumeration((List<Permission>)(List)perms);
         }
     }
 
@@ -1347,7 +1349,7 @@ implements Serializable
         // Don't call out.defaultWriteObject()
 
         // Write out Vector
-        Vector permissions = new Vector(perms.size());
+        Vector<SocketPermission> permissions = new Vector<>(perms.size());
 
         synchronized (this) {
             permissions.addAll(perms);
@@ -1361,16 +1363,18 @@ implements Serializable
     /*
      * Reads in a Vector of SocketPermissions and saves them in the perms field.
      */
-    private void readObject(ObjectInputStream in) throws IOException,
-    ClassNotFoundException {
+    private void readObject(ObjectInputStream in)
+        throws IOException, ClassNotFoundException
+    {
         // Don't call in.defaultReadObject()
 
         // Read in serialized fields
         ObjectInputStream.GetField gfields = in.readFields();
 
         // Get the one we want
-        Vector permissions = (Vector)gfields.get("permissions", null);
-        perms = new ArrayList(permissions.size());
+        @SuppressWarnings("unchecked")
+        Vector<SocketPermission> permissions = (Vector<SocketPermission>)gfields.get("permissions", null);
+        perms = new ArrayList<SocketPermission>(permissions.size());
         perms.addAll(permissions);
     }
 }

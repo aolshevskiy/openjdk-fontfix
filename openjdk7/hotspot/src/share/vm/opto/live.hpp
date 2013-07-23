@@ -33,10 +33,34 @@
 #include "opto/regmask.hpp"
 
 class Block;
-class LRG_List;
 class PhaseCFG;
 class VectorSet;
 class IndexSet;
+
+//------------------------------LRG_List---------------------------------------
+// Map Node indices to Live RanGe indices.
+// Array lookup in the optimized case.
+class LRG_List : public ResourceObj {
+  friend class VMStructs;
+  uint _cnt, _max;
+  uint* _lidxs;
+  ReallocMark _nesting;         // assertion check for reallocations
+public:
+  LRG_List( uint max );
+
+  uint lookup( uint nidx ) const {
+    return _lidxs[nidx];
+  }
+  uint operator[] (uint nidx) const { return lookup(nidx); }
+
+  void map( uint nidx, uint lidx ) {
+    assert( nidx < _cnt, "oob" );
+    _lidxs[nidx] = lidx;
+  }
+  void extend( uint nidx, uint lidx );
+
+  uint Size() const { return _cnt; }
+};
 
 //------------------------------PhaseLive--------------------------------------
 // Compute live-in/live-out
@@ -56,7 +80,7 @@ class PhaseLive : public Phase {
   Block_List *_worklist;        // Worklist for iterative solution
 
   const PhaseCFG &_cfg;         // Basic blocks
-  LRG_List &_names;             // Mapping from Nodes to live ranges
+  const LRG_List &_names;       // Mapping from Nodes to live ranges
   uint _maxlrg;                 // Largest live-range number
   Arena *_arena;
 
@@ -67,7 +91,7 @@ class PhaseLive : public Phase {
   void add_liveout( Block *p, IndexSet *lo, VectorSet &first_pass );
 
 public:
-  PhaseLive( const PhaseCFG &cfg, LRG_List &names, Arena *arena );
+  PhaseLive(const PhaseCFG &cfg, const LRG_List &names, Arena *arena);
   ~PhaseLive() {}
   // Compute liveness info
   void compute(uint maxlrg);

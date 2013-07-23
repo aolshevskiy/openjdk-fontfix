@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -112,7 +112,8 @@ public final class DeferredTransportPipe extends AbstractTubeImpl {
             context.getBinding(),
             context.getContainer(),
             context.getCodec().copy(),
-            context.getSEIModel()
+            context.getSEIModel(),
+            context.getSEI()
         );
 
         address = request.endpointAddress;
@@ -124,7 +125,9 @@ public final class DeferredTransportPipe extends AbstractTubeImpl {
     }
 
     public NextAction processResponse(@NotNull Packet response) {
-        return transport.processResponse(response);
+        if (transport != null)
+                return transport.processResponse(response);
+        return doReturnWith(response);
     }
 
     public void preDestroy() {

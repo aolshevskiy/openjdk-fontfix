@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,13 @@ LIBRARY = jawt
 PRODUCT = sun
 
 include $(BUILDDIR)/common/Defs.gmk
+
+#
+# libjawt links to other programs, but nothing links to it directly. An RPATH
+# entry has been added to the launcher so third-party programs linked against
+# it will be able to find it no matter where the JDK or the third-party program
+# is located.
+#
 
 #
 # Files
@@ -116,24 +123,24 @@ CPPFLAGS += -I$(OPENWIN_HOME)/include \
 #
 ifeq ($(PLATFORM), solaris)
   ifndef BUILD_HEADLESS_ONLY
-    OTHER_LDLIBS = -L$(LIBDIR)/$(LIBARCH) -L$(OPENWIN_LIB) -L$(LIBDIR)/$(LIBARCH)/xawt -lmawt -L/usr/openwin/sfw/lib$(ISA_DIR) -lXrender
+    OTHER_LDLIBS = -L$(LIBDIR)/$(LIBARCH) -L$(OPENWIN_LIB) -lawt_xawt -L/usr/openwin/sfw/lib$(ISA_DIR) -lXrender
   else
-    OTHER_LDLIBS = -L$(LIBDIR)/$(LIBARCH) -L$(OPENWIN_LIB) -L$(LIBDIR)/$(LIBARCH)/headless -lmawt -L/usr/openwin/sfw/lib$(ISA_DIR) -lXrender
+    OTHER_LDLIBS = -L$(LIBDIR)/$(LIBARCH) -L$(OPENWIN_LIB) -lawt_headless -L/usr/openwin/sfw/lib$(ISA_DIR) -lXrender
   endif
 endif # PLATFORM
 
 ifeq ($(PLATFORM), linux)
   ifndef BUILD_HEADLESS_ONLY
-    OTHER_LDLIBS = -L$(LIBDIR)/$(LIBARCH) -lawt -L$(LIBDIR)/$(LIBARCH)/xawt -lmawt
+    OTHER_LDLIBS = -L$(LIBDIR)/$(LIBARCH) -lawt -lawt_xawt
   else
-    OTHER_LDLIBS = -L$(LIBDIR)/$(LIBARCH) -lawt -L$(LIBDIR)/$(LIBARCH)/headless -lmawt
+    OTHER_LDLIBS = -L$(LIBDIR)/$(LIBARCH) -lawt -lawt_headless
     CFLAGS += -DHEADLESS
   endif
 endif # PLATFORM
 
 ifeq ($(PLATFORM), macosx)
 vpath %.m   $(call NativeSrcDirList,,native/sun/awt)
-OTHER_LDLIBS = -llwawt -L$(LIBDIR)/lwawt -Xlinker -rpath -Xlinker @loader_path/lwawt \
+OTHER_LDLIBS = -lawt_lwawt -L$(LIBDIR) -Xlinker -rpath -Xlinker @loader_path \
                -framework Cocoa
 endif # PLATFORM
 

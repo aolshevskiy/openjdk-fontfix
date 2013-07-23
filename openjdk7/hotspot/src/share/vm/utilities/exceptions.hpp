@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -194,15 +194,15 @@ class Exceptions {
 #define HAS_PENDING_EXCEPTION                    (((ThreadShadow*)THREAD)->has_pending_exception())
 #define CLEAR_PENDING_EXCEPTION                  (((ThreadShadow*)THREAD)->clear_pending_exception())
 
-#define CHECK                                    THREAD); if (HAS_PENDING_EXCEPTION) return       ; (0
-#define CHECK_(result)                           THREAD); if (HAS_PENDING_EXCEPTION) return result; (0
+#define CHECK                                    THREAD); if (HAS_PENDING_EXCEPTION) return       ; (void)(0
+#define CHECK_(result)                           THREAD); if (HAS_PENDING_EXCEPTION) return result; (void)(0
 #define CHECK_0                                  CHECK_(0)
 #define CHECK_NH                                 CHECK_(Handle())
 #define CHECK_NULL                               CHECK_(NULL)
 #define CHECK_false                              CHECK_(false)
 
-#define CHECK_AND_CLEAR                         THREAD); if (HAS_PENDING_EXCEPTION) { CLEAR_PENDING_EXCEPTION; return;        } (0
-#define CHECK_AND_CLEAR_(result)                THREAD); if (HAS_PENDING_EXCEPTION) { CLEAR_PENDING_EXCEPTION; return result; } (0
+#define CHECK_AND_CLEAR                         THREAD); if (HAS_PENDING_EXCEPTION) { CLEAR_PENDING_EXCEPTION; return;        } (void)(0
+#define CHECK_AND_CLEAR_(result)                THREAD); if (HAS_PENDING_EXCEPTION) { CLEAR_PENDING_EXCEPTION; return result; } (void)(0
 #define CHECK_AND_CLEAR_0                       CHECK_AND_CLEAR_(0)
 #define CHECK_AND_CLEAR_NH                      CHECK_AND_CLEAR_(Handle())
 #define CHECK_AND_CLEAR_NULL                    CHECK_AND_CLEAR_(NULL)
@@ -267,6 +267,7 @@ class Exceptions {
 #define THROW_WRAPPED_0(name, oop_to_wrap)  THROW_WRAPPED_(name, oop_to_wrap, 0)
 #define THROW_ARG_0(name, signature, arg)   THROW_ARG_(name, signature, arg, 0)
 #define THROW_MSG_CAUSE_0(name, message, cause) THROW_MSG_CAUSE_(name, message, cause, 0)
+#define THROW_MSG_CAUSE_NULL(name, message, cause) THROW_MSG_CAUSE_(name, message, cause, NULL)
 
 #define THROW_NULL(name)                    THROW_(name, NULL)
 #define THROW_MSG_NULL(name, message)       THROW_MSG_(name, message, NULL)
@@ -281,7 +282,7 @@ class Exceptions {
     CLEAR_PENDING_EXCEPTION;               \
     ex->print();                           \
     ShouldNotReachHere();                  \
-  } (0
+  } (void)(0
 
 // ExceptionMark is a stack-allocated helper class for local exception handling.
 // It is used with the EXCEPTION_MARK macro.

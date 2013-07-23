@@ -50,9 +50,10 @@
 #include "runtime/vframe.hpp"
 #include "services/attachListener.hpp"
 #include "services/serviceUtil.hpp"
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/parallelScavenge/psMarkSweep.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 #ifdef JVMTI_TRACE
 #define EVT_TRACE(evt,out) if ((JvmtiTrace::event_trace_flags(evt) & JvmtiTrace::SHOW_EVENT_SENT) != 0) { SafeResourceMark rm; tty->print_cr out; }
@@ -196,7 +197,7 @@ public:
   jobject to_jobject(oop obj) { return JNIHandles::make_local(_thread,obj); }
 #endif
 
-  jclass to_jclass(klassOop klass) { return (klass == NULL ? NULL : (jclass)to_jobject(Klass::cast(klass)->java_mirror())); }
+  jclass to_jclass(Klass* klass) { return (klass == NULL ? NULL : (jclass)to_jobject(klass->java_mirror())); }
 
   jmethodID to_jmethodID(methodHandle method) { return method->jmethod_id(); }
 
@@ -220,7 +221,7 @@ private:
   jclass _jc;
 
 public:
-  JvmtiClassEventMark(JavaThread *thread, klassOop klass) :
+  JvmtiClassEventMark(JavaThread *thread, Klass* klass) :
     JvmtiThreadEventMark(thread) {
     _jc = to_jclass(klass);
   };
@@ -618,6 +619,9 @@ class JvmtiClassFileLoadHookPoster : public StackObj {
         // data has been changed by the new retransformable agent
         // and it hasn't already been cached, cache it
         *_cached_data_ptr = (unsigned char *)os::malloc(_curr_len, mtInternal);
+        if (*_cached_data_ptr == NULL) {
+          vm_exit_out_of_memory(_curr_len, OOM_MALLOC_ERROR, "unable to allocate cached copy of original class bytes");
+        }
         memcpy(*_cached_data_ptr, _curr_data, _curr_len);
         *_cached_length_ptr = _curr_len;
       }
@@ -668,13 +672,22 @@ void JvmtiExport::post_class_file_load_hook(Symbol* h_name,
   poster.post();
 }
 
-static inline klassOop oop_to_klassOop(oop obj) {
-  klassOop k = obj->klass();
+void JvmtiExport::report_unsupported(bool on) {
+  // If any JVMTI service is turned on, we need to exit before native code
+  // tries to access nonexistant services.
+  if (on) {
+    vm_exit_during_initialization("Java Kernel does not support JVMTI.");
+  }
+}
+
+
+static inline Klass* oop_to_klass(oop obj) {
+  Klass* k = obj->klass();
 
   // if the object is a java.lang.Class then return the java mirror
   if (k == SystemDictionary::Class_klass()) {
     if (!java_lang_Class::is_primitive(obj)) {
-      k = java_lang_Class::as_klassOop(obj);
+      k = java_lang_Class::as_Klass(obj);
       assert(k != NULL, "class for non-primitive mirror must exist");
     }
   }
@@ -686,7 +699,7 @@ class JvmtiVMObjectAllocEventMark : public JvmtiClassEventMark  {
    jobject _jobj;
    jlong    _size;
  public:
-   JvmtiVMObjectAllocEventMark(JavaThread *thread, oop obj) : JvmtiClassEventMark(thread, oop_to_klassOop(obj)) {
+   JvmtiVMObjectAllocEventMark(JavaThread *thread, oop obj) : JvmtiClassEventMark(thread, oop_to_klass(obj)) {
      _jobj = (jobject)to_jobject(obj);
      _size = obj->size() * wordSize;
    };
@@ -771,7 +784,7 @@ void JvmtiExport::post_compiled_method_unload(
 // JvmtiExport
 //
 
-void JvmtiExport::post_raw_breakpoint(JavaThread *thread, methodOop method, address location) {
+void JvmtiExport::post_raw_breakpoint(JavaThread *thread, Method* method, address location) {
   HandleMark hm(thread);
   methodHandle mh(thread, method);
 
@@ -852,7 +865,7 @@ bool              JvmtiExport::_should_post_on_exceptions                 = fals
 //
 // JVMTI single step management
 //
-void JvmtiExport::at_single_stepping_point(JavaThread *thread, methodOop method, address location) {
+void JvmtiExport::at_single_stepping_point(JavaThread *thread, Method* method, address location) {
   assert(JvmtiExport::should_post_single_step(), "must be single stepping");
 
   HandleMark hm(thread);
@@ -895,7 +908,7 @@ bool JvmtiExport::hide_single_stepping(JavaThread *thread) {
   }
 }
 
-void JvmtiExport::post_class_load(JavaThread *thread, klassOop klass) {
+void JvmtiExport::post_class_load(JavaThread *thread, Klass* klass) {
   HandleMark hm(thread);
   KlassHandle kh(thread, klass);
 
@@ -910,7 +923,7 @@ void JvmtiExport::post_class_load(JavaThread *thread, klassOop klass) {
     if (ets->is_enabled(JVMTI_EVENT_CLASS_LOAD)) {
       EVT_TRACE(JVMTI_EVENT_CLASS_LOAD, ("JVMTI [%s] Evt Class Load sent %s",
                                          JvmtiTrace::safe_get_thread_name(thread),
-                                         kh()==NULL? "NULL" : Klass::cast(kh())->external_name() ));
+                                         kh()==NULL? "NULL" : kh()->external_name() ));
 
       JvmtiEnv *env = ets->get_env();
       JvmtiClassEventMark jem(thread, kh());
@@ -924,7 +937,7 @@ void JvmtiExport::post_class_load(JavaThread *thread, klassOop klass) {
 }
 
 
-void JvmtiExport::post_class_prepare(JavaThread *thread, klassOop klass) {
+void JvmtiExport::post_class_prepare(JavaThread *thread, Klass* klass) {
   HandleMark hm(thread);
   KlassHandle kh(thread, klass);
 
@@ -939,7 +952,7 @@ void JvmtiExport::post_class_prepare(JavaThread *thread, klassOop klass) {
     if (ets->is_enabled(JVMTI_EVENT_CLASS_PREPARE)) {
       EVT_TRACE(JVMTI_EVENT_CLASS_PREPARE, ("JVMTI [%s] Evt Class Prepare sent %s",
                                             JvmtiTrace::safe_get_thread_name(thread),
-                                            kh()==NULL? "NULL" : Klass::cast(kh())->external_name() ));
+                                            kh()==NULL? "NULL" : kh()->external_name() ));
 
       JvmtiEnv *env = ets->get_env();
       JvmtiClassEventMark jem(thread, kh());
@@ -952,7 +965,7 @@ void JvmtiExport::post_class_prepare(JavaThread *thread, klassOop klass) {
   }
 }
 
-void JvmtiExport::post_class_unload(klassOop klass) {
+void JvmtiExport::post_class_unload(Klass* klass) {
   Thread *thread = Thread::current();
   HandleMark hm(thread);
   KlassHandle kh(thread, klass);
@@ -969,12 +982,12 @@ void JvmtiExport::post_class_unload(klassOop klass) {
     for (JvmtiEnv* env = it.first(); env != NULL; env = it.next(env)) {
       if (env->is_enabled((jvmtiEvent)EXT_EVENT_CLASS_UNLOAD)) {
         EVT_TRACE(EXT_EVENT_CLASS_UNLOAD, ("JVMTI [?] Evt Class Unload sent %s",
-                  kh()==NULL? "NULL" : Klass::cast(kh())->external_name() ));
+                  kh()==NULL? "NULL" : kh()->external_name() ));
 
         // do everything manually, since this is a proxy - needs special care
         JNIEnv* jni_env = real_thread->jni_environment();
         jthread jt = (jthread)JNIHandles::make_local(real_thread, real_thread->threadObj());
-        jclass jk = (jclass)JNIHandles::make_local(real_thread, Klass::cast(kh())->java_mirror());
+        jclass jk = (jclass)JNIHandles::make_local(real_thread, kh()->java_mirror());
 
         // Before we call the JVMTI agent, we have to set the state in the
         // thread for which we are proxying.
@@ -1093,7 +1106,7 @@ void JvmtiExport::post_resource_exhausted(jint resource_exhausted_flags, const c
   }
 }
 
-void JvmtiExport::post_method_entry(JavaThread *thread, methodOop method, frame current_frame) {
+void JvmtiExport::post_method_entry(JavaThread *thread, Method* method, frame current_frame) {
   HandleMark hm(thread);
   methodHandle mh(thread, method);
 
@@ -1131,7 +1144,7 @@ void JvmtiExport::post_method_entry(JavaThread *thread, methodOop method, frame 
   }
 }
 
-void JvmtiExport::post_method_exit(JavaThread *thread, methodOop method, frame current_frame) {
+void JvmtiExport::post_method_exit(JavaThread *thread, Method* method, frame current_frame) {
   HandleMark hm(thread);
   methodHandle mh(thread, method);
 
@@ -1226,7 +1239,7 @@ void JvmtiExport::post_method_exit(JavaThread *thread, methodOop method, frame c
 
 
 // Todo: inline this for optimization
-void JvmtiExport::post_single_step(JavaThread *thread, methodOop method, address location) {
+void JvmtiExport::post_single_step(JavaThread *thread, Method* method, address location) {
   HandleMark hm(thread);
   methodHandle mh(thread, method);
 
@@ -1259,7 +1272,7 @@ void JvmtiExport::post_single_step(JavaThread *thread, methodOop method, address
 }
 
 
-void JvmtiExport::post_exception_throw(JavaThread *thread, methodOop method, address location, oop exception) {
+void JvmtiExport::post_exception_throw(JavaThread *thread, Method* method, address location, oop exception) {
   HandleMark hm(thread);
   methodHandle mh(thread, method);
   Handle exception_handle(thread, exception);
@@ -1294,7 +1307,11 @@ void JvmtiExport::post_exception_throw(JavaThread *thread, methodOop method, add
         bool should_repeat;
         vframeStream st(thread);
         assert(!st.at_end(), "cannot be at end");
-        methodOop current_method = NULL;
+        Method* current_method = NULL;
+        // A GC may occur during the Method::fast_exception_handler_bci_for()
+        // call below if it needs to load the constraint class. Using a
+        // methodHandle to keep the 'current_method' from being deallocated
+        // if GC happens.
         methodHandle current_mh = methodHandle(thread, current_method);
         int current_bci = -1;
         do {
@@ -1304,10 +1321,10 @@ void JvmtiExport::post_exception_throw(JavaThread *thread, methodOop method, add
           do {
             should_repeat = false;
             KlassHandle eh_klass(thread, exception_handle()->klass());
-            current_bci = methodOopDesc::fast_exception_handler_bci_for(
+            current_bci = Method::fast_exception_handler_bci_for(
               current_mh, eh_klass, current_bci, THREAD);
             if (HAS_PENDING_EXCEPTION) {
-              exception_handle = KlassHandle(thread, PENDING_EXCEPTION);
+              exception_handle = Handle(thread, PENDING_EXCEPTION);
               CLEAR_PENDING_EXCEPTION;
               should_repeat = true;
             }
@@ -1340,7 +1357,7 @@ void JvmtiExport::post_exception_throw(JavaThread *thread, methodOop method, add
 }
 
 
-void JvmtiExport::notice_unwind_due_to_exception(JavaThread *thread, methodOop method, address location, oop exception, bool in_handler_frame) {
+void JvmtiExport::notice_unwind_due_to_exception(JavaThread *thread, Method* method, address location, oop exception, bool in_handler_frame) {
   HandleMark hm(thread);
   methodHandle mh(thread, method);
   Handle exception_handle(thread, exception);
@@ -1407,7 +1424,7 @@ void JvmtiExport::notice_unwind_due_to_exception(JavaThread *thread, methodOop m
 }
 
 oop JvmtiExport::jni_GetField_probe(JavaThread *thread, jobject jobj, oop obj,
-                                    klassOop klass, jfieldID fieldID, bool is_static) {
+                                    Klass* klass, jfieldID fieldID, bool is_static) {
   if (*((int *)get_field_access_count_addr()) > 0 && thread->has_last_Java_frame()) {
     // At least one field access watch is set so we have more work
     // to do. This wrapper is used by entry points that allow us
@@ -1420,7 +1437,7 @@ oop JvmtiExport::jni_GetField_probe(JavaThread *thread, jobject jobj, oop obj,
 }
 
 oop JvmtiExport::jni_GetField_probe_nh(JavaThread *thread, jobject jobj, oop obj,
-                                       klassOop klass, jfieldID fieldID, bool is_static) {
+                                       Klass* klass, jfieldID fieldID, bool is_static) {
   if (*((int *)get_field_access_count_addr()) > 0 && thread->has_last_Java_frame()) {
     // At least one field access watch is set so we have more work
     // to do. This wrapper is used by "quick" entry points that don't
@@ -1435,7 +1452,7 @@ oop JvmtiExport::jni_GetField_probe_nh(JavaThread *thread, jobject jobj, oop obj
 }
 
 void JvmtiExport::post_field_access_by_jni(JavaThread *thread, oop obj,
-                                           klassOop klass, jfieldID fieldID, bool is_static) {
+                                           Klass* klass, jfieldID fieldID, bool is_static) {
   // We must be called with a Java context in order to provide reasonable
   // values for the klazz, method, and location fields. The callers of this
   // function don't make the call unless there is a Java context.
@@ -1464,7 +1481,7 @@ void JvmtiExport::post_field_access_by_jni(JavaThread *thread, oop obj,
                     h_klass, h_obj, fieldID);
 }
 
-void JvmtiExport::post_field_access(JavaThread *thread, methodOop method,
+void JvmtiExport::post_field_access(JavaThread *thread, Method* method,
   address location, KlassHandle field_klass, Handle object, jfieldID field) {
 
   HandleMark hm(thread);
@@ -1501,7 +1518,7 @@ void JvmtiExport::post_field_access(JavaThread *thread, methodOop method,
 }
 
 oop JvmtiExport::jni_SetField_probe(JavaThread *thread, jobject jobj, oop obj,
-                                    klassOop klass, jfieldID fieldID, bool is_static,
+                                    Klass* klass, jfieldID fieldID, bool is_static,
                                     char sig_type, jvalue *value) {
   if (*((int *)get_field_modification_count_addr()) > 0 && thread->has_last_Java_frame()) {
     // At least one field modification watch is set so we have more work
@@ -1515,7 +1532,7 @@ oop JvmtiExport::jni_SetField_probe(JavaThread *thread, jobject jobj, oop obj,
 }
 
 oop JvmtiExport::jni_SetField_probe_nh(JavaThread *thread, jobject jobj, oop obj,
-                                       klassOop klass, jfieldID fieldID, bool is_static,
+                                       Klass* klass, jfieldID fieldID, bool is_static,
                                        char sig_type, jvalue *value) {
   if (*((int *)get_field_modification_count_addr()) > 0 && thread->has_last_Java_frame()) {
     // At least one field modification watch is set so we have more work
@@ -1531,7 +1548,7 @@ oop JvmtiExport::jni_SetField_probe_nh(JavaThread *thread, jobject jobj, oop obj
 }
 
 void JvmtiExport::post_field_modification_by_jni(JavaThread *thread, oop obj,
-                                                 klassOop klass, jfieldID fieldID, bool is_static,
+                                                 Klass* klass, jfieldID fieldID, bool is_static,
                                                  char sig_type, jvalue *value) {
   // We must be called with a Java context in order to provide reasonable
   // values for the klazz, method, and location fields. The callers of this
@@ -1562,7 +1579,7 @@ void JvmtiExport::post_field_modification_by_jni(JavaThread *thread, oop obj,
                           h_klass, h_obj, fieldID, sig_type, value);
 }
 
-void JvmtiExport::post_raw_field_modification(JavaThread *thread, methodOop method,
+void JvmtiExport::post_raw_field_modification(JavaThread *thread, Method* method,
   address location, KlassHandle field_klass, Handle object, jfieldID field,
   char sig_type, jvalue *value) {
 
@@ -1607,20 +1624,24 @@ void JvmtiExport::post_raw_field_modification(JavaThread *thread, methodOop meth
     }
   }
 
+  assert(sig_type != '[', "array should have sig_type == 'L'");
+  bool handle_created = false;
+
   // convert oop to JNI handle.
-  if (sig_type == 'L' || sig_type == '[') {
+  if (sig_type == 'L') {
+    handle_created = true;
     value->l = (jobject)JNIHandles::make_local(thread, (oop)value->l);
   }
 
   post_field_modification(thread, method, location, field_klass, object, field, sig_type, value);
 
   // Destroy the JNI handle allocated above.
-  if (sig_type == 'L') {
+  if (handle_created) {
     JNIHandles::destroy_local(value->l);
   }
 }
 
-void JvmtiExport::post_field_modification(JavaThread *thread, methodOop method,
+void JvmtiExport::post_field_modification(JavaThread *thread, Method* method,
   address location, KlassHandle field_klass, Handle object, jfieldID field,
   char sig_type, jvalue *value_ptr) {
 
@@ -1660,7 +1681,7 @@ void JvmtiExport::post_field_modification(JavaThread *thread, methodOop method,
   }
 }
 
-void JvmtiExport::post_native_method_bind(methodOop method, address* function_ptr) {
+void JvmtiExport::post_native_method_bind(Method* method, address* function_ptr) {
   JavaThread* thread = JavaThread::current();
   assert(thread->thread_state() == _thread_in_vm, "must be in vm state");
 
@@ -1721,7 +1742,7 @@ jvmtiCompiledMethodLoadInlineRecord* create_inline_record(nmethod* nm) {
     int stackframe = 0;
     for(ScopeDesc* sd = nm->scope_desc_at(p->real_pc(nm));sd != NULL;sd = sd->sender()) {
       // sd->method() can be NULL for stubs but not for nmethods. To be completely robust, include an assert that we should never see a null sd->method()
-      assert(!sd->method().is_null(), "sd->method() cannot be null.");
+      assert(sd->method() != NULL, "sd->method() cannot be null.");
       record->pcinfo[scope].methods[stackframe] = sd->method()->jmethod_id();
       record->pcinfo[scope].bcis[stackframe] = sd->bci();
       stackframe++;
@@ -2112,7 +2133,7 @@ void JvmtiExport::post_vm_object_alloc(JavaThread *thread,  oop object) {
     if (env->is_enabled(JVMTI_EVENT_VM_OBJECT_ALLOC)) {
       EVT_TRACE(JVMTI_EVENT_VM_OBJECT_ALLOC, ("JVMTI [%s] Evt vmobject alloc sent %s",
                                          JvmtiTrace::safe_get_thread_name(thread),
-                                         object==NULL? "NULL" : Klass::cast(java_lang_Class::as_klassOop(object))->external_name()));
+                                         object==NULL? "NULL" : java_lang_Class::as_Klass(object)->external_name()));
 
       JvmtiVMObjectAllocEventMark jem(thread, h());
       JvmtiJavaThreadEventTransition jet(thread);
@@ -2167,7 +2188,7 @@ extern "C" {
 jint JvmtiExport::load_agent_library(AttachOperation* op, outputStream* st) {
   char ebuf[1024];
   char buffer[JVM_MAXPATHLEN];
-  void* library;
+  void* library = NULL;
   jint result = JNI_ERR;
 
   // get agent name and options
@@ -2186,13 +2207,16 @@ jint JvmtiExport::load_agent_library(AttachOperation* op, outputStream* st) {
     library = os::dll_load(agent, ebuf, sizeof ebuf);
   } else {
     // Try to load the agent from the standard dll directory
-    os::dll_build_name(buffer, sizeof(buffer), Arguments::get_dll_dir(), agent);
-    library = os::dll_load(buffer, ebuf, sizeof ebuf);
+    if (os::dll_build_name(buffer, sizeof(buffer), Arguments::get_dll_dir(),
+                           agent)) {
+      library = os::dll_load(buffer, ebuf, sizeof ebuf);
+    }
     if (library == NULL) {
       // not found - try local path
       char ns[1] = {0};
-      os::dll_build_name(buffer, sizeof(buffer), ns, agent);
-      library = os::dll_load(buffer, ebuf, sizeof ebuf);
+      if (os::dll_build_name(buffer, sizeof(buffer), ns, agent)) {
+        library = os::dll_load(buffer, ebuf, sizeof ebuf);
+      }
     }
   }
 

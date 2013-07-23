@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,6 +39,7 @@
 
 package build.tools.generatebreakiteratordata;
 
+import java.util.Arrays;
 import java.util.Hashtable;
 
 /**
@@ -66,7 +67,7 @@ class CharSet {
      * A cache which is used to speed up parseString() whenever it is
      * used to parse a description that has been parsed before
      */
-    private static Hashtable expressionCache = null;
+    private static Hashtable<String, CharSet> expressionCache = null;
 
     /**
      * Builds a CharSet based on a textual description.  For the syntax of
@@ -79,7 +80,7 @@ class CharSet {
         // if "s" is in the expression cache, pull the result out
         // of the expresison cache
         if (expressionCache != null) {
-            result = (CharSet)expressionCache.get(s);
+            result = expressionCache.get(s);
         }
 
         // otherwise, use doParseString() to actually parse the string,
@@ -87,7 +88,7 @@ class CharSet {
         if (result == null) {
             result = doParseString(s);
             if (expressionCache == null) {
-                expressionCache = new Hashtable();
+                expressionCache = new Hashtable<>();
             }
             expressionCache.put(s, result);
         }
@@ -336,8 +337,8 @@ class CharSet {
      * Returns a copy of CharSet's expression cache and sets CharSet's
      * expression cache to empty.
      */
-    public static Hashtable releaseExpressionCache() {
-        Hashtable result = expressionCache;
+    public static Hashtable<String, CharSet> releaseExpressionCache() {
+        Hashtable<String, CharSet> result = expressionCache;
         expressionCache = null;
         return result;
     }
@@ -701,7 +702,14 @@ class CharSet {
      * the exact same characters as this one
      */
     public boolean equals(Object that) {
-        return (that instanceof CharSet) && chars.equals(((CharSet)that).chars);
+        return (that instanceof CharSet) && Arrays.equals(chars, ((CharSet)that).chars);
+    }
+
+    /**
+     * Returns the hash code for this set of characters
+     */
+    public int hashCode() {
+       return Arrays.hashCode(chars);
     }
 
     /**
@@ -778,7 +786,7 @@ class CharSet {
      * An Enumeration that can be used to extract the character ranges
      * from a CharSet one at a time
      */
-    public class Enumeration implements java.util.Enumeration {
+    public class Enumeration implements java.util.Enumeration<int[]> {
         /**
          * Initializes a CharSet.Enumeration
          */
@@ -798,7 +806,7 @@ class CharSet {
         /**
          * Returns the next range in the CarSet
          */
-        public Object nextElement() {
+        public int[] nextElement() {
             int[] result = new int[2];
             result[0] = chars[p++];
             result[1] = chars[p++];

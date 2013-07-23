@@ -31,10 +31,10 @@ import java.util.ResourceBundle;
 /**
  * Formats error messages.
  */
-class Messages
+public class Messages
 {
     /** Loads a string resource and formats it with specified arguments. */
-    static String format( String property, Object... args ) {
+    public static String format( String property, Object... args ) {
         String text = ResourceBundle.getBundle(Messages.class.getPackage().getName() +".MessageBundle").getString(property);
         return MessageFormat.format(text,args);
     }
@@ -68,14 +68,16 @@ class Messages
     static final String NON_EXISTENT_DIR = // 1 arg
         "Driver.NonExistentDir";
 
-    static final String MISSING_RUNTIME_PACKAGENAME = // 0 args
-        "Driver.MissingRuntimePackageName";
+    // Usage not found. TODO Remove
+    // static final String MISSING_RUNTIME_PACKAGENAME = // 0 args
+    //     "Driver.MissingRuntimePackageName";
 
     static final String MISSING_MODE_OPERAND = // 0 args
-        "Driver.MissingModeOperand";
+            "Driver.MissingModeOperand";
 
-    static final String MISSING_COMPATIBILITY_OPERAND = // 0 args
-        "Driver.MissingCompatibilityOperand";
+    // Usage not found. TODO Remove
+    // static final String MISSING_COMPATIBILITY_OPERAND = // 0 args
+    //     "Driver.MissingCompatibilityOperand";
 
     static final String MISSING_PROXY = // 0 args
         "Driver.MISSING_PROXY";

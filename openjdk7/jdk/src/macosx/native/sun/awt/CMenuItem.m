@@ -71,7 +71,7 @@ AWT_ASSERT_APPKIT_THREAD;
 JNF_COCOA_ENTER(env);
 
     // If we are called as a result of user pressing a shorcut, do nothing,
-    // because AWTView has already sent corresponding key event to the Java
+    // because AVTView has already sent corresponding key event to the Java
     // layer from performKeyEquivalent
     NSEvent *currEvent = [[NSApplication sharedApplication] currentEvent];
     if ([currEvent type] == NSKeyDown) {
@@ -82,8 +82,13 @@ JNF_COCOA_ENTER(env);
         // keys, so we need to do the same translation here that we do
         // for the regular key down events
         if ([eventKey length] == 1) {
-            unichar ch =  NsCharToJavaChar([eventKey characterAtIndex:0], 0);
-            eventKey = [NSString stringWithCharacters: &ch length: 1];
+            unichar origChar = [eventKey characterAtIndex:0];
+            unichar newChar =  NsCharToJavaChar(origChar, 0);
+            if (newChar == java_awt_event_KeyEvent_CHAR_UNDEFINED) {
+                newChar = origChar;
+            }
+
+            eventKey = [NSString stringWithCharacters: &newChar length: 1];
         }
 
         if ([menuKey isEqualToString:eventKey]) {

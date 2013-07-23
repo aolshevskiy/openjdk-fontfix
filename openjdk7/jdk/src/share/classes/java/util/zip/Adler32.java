@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,11 +33,15 @@ import sun.nio.ch.DirectBuffer;
  * stream. An Adler-32 checksum is almost as reliable as a CRC-32 but
  * can be computed much faster.
  *
+ * <p> Passing a {@code null} argument to a method in this class will cause
+ * a {@link NullPointerException} to be thrown.
+ *
  * @see         Checksum
  * @author      David Connelly
  */
 public
 class Adler32 implements Checksum {
+
     private int adler = 1;
 
     /**
@@ -78,6 +82,7 @@ class Adler32 implements Checksum {
         adler = updateBytes(adler, b, 0, b.length);
     }
 
+
     /**
      * Updates the checksum with the bytes from the specified buffer.
      *
@@ -89,8 +94,9 @@ class Adler32 implements Checksum {
      * limit; its limit will not have been changed.
      *
      * @param buffer the ByteBuffer to update the checksum with
+     * @since 1.8
      */
-    private void update(ByteBuffer buffer) {
+    public void update(ByteBuffer buffer) {
         int pos = buffer.position();
         int limit = buffer.limit();
         assert (pos <= limit);
@@ -121,15 +127,6 @@ class Adler32 implements Checksum {
      */
     public long getValue() {
         return (long)adler & 0xffffffffL;
-    }
-
-    // Set up JavaUtilZipAccess in SharedSecrets
-    static {
-       sun.misc.SharedSecrets.setJavaUtilZipAccess(new sun.misc.JavaUtilZipAccess() {
-           public void update(Adler32 adler32, ByteBuffer buf) {
-               adler32.update(buf);
-           }
-        });
     }
 
     private native static int update(int adler, int b);

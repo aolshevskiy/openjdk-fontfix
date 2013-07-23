@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,9 +48,9 @@
 
 class HeapRegion;
 class HRRSCleanupTask;
-class PermanentGenerationSpec;
 class GenerationSpec;
 class OopsInHeapRegionClosure;
+class G1KlassScanClosure;
 class G1ScanHeapEvacClosure;
 class ObjectClosure;
 class SpaceClosure;
@@ -172,7 +172,6 @@ class G1STWIsAliveClosure: public BoolObjectClosure {
   G1CollectedHeap* _g1;
 public:
   G1STWIsAliveClosure(G1CollectedHeap* g1) : _g1(g1) {}
-  void do_object(oop p) { assert(false, "Do not call."); }
   bool do_object_b(oop p);
 };
 
@@ -198,7 +197,6 @@ class RefineCardTableEntryClosure;
 
 class G1CollectedHeap : public SharedHeap {
   friend class VM_G1CollectForAllocation;
-  friend class VM_GenCollectForPermanentAllocation;
   friend class VM_G1CollectFull;
   friend class VM_G1IncCollectionPause;
   friend class VMStructs;
@@ -233,7 +231,7 @@ private:
 
   static size_t _humongous_object_threshold_in_words;
 
-  // Storage for the G1 heap (excludes the permanent generation).
+  // Storage for the G1 heap.
   VirtualSpace _g1_storage;
   MemRegion    _g1_reserved;
 
@@ -569,18 +567,21 @@ protected:
   // the mutator alloc region without taking the Heap_lock. This
   // should only be used for non-humongous allocations.
   inline HeapWord* attempt_allocation(size_t word_size,
-                                      unsigned int* gc_count_before_ret);
+                                      unsigned int* gc_count_before_ret,
+                                      int* gclocker_retry_count_ret);
 
   // Second-level mutator allocation attempt: take the Heap_lock and
   // retry the allocation attempt, potentially scheduling a GC
   // pause. This should only be used for non-humongous allocations.
   HeapWord* attempt_allocation_slow(size_t word_size,
-                                    unsigned int* gc_count_before_ret);
+                                    unsigned int* gc_count_before_ret,
+                                    int* gclocker_retry_count_ret);
 
   // Takes the Heap_lock and attempts a humongous allocation. It can
   // potentially schedule a GC pause.
   HeapWord* attempt_allocation_humongous(size_t word_size,
-                                         unsigned int* gc_count_before_ret);
+                                         unsigned int* gc_count_before_ret,
+                                         int* gclocker_retry_count_ret);
 
   // Allocation attempt that should be called during safepoints (e.g.,
   // at the end of a successful GC). expect_null_mutator_alloc_region
@@ -600,11 +601,6 @@ protected:
   // heap, and then allocate a block of the given size. The block
   // may not be a humongous - it must fit into a single heap region.
   HeapWord* par_allocate_during_gc(GCAllocPurpose purpose, size_t word_size);
-
-  HeapWord* allocate_during_gc_slow(GCAllocPurpose purpose,
-                                    HeapRegion*    alloc_region,
-                                    bool           par,
-                                    size_t         word_size);
 
   // Ensure that no further allocations can happen in "r", bearing in mind
   // that parallel threads might be attempting allocations.
@@ -643,7 +639,7 @@ protected:
 
   // Callback from VM_G1CollectFull operation.
   // Perform a full collection.
-  void do_full_collection(bool clear_all_soft_refs);
+  virtual void do_full_collection(bool clear_all_soft_refs);
 
   // Resize the heap if necessary after a full collection.  If this is
   // after a collect-for allocation, "word_size" is the allocation size,
@@ -799,9 +795,6 @@ protected:
   // concurrently after the collection.
   DirtyCardQueueSet _dirty_card_queue_set;
 
-  // The Heap Region Rem Set Iterator.
-  HeapRegionRemSetIterator** _rem_set_iterator;
-
   // The closure used to refine a single card.
   RefineCardTableEntryClosure* _refine_cte_cl;
 
@@ -824,24 +817,23 @@ protected:
 
   // Applies "scan_non_heap_roots" to roots outside the heap,
   // "scan_rs" to roots inside the heap (having done "set_region" to
-  // indicate the region in which the root resides), and does "scan_perm"
-  // (setting the generation to the perm generation.)  If "scan_rs" is
+  // indicate the region in which the root resides),
+  // and does "scan_metadata" If "scan_rs" is
   // NULL, then this step is skipped.  The "worker_i"
   // param is for use with parallel roots processing, and should be
   // the "i" of the calling parallel worker thread's work(i) function.
   // In the sequential case this param will be ignored.
-  void g1_process_strong_roots(bool collecting_perm_gen,
+  void g1_process_strong_roots(bool is_scavenging,
                                ScanningOption so,
                                OopClosure* scan_non_heap_roots,
                                OopsInHeapRegionClosure* scan_rs,
-                               OopsInGenClosure* scan_perm,
+                               G1KlassScanClosure* scan_klasses,
                                int worker_i);
 
   // Apply "blk" to all the weak roots of the system.  These include
   // JNI weak roots, the code cache, system dictionary, symbol table,
   // string table, and referents of reachable weak refs.
-  void g1_process_weak_roots(OopClosure* root_closure,
-                             OopClosure* non_root_closure);
+  void g1_process_weak_roots(OopClosure* root_closure);
 
   // Frees a non-humongous region by initializing its contents and
   // adding it to the free list that's passed as a parameter (this is
@@ -1093,7 +1085,7 @@ public:
   G1CollectedHeap(G1CollectorPolicy* policy);
 
   // Initialize the G1CollectedHeap to have the initial and
-  // maximum sizes, permanent generation, and remembered and barrier sets
+  // maximum sizes and remembered and barrier sets
   // specified by the policy object.
   jint initialize();
 
@@ -1122,21 +1114,14 @@ public:
   // The current policy object for the collector.
   G1CollectorPolicy* g1_policy() const { return _g1_policy; }
 
+  virtual CollectorPolicy* collector_policy() const { return (CollectorPolicy*) g1_policy(); }
+
   // Adaptive size policy.  No such thing for g1.
   virtual AdaptiveSizePolicy* size_policy() { return NULL; }
 
   // The rem set and barrier set.
   G1RemSet* g1_rem_set() const { return _g1_rem_set; }
   ModRefBarrierSet* mr_bs() const { return _mr_bs; }
-
-  // The rem set iterator.
-  HeapRegionRemSetIterator* rem_set_iterator(int i) {
-    return _rem_set_iterator[i];
-  }
-
-  HeapRegionRemSetIterator* rem_set_iterator() {
-    return _rem_set_iterator[0];
-  }
 
   unsigned get_gc_time_stamp() {
     return _gc_time_stamp;
@@ -1303,12 +1288,6 @@ public:
   // The same as above but assume that the caller holds the Heap_lock.
   void collect_locked(GCCause::Cause cause);
 
-  // This interface assumes that it's being called by the
-  // vm thread. It collects the heap assuming that the
-  // heap lock is already held and that we are executing in
-  // the context of the vm thread.
-  virtual void collect_as_vm_thread(GCCause::Cause cause);
-
   // True iff an evacuation has failed in the most-recent collection.
   bool evacuation_failed() { return _evacuation_failed; }
 
@@ -1342,7 +1321,7 @@ public:
   inline bool obj_in_cs(oop obj);
 
   // Return "TRUE" iff the given object address is in the reserved
-  // region of g1 (excluding the permanent generation).
+  // region of g1.
   bool is_in_g1_reserved(const void* p) const {
     return _g1_reserved.contains(p);
   }
@@ -1369,30 +1348,17 @@ public:
 
   // Iterate over all the ref-containing fields of all objects, calling
   // "cl.do_oop" on each.
-  virtual void oop_iterate(OopClosure* cl) {
-    oop_iterate(cl, true);
-  }
-  void oop_iterate(OopClosure* cl, bool do_perm);
+  virtual void oop_iterate(ExtendedOopClosure* cl);
 
   // Same as above, restricted to a memory region.
-  virtual void oop_iterate(MemRegion mr, OopClosure* cl) {
-    oop_iterate(mr, cl, true);
-  }
-  void oop_iterate(MemRegion mr, OopClosure* cl, bool do_perm);
+  void oop_iterate(MemRegion mr, ExtendedOopClosure* cl);
 
   // Iterate over all objects, calling "cl.do_object" on each.
-  virtual void object_iterate(ObjectClosure* cl) {
-    object_iterate(cl, true);
-  }
-  virtual void safe_object_iterate(ObjectClosure* cl) {
-    object_iterate(cl, true);
-  }
-  void object_iterate(ObjectClosure* cl, bool do_perm);
+  virtual void object_iterate(ObjectClosure* cl);
 
-  // Iterate over all objects allocated since the last collection, calling
-  // "cl.do_object" on each.  The heap must have been initialized properly
-  // to support this function, or else this call will fail.
-  virtual void object_iterate_since_last_GC(ObjectClosure* cl);
+  virtual void safe_object_iterate(ObjectClosure* cl) {
+    object_iterate(cl);
+  }
 
   // Iterate over all spaces in use in the heap, in ascending address order.
   virtual void space_iterate(SpaceClosure* cl);
@@ -1549,15 +1515,6 @@ public:
     return is_in_young(new_obj);
   }
 
-  // Can a compiler elide a store barrier when it writes
-  // a permanent oop into the heap?  Applies when the compiler
-  // is storing x to the heap, where x->is_perm() is true.
-  virtual bool can_elide_permanent_oop_store_barriers() const {
-    // At least until perm gen collection is also G1-ified, at
-    // which point this should return false.
-    return true;
-  }
-
   // Returns "true" iff the given word_size is "very large".
   static bool isHumongous(size_t word_size) {
     // Note this has to be strictly greater-than as the TLABs
@@ -1617,6 +1574,7 @@ public:
 
   virtual void print_on(outputStream* st) const;
   virtual void print_extended_on(outputStream* st) const;
+  virtual void print_on_error(outputStream* st) const;
 
   virtual void print_gc_threads_on(outputStream* st) const;
   virtual void gc_threads_do(ThreadClosure* tc) const;
@@ -1683,15 +1641,12 @@ public:
   // This will find the region to which the object belongs and
   // then call the region version of the same function.
 
-  // Added if it is in permanent gen it isn't dead.
   // Added if it is NULL it isn't dead.
 
   bool is_obj_dead(const oop obj) const {
     const HeapRegion* hr = heap_region_containing(obj);
     if (hr == NULL) {
-      if (Universe::heap()->is_in_permanent(obj))
-        return false;
-      else if (obj == NULL) return false;
+      if (obj == NULL) return false;
       else return true;
     }
     else return is_obj_dead(obj, hr);
@@ -1700,9 +1655,7 @@ public:
   bool is_obj_ill(const oop obj) const {
     const HeapRegion* hr = heap_region_containing(obj);
     if (hr == NULL) {
-      if (Universe::heap()->is_in_permanent(obj))
-        return false;
-      else if (obj == NULL) return false;
+      if (obj == NULL) return false;
       else return true;
     }
     else return is_obj_ill(obj, hr);
@@ -1793,6 +1746,95 @@ public:
     ParGCAllocBuffer::retire(end_of_gc, retain);
     _retired = true;
   }
+
+  bool is_retired() {
+    return _retired;
+  }
+};
+
+class G1ParGCAllocBufferContainer {
+protected:
+  static int const _priority_max = 2;
+  G1ParGCAllocBuffer* _priority_buffer[_priority_max];
+
+public:
+  G1ParGCAllocBufferContainer(size_t gclab_word_size) {
+    for (int pr = 0; pr < _priority_max; ++pr) {
+      _priority_buffer[pr] = new G1ParGCAllocBuffer(gclab_word_size);
+    }
+  }
+
+  ~G1ParGCAllocBufferContainer() {
+    for (int pr = 0; pr < _priority_max; ++pr) {
+      assert(_priority_buffer[pr]->is_retired(), "alloc buffers should all retire at this point.");
+      delete _priority_buffer[pr];
+    }
+  }
+
+  HeapWord* allocate(size_t word_sz) {
+    HeapWord* obj;
+    for (int pr = 0; pr < _priority_max; ++pr) {
+      obj = _priority_buffer[pr]->allocate(word_sz);
+      if (obj != NULL) return obj;
+    }
+    return obj;
+  }
+
+  bool contains(void* addr) {
+    for (int pr = 0; pr < _priority_max; ++pr) {
+      if (_priority_buffer[pr]->contains(addr)) return true;
+    }
+    return false;
+  }
+
+  void undo_allocation(HeapWord* obj, size_t word_sz) {
+    bool finish_undo;
+    for (int pr = 0; pr < _priority_max; ++pr) {
+      if (_priority_buffer[pr]->contains(obj)) {
+        _priority_buffer[pr]->undo_allocation(obj, word_sz);
+        finish_undo = true;
+      }
+    }
+    if (!finish_undo) ShouldNotReachHere();
+  }
+
+  size_t words_remaining() {
+    size_t result = 0;
+    for (int pr = 0; pr < _priority_max; ++pr) {
+      result += _priority_buffer[pr]->words_remaining();
+    }
+    return result;
+  }
+
+  size_t words_remaining_in_retired_buffer() {
+    G1ParGCAllocBuffer* retired = _priority_buffer[0];
+    return retired->words_remaining();
+  }
+
+  void flush_stats_and_retire(PLABStats* stats, bool end_of_gc, bool retain) {
+    for (int pr = 0; pr < _priority_max; ++pr) {
+      _priority_buffer[pr]->flush_stats_and_retire(stats, end_of_gc, retain);
+    }
+  }
+
+  void update(bool end_of_gc, bool retain, HeapWord* buf, size_t word_sz) {
+    G1ParGCAllocBuffer* retired_and_set = _priority_buffer[0];
+    retired_and_set->retire(end_of_gc, retain);
+    retired_and_set->set_buf(buf);
+    retired_and_set->set_word_size(word_sz);
+    adjust_priority_order();
+  }
+
+private:
+  void adjust_priority_order() {
+    G1ParGCAllocBuffer* retired_and_set = _priority_buffer[0];
+
+    int last = _priority_max - 1;
+    for (int pr = 0; pr < last; ++pr) {
+      _priority_buffer[pr] = _priority_buffer[pr + 1];
+    }
+    _priority_buffer[last] = retired_and_set;
+  }
 };
 
 class G1ParScanThreadState : public StackObj {
@@ -1803,9 +1845,9 @@ protected:
   CardTableModRefBS* _ct_bs;
   G1RemSet* _g1_rem;
 
-  G1ParGCAllocBuffer  _surviving_alloc_buffer;
-  G1ParGCAllocBuffer  _tenured_alloc_buffer;
-  G1ParGCAllocBuffer* _alloc_buffers[GCAllocPurposeCount];
+  G1ParGCAllocBufferContainer  _surviving_alloc_buffer;
+  G1ParGCAllocBufferContainer  _tenured_alloc_buffer;
+  G1ParGCAllocBufferContainer* _alloc_buffers[GCAllocPurposeCount];
   ageTable            _age_table;
 
   size_t           _alloc_buffer_waste;
@@ -1869,7 +1911,7 @@ public:
   RefToScanQueue*   refs()            { return _refs;             }
   ageTable*         age_table()       { return &_age_table;       }
 
-  G1ParGCAllocBuffer* alloc_buffer(GCAllocPurpose purpose) {
+  G1ParGCAllocBufferContainer* alloc_buffer(GCAllocPurpose purpose) {
     return _alloc_buffers[purpose];
   }
 
@@ -1899,15 +1941,13 @@ public:
     HeapWord* obj = NULL;
     size_t gclab_word_size = _g1h->desired_plab_sz(purpose);
     if (word_sz * 100 < gclab_word_size * ParallelGCBufferWastePct) {
-      G1ParGCAllocBuffer* alloc_buf = alloc_buffer(purpose);
-      add_to_alloc_buffer_waste(alloc_buf->words_remaining());
-      alloc_buf->retire(false /* end_of_gc */, false /* retain */);
+      G1ParGCAllocBufferContainer* alloc_buf = alloc_buffer(purpose);
 
       HeapWord* buf = _g1h->par_allocate_during_gc(purpose, gclab_word_size);
       if (buf == NULL) return NULL; // Let caller handle allocation failure.
-      // Otherwise.
-      alloc_buf->set_word_size(gclab_word_size);
-      alloc_buf->set_buf(buf);
+
+      add_to_alloc_buffer_waste(alloc_buf->words_remaining_in_retired_buffer());
+      alloc_buf->update(false /* end_of_gc */, false /* retain */, buf, gclab_word_size);
 
       obj = alloc_buf->allocate(word_sz);
       assert(obj != NULL, "buffer was definitely big enough...");

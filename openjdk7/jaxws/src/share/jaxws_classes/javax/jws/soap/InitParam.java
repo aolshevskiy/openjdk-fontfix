@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,20 +25,10 @@
 
 package javax.jws.soap;
 
-/**
- * An initialization parameter
- *
- * @deprecated  As of JSR-181 2.0 with no replacement.
+/*
+ * @Deprecated
  */
 @Deprecated public @interface InitParam {
-
-    /**
-     * Name of the initialization parameter
-     */
     String name();
-
-    /**
-     * Value of the initialization parameter
-     */
     String value();
-};
+}

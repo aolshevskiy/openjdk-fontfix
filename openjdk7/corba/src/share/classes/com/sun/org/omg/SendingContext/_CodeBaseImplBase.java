@@ -138,7 +138,7 @@ public abstract class _CodeBaseImplBase extends org.omg.CORBA.portable.ObjectImp
 
     public String[] _ids ()
     {
-        return (String[])__ids.clone();
+        return (String[]) __ids.clone();
     }
 
 

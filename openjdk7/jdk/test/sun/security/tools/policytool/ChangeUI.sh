@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug  6296772 6293981 6290216 7083664
+# @bug  6296772 6293981 6290216 8015276
 # @summary FilePermission and DelegationPermission, and cancel button
 #
 # @run applet/manual=done ChangeUI.html

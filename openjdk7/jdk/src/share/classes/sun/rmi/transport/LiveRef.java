@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -111,7 +111,7 @@ public class LiveRef implements Cloneable {
             LiveRef newRef = (LiveRef) super.clone();
             return newRef;
         } catch (CloneNotSupportedException e) {
-            throw new InternalError(e.toString());
+            throw new InternalError(e.toString(), e);
         }
     }
 

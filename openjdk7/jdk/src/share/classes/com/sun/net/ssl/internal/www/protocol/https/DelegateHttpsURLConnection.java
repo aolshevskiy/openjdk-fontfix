@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -165,10 +165,10 @@ class VerifierWrapper implements javax.net.ssl.HostnameVerifier {
     private static String getServername(X509Certificate peerCert) {
         try {
             // compare to subjectAltNames if dnsName is present
-            Collection subjAltNames = peerCert.getSubjectAlternativeNames();
+            Collection<List<?>> subjAltNames = peerCert.getSubjectAlternativeNames();
             if (subjAltNames != null) {
-                for (Iterator itr = subjAltNames.iterator(); itr.hasNext(); ) {
-                    List next = (List)itr.next();
+                for (Iterator<List<?>> itr = subjAltNames.iterator(); itr.hasNext(); ) {
+                    List<?> next = itr.next();
                     if (((Integer)next.get(0)).intValue() == 2) {
                         // compare dNSName with host in url
                         String dnsName = ((String)next.get(1));

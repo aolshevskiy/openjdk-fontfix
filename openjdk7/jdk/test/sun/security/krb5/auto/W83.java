@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,8 +52,6 @@ public class W83 {
         Config.refresh();
 
         kdc.writeKtab(OneKDC.KTAB);
-        new File(OneKDC.KRB5_CONF).deleteOnExit();
-        new File(OneKDC.KTAB).deleteOnExit();
 
         KeyTab ktab = KeyTab.getInstance(OneKDC.KTAB);
         for (int etype: EType.getBuiltInDefaults()) {

@@ -29,6 +29,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.awt.peer.*;
 import java.lang.reflect.*;
+
 import sun.awt.AWTAccessor;
 
 class XScrollPanePeer extends XComponentPeer implements ScrollPanePeer, XScrollbarClient {
@@ -291,10 +292,12 @@ class XScrollPanePeer extends XComponentPeer implements ScrollPanePeer, XScrollb
                 setAdjustableValue(hadj, hsb.getValue(), type);
                 sx = -(hsb.getValue());
                 Graphics g = getGraphics();
-                try {
-                    paintHorScrollbar(g, colors, true);
-                } finally {
-                    g.dispose();
+                if (g != null) {
+                    try {
+                        paintHorScrollbar(g, colors, true);
+                    } finally {
+                        g.dispose();
+                    }
                 }
             }
             if ((flag & VERTICAL) != 0) {
@@ -303,26 +306,38 @@ class XScrollPanePeer extends XComponentPeer implements ScrollPanePeer, XScrollb
                 setAdjustableValue(vadj, vsb.getValue(), type);
                 sy = -(vsb.getValue());
                 Graphics g = getGraphics();
-                try {
-                    paintVerScrollbar(g, colors, true);
-                } finally {
-                    g.dispose();
+                if (g != null) {
+                    try {
+                        paintVerScrollbar(g, colors, true);
+                    } finally {
+                        g.dispose();
+                    }
                 }
             }
         }
         c.move(sx, sy);
     }
 
-    void setAdjustableValue(ScrollPaneAdjustable adj, int value, int type) {
-        AWTAccessor.getScrollPaneAdjustableAccessor().setTypedValue(adj, value, type);
+    private void setAdjustableValue(final ScrollPaneAdjustable adj, final int value,
+                            final int type) {
+        AWTAccessor.getScrollPaneAdjustableAccessor().setTypedValue(adj, value,
+                                                                    type);
     }
-
-    public void paint(Graphics g) {
-        paintComponent(g);
+    @Override
+    void paintPeer(final Graphics g) {
+        final Color[] colors = getGUIcolors();
+        g.setColor(colors[BACKGROUND_COLOR]);
+        final int h = height - hsbSpace;
+        final int w = width - vsbSpace;
+        g.fillRect(0, 0, w, h);
+        // paint rectangular region between scrollbars
+        g.fillRect(w, h, vsbSpace, hsbSpace);
+        if (MARGIN > 0) {
+            draw3DRect(g, colors, 0, 0, w - 1, h - 1, false);
+        }
+        paintScrollBars(g, colors);
     }
-
-
-    void paintScrollBars(Graphics g, Color[] colors) {
+    private void paintScrollBars(Graphics g, Color[] colors) {
         if (vsbSpace > 0) {
             paintVerScrollbar(g, colors, true);
             // paint the whole scrollbar
@@ -333,51 +348,32 @@ class XScrollPanePeer extends XComponentPeer implements ScrollPanePeer, XScrollb
             // paint the whole scrollbar
         }
     }
-
-   void repaintScrollBars() {
-       Graphics g = getGraphics();
-       Color colors[] = getGUIcolors();
-       if (g != null) {
-           paintScrollBars(g,colors);
-       }
-       g.dispose();
-   }
-
-    public void repaintScrollbarRequest(XScrollbar sb) {
-       Graphics g = getGraphics();
-       Color colors[] = getGUIcolors();
-       if (g != null) {
-           if (sb ==  vsb)  {
-               paintVerScrollbar(g,colors,true);
-           }
-           else if (sb ==  hsb) {
-               paintHorScrollbar(g,colors,true);
-           }
-       }
-    }
-
-    /**
-     * Paint the scrollpane.
-     */
-    public void paintComponent(Graphics g) {
-
+    void repaintScrollBars() {
+        Graphics g = getGraphics();
         Color colors[] = getGUIcolors();
-        g.setColor(colors[BACKGROUND_COLOR]);
-        int h = height - hsbSpace;
-        int w = width - vsbSpace;
-
-        g.fillRect(0, 0, w, h);
-
-        // paint rectangular region between scrollbars
-        g.fillRect(w, h, vsbSpace, hsbSpace);
-
-        if (MARGIN > 0) {
-            draw3DRect(g, colors, 0, 0, w - 1, h - 1, false);
+        if (g != null) {
+            try {
+                paintScrollBars(g, colors);
+            } finally {
+                g.dispose();
+            }
         }
-
-        paintScrollBars(g,colors);
     }
-
+    public void repaintScrollbarRequest(XScrollbar sb) {
+        Graphics g = getGraphics();
+        Color colors[] = getGUIcolors();
+        if (g != null) {
+            try {
+                if (sb == vsb) {
+                    paintVerScrollbar(g, colors, true);
+                } else if (sb == hsb) {
+                    paintHorScrollbar(g, colors, true);
+                }
+            } finally {
+                g.dispose();
+            }
+        }
+    }
     public void handleEvent(java.awt.AWTEvent e) {
         super.handleEvent(e);
 

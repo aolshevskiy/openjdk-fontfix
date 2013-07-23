@@ -25,14 +25,7 @@
 
 package java.net;
 
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.lang.ref.*;
 import java.io.*;
-import java.net.URL;
-import java.net.URLConnection;
-import java.net.URLStreamHandlerFactory;
-import java.util.Enumeration;
 import java.util.*;
 import java.util.jar.Manifest;
 import java.util.jar.JarFile;
@@ -64,6 +57,12 @@ import sun.security.util.SecurityConstants;
  * <p>
  * The classes that are loaded are by default granted permission only to
  * access the URLs specified when the URLClassLoader was created.
+ * <p>
+ * Where a JAR file contains the {@link Name#PROFILE Profile} attribute
+ * then its value is the name of the Java SE profile that the library
+ * minimally requires. If this runtime does not support the profile then
+ * it causes {@link java.util.jar.UnsupportedProfileException} to be
+ * thrown at some unspecified time.
  *
  * @author  David Connelly
  * @since   1.2
@@ -352,8 +351,8 @@ public class URLClassLoader extends SecureClassLoader implements Closeable {
     {
         try {
             return AccessController.doPrivileged(
-                new PrivilegedExceptionAction<Class>() {
-                    public Class run() throws ClassNotFoundException {
+                new PrivilegedExceptionAction<Class<?>>() {
+                    public Class<?> run() throws ClassNotFoundException {
                         String path = name.replace('.', '/').concat(".class");
                         Resource res = ucp.getResource(path, false);
                         if (res != null) {
@@ -406,7 +405,7 @@ public class URLClassLoader extends SecureClassLoader implements Closeable {
      * Resource. The resulting Class must be resolved before it can be
      * used.
      */
-    private Class defineClass(String name, Resource res) throws IOException {
+    private Class<?> defineClass(String name, Resource res) throws IOException {
         long t0 = System.nanoTime();
         int i = name.lastIndexOf('.');
         URL url = res.getCodeSourceURL();
@@ -774,7 +773,7 @@ final class FactoryURLClassLoader extends URLClassLoader {
         super(urls, acc);
     }
 
-    public final Class loadClass(String name, boolean resolve)
+    public final Class<?> loadClass(String name, boolean resolve)
         throws ClassNotFoundException
     {
         // First check if we have permission to access the package. This

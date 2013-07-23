@@ -34,9 +34,8 @@
  */
 
 package java.util.concurrent.locks;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.*;
-import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.Collection;
 
 /**
  * An implementation of {@link ReadWriteLock} supporting similar
@@ -46,7 +45,7 @@ import java.util.*;
  * <ul>
  * <li><b>Acquisition order</b>
  *
- * <p> This class does not impose a reader or writer preference
+ * <p>This class does not impose a reader or writer preference
  * ordering for lock access.  However, it does support an optional
  * <em>fairness</em> policy.
  *
@@ -60,9 +59,9 @@ import java.util.*;
  * <p>
  *
  * <dt><b><i>Fair mode</i></b>
- * <dd> When constructed as fair, threads contend for entry using an
+ * <dd>When constructed as fair, threads contend for entry using an
  * approximately arrival-order policy. When the currently held lock
- * is released either the longest-waiting single writer thread will
+ * is released, either the longest-waiting single writer thread will
  * be assigned the write lock, or if there is a group of reader threads
  * waiting longer than all waiting writer threads, that group will be
  * assigned the read lock.
@@ -80,8 +79,8 @@ import java.util.*;
  * will block unless both the read lock and write lock are free (which
  * implies there are no waiting threads).  (Note that the non-blocking
  * {@link ReadLock#tryLock()} and {@link WriteLock#tryLock()} methods
- * do not honor this fair setting and will acquire the lock if it is
- * possible, regardless of waiting threads.)
+ * do not honor this fair setting and will immediately acquire the lock
+ * if it is possible, regardless of waiting threads.)
  * <p>
  * </dl>
  *
@@ -143,21 +142,21 @@ import java.util.*;
  *   void processCachedData() {
  *     rwl.readLock().lock();
  *     if (!cacheValid) {
- *        // Must release read lock before acquiring write lock
- *        rwl.readLock().unlock();
- *        rwl.writeLock().lock();
- *        try {
- *          // Recheck state because another thread might have
- *          // acquired write lock and changed state before we did.
- *          if (!cacheValid) {
- *            data = ...
- *            cacheValid = true;
- *          }
- *          // Downgrade by acquiring read lock before releasing write lock
- *          rwl.readLock().lock();
- *        } finally {
- *          rwl.writeLock().unlock(); // Unlock write, still hold read
- *        }
+ *       // Must release read lock before acquiring write lock
+ *       rwl.readLock().unlock();
+ *       rwl.writeLock().lock();
+ *       try {
+ *         // Recheck state because another thread might have
+ *         // acquired write lock and changed state before we did.
+ *         if (!cacheValid) {
+ *           data = ...
+ *           cacheValid = true;
+ *         }
+ *         // Downgrade by acquiring read lock before releasing write lock
+ *         rwl.readLock().lock();
+ *       } finally {
+ *         rwl.writeLock().unlock(); // Unlock write, still hold read
+ *       }
  *     }
  *
  *     try {
@@ -176,33 +175,33 @@ import java.util.*;
  * is a class using a TreeMap that is expected to be large and
  * concurrently accessed.
  *
- * <pre>{@code
+ *  <pre> {@code
  * class RWDictionary {
- *    private final Map<String, Data> m = new TreeMap<String, Data>();
- *    private final ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
- *    private final Lock r = rwl.readLock();
- *    private final Lock w = rwl.writeLock();
+ *   private final Map<String, Data> m = new TreeMap<String, Data>();
+ *   private final ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
+ *   private final Lock r = rwl.readLock();
+ *   private final Lock w = rwl.writeLock();
  *
- *    public Data get(String key) {
- *        r.lock();
- *        try { return m.get(key); }
- *        finally { r.unlock(); }
- *    }
- *    public String[] allKeys() {
- *        r.lock();
- *        try { return m.keySet().toArray(); }
- *        finally { r.unlock(); }
- *    }
- *    public Data put(String key, Data value) {
- *        w.lock();
- *        try { return m.put(key, value); }
- *        finally { w.unlock(); }
- *    }
- *    public void clear() {
- *        w.lock();
- *        try { m.clear(); }
- *        finally { w.unlock(); }
- *    }
+ *   public Data get(String key) {
+ *     r.lock();
+ *     try { return m.get(key); }
+ *     finally { r.unlock(); }
+ *   }
+ *   public String[] allKeys() {
+ *     r.lock();
+ *     try { return m.keySet().toArray(); }
+ *     finally { r.unlock(); }
+ *   }
+ *   public Data put(String key, Data value) {
+ *     w.lock();
+ *     try { return m.put(key, value); }
+ *     finally { w.unlock(); }
+ *   }
+ *   public void clear() {
+ *     w.lock();
+ *     try { m.clear(); }
+ *     finally { w.unlock(); }
+ *   }
  * }}</pre>
  *
  * <h3>Implementation Notes</h3>
@@ -213,7 +212,6 @@ import java.util.*;
  *
  * @since 1.5
  * @author Doug Lea
- *
  */
 public class ReentrantReadWriteLock
         implements ReadWriteLock, java.io.Serializable {
@@ -279,7 +277,7 @@ public class ReentrantReadWriteLock
         static final class HoldCounter {
             int count = 0;
             // Use id, not reference, to avoid garbage retention
-            final long tid = Thread.currentThread().getId();
+            final long tid = getThreadId(Thread.currentThread());
         }
 
         /**
@@ -422,7 +420,7 @@ public class ReentrantReadWriteLock
                     firstReaderHoldCount--;
             } else {
                 HoldCounter rh = cachedHoldCounter;
-                if (rh == null || rh.tid != current.getId())
+                if (rh == null || rh.tid != getThreadId(current))
                     rh = readHolds.get();
                 int count = rh.count;
                 if (count <= 1) {
@@ -480,7 +478,7 @@ public class ReentrantReadWriteLock
                     firstReaderHoldCount++;
                 } else {
                     HoldCounter rh = cachedHoldCounter;
-                    if (rh == null || rh.tid != current.getId())
+                    if (rh == null || rh.tid != getThreadId(current))
                         cachedHoldCounter = rh = readHolds.get();
                     else if (rh.count == 0)
                         readHolds.set(rh);
@@ -517,7 +515,7 @@ public class ReentrantReadWriteLock
                     } else {
                         if (rh == null) {
                             rh = cachedHoldCounter;
-                            if (rh == null || rh.tid != current.getId()) {
+                            if (rh == null || rh.tid != getThreadId(current)) {
                                 rh = readHolds.get();
                                 if (rh.count == 0)
                                     readHolds.remove();
@@ -538,7 +536,7 @@ public class ReentrantReadWriteLock
                     } else {
                         if (rh == null)
                             rh = cachedHoldCounter;
-                        if (rh == null || rh.tid != current.getId())
+                        if (rh == null || rh.tid != getThreadId(current))
                             rh = readHolds.get();
                         else if (rh.count == 0)
                             readHolds.set(rh);
@@ -594,7 +592,7 @@ public class ReentrantReadWriteLock
                         firstReaderHoldCount++;
                     } else {
                         HoldCounter rh = cachedHoldCounter;
-                        if (rh == null || rh.tid != current.getId())
+                        if (rh == null || rh.tid != getThreadId(current))
                             cachedHoldCounter = rh = readHolds.get();
                         else if (rh.count == 0)
                             readHolds.set(rh);
@@ -645,7 +643,7 @@ public class ReentrantReadWriteLock
                 return firstReaderHoldCount;
 
             HoldCounter rh = cachedHoldCounter;
-            if (rh != null && rh.tid == current.getId())
+            if (rh != null && rh.tid == getThreadId(current))
                 return rh.count;
 
             int count = readHolds.get().count;
@@ -654,8 +652,7 @@ public class ReentrantReadWriteLock
         }
 
         /**
-         * Reconstitute this lock instance from a stream
-         * @param s the stream
+         * Reconstitutes the instance from a stream (that is, deserializes it).
          */
         private void readObject(java.io.ObjectInputStream s)
             throws java.io.IOException, ClassNotFoundException {
@@ -799,7 +796,7 @@ public class ReentrantReadWriteLock
          *
          * @return {@code true} if the read lock was acquired
          */
-        public  boolean tryLock() {
+        public boolean tryLock() {
             return sync.tryReadLock();
         }
 
@@ -819,8 +816,11 @@ public class ReentrantReadWriteLock
          * permit barging on a fair lock then combine the timed and
          * un-timed forms together:
          *
-         * <pre>if (lock.tryLock() || lock.tryLock(timeout, unit) ) { ... }
-         * </pre>
+         *  <pre> {@code
+         * if (lock.tryLock() ||
+         *     lock.tryLock(timeout, unit)) {
+         *   ...
+         * }}</pre>
          *
          * <p>If the write lock is held by another thread then the
          * current thread becomes disabled for thread scheduling
@@ -866,7 +866,6 @@ public class ReentrantReadWriteLock
          * @return {@code true} if the read lock was acquired
          * @throws InterruptedException if the current thread is interrupted
          * @throws NullPointerException if the time unit is null
-         *
          */
         public boolean tryLock(long timeout, TimeUnit unit)
                 throws InterruptedException {
@@ -876,10 +875,10 @@ public class ReentrantReadWriteLock
         /**
          * Attempts to release this lock.
          *
-         * <p> If the number of readers is now zero then the lock
+         * <p>If the number of readers is now zero then the lock
          * is made available for write lock attempts.
          */
-        public  void unlock() {
+        public void unlock() {
             sync.releaseShared(1);
         }
 
@@ -1018,7 +1017,7 @@ public class ReentrantReadWriteLock
          * #tryLock(long, TimeUnit) tryLock(0, TimeUnit.SECONDS) }
          * which is almost equivalent (it also detects interruption).
          *
-         * <p> If the current thread already holds this lock then the
+         * <p>If the current thread already holds this lock then the
          * hold count is incremented by one and the method returns
          * {@code true}.
          *
@@ -1049,8 +1048,11 @@ public class ReentrantReadWriteLock
          * that does permit barging on a fair lock then combine the
          * timed and un-timed forms together:
          *
-         * <pre>if (lock.tryLock() || lock.tryLock(timeout, unit) ) { ... }
-         * </pre>
+         *  <pre> {@code
+         * if (lock.tryLock() ||
+         *     lock.tryLock(timeout, unit)) {
+         *   ...
+         * }}</pre>
          *
          * <p>If the current thread already holds this lock then the
          * hold count is incremented by one and the method returns
@@ -1108,7 +1110,6 @@ public class ReentrantReadWriteLock
          *
          * @throws InterruptedException if the current thread is interrupted
          * @throws NullPointerException if the time unit is null
-         *
          */
         public boolean tryLock(long timeout, TimeUnit unit)
                 throws InterruptedException {
@@ -1125,7 +1126,7 @@ public class ReentrantReadWriteLock
          * IllegalMonitorStateException} is thrown.
          *
          * @throws IllegalMonitorStateException if the current thread does not
-         * hold this lock.
+         * hold this lock
          */
         public void unlock() {
             sync.release(1);
@@ -1253,7 +1254,7 @@ public class ReentrantReadWriteLock
      * Queries the number of read locks held for this lock. This
      * method is designed for use in monitoring system state, not for
      * synchronization control.
-     * @return the number of read locks held.
+     * @return the number of read locks held
      */
     public int getReadLockCount() {
         return sync.getReadLockCount();
@@ -1481,6 +1482,30 @@ public class ReentrantReadWriteLock
 
         return super.toString() +
             "[Write locks = " + w + ", Read locks = " + r + "]";
+    }
+
+    /**
+     * Returns the thread id for the given thread.  We must access
+     * this directly rather than via method Thread.getId() because
+     * getId() is not final, and has been known to be overridden in
+     * ways that do not preserve unique mappings.
+     */
+    static final long getThreadId(Thread thread) {
+        return UNSAFE.getLongVolatile(thread, TID_OFFSET);
+    }
+
+    // Unsafe mechanics
+    private static final sun.misc.Unsafe UNSAFE;
+    private static final long TID_OFFSET;
+    static {
+        try {
+            UNSAFE = sun.misc.Unsafe.getUnsafe();
+            Class<?> tk = Thread.class;
+            TID_OFFSET = UNSAFE.objectFieldOffset
+                (tk.getDeclaredField("tid"));
+        } catch (Exception e) {
+            throw new Error(e);
+        }
     }
 
 }

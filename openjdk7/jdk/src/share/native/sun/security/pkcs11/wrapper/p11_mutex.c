@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  */
 
 /* Copyright  (c) 2002 Graz University of Technology. All rights reserved.
@@ -92,7 +92,7 @@ CK_C_INITIALIZE_ARGS_PTR makeCKInitArgsAdapter(JNIEnv *env, jobject jInitArgs)
     /* convert the Java InitArgs object to a pointer to a CK_C_INITIALIZE_ARGS structure */
     ckpInitArgs = (CK_C_INITIALIZE_ARGS_PTR) malloc(sizeof(CK_C_INITIALIZE_ARGS));
     if (ckpInitArgs == NULL) {
-        JNU_ThrowOutOfMemoryError(env, 0);
+        throwOutOfMemoryError(env, 0);
         return NULL_PTR;
     }
 
@@ -112,22 +112,34 @@ CK_C_INITIALIZE_ARGS_PTR makeCKInitArgsAdapter(JNIEnv *env, jobject jInitArgs)
     ckpInitArgs->UnlockMutex = NULL_PTR;
 #else
     fieldID = (*env)->GetFieldID(env, jInitArgsClass, "CreateMutex", "Lsun/security/pkcs11/wrapper/CK_CREATEMUTEX;");
-    if (fieldID == NULL) { return NULL; }
+    if (fieldID == NULL) {
+        free(ckpInitArgs);
+        return NULL;
+    }
     jMutexHandler = (*env)->GetObjectField(env, jInitArgs, fieldID);
     ckpInitArgs->CreateMutex = (jMutexHandler != NULL) ? &callJCreateMutex : NULL_PTR;
 
     fieldID = (*env)->GetFieldID(env, jInitArgsClass, "DestroyMutex", "Lsun/security/pkcs11/wrapper/CK_DESTROYMUTEX;");
-    if (fieldID == NULL) { return NULL; }
+    if (fieldID == NULL) {
+        free(ckpInitArgs);
+        return NULL;
+    }
     jMutexHandler = (*env)->GetObjectField(env, jInitArgs, fieldID);
     ckpInitArgs->DestroyMutex = (jMutexHandler != NULL) ? &callJDestroyMutex : NULL_PTR;
 
     fieldID = (*env)->GetFieldID(env, jInitArgsClass, "LockMutex", "Lsun/security/pkcs11/wrapper/CK_LOCKMUTEX;");
-    if (fieldID == NULL) { return NULL; }
+    if (fieldID == NULL) {
+        free(ckpInitArgs);
+        return NULL;
+    }
     jMutexHandler = (*env)->GetObjectField(env, jInitArgs, fieldID);
     ckpInitArgs->LockMutex = (jMutexHandler != NULL) ? &callJLockMutex : NULL_PTR;
 
     fieldID = (*env)->GetFieldID(env, jInitArgsClass, "UnlockMutex", "Lsun/security/pkcs11/wrapper/CK_UNLOCKMUTEX;");
-    if (fieldID == NULL) { return NULL; }
+    if (fieldID == NULL) {
+        free(ckpInitArgs);
+        return NULL;
+    }
     jMutexHandler = (*env)->GetObjectField(env, jInitArgs, fieldID);
     ckpInitArgs->UnlockMutex = (jMutexHandler != NULL) ? &callJUnlockMutex : NULL_PTR;
 
@@ -141,7 +153,7 @@ CK_C_INITIALIZE_ARGS_PTR makeCKInitArgsAdapter(JNIEnv *env, jobject jInitArgs)
         ckpGlobalInitArgs = (CK_C_INITIALIZE_ARGS_PTR) malloc(sizeof(CK_C_INITIALIZE_ARGS));
         if (ckpGlobalInitArgs == NULL) {
             free(ckpInitArgs);
-            JNU_ThrowOutOfMemoryError(env, 0);
+            throwOutOfMemoryError(env, 0);
             return NULL_PTR;
         }
 
@@ -151,13 +163,19 @@ CK_C_INITIALIZE_ARGS_PTR makeCKInitArgsAdapter(JNIEnv *env, jobject jInitArgs)
 
     /* convert and set the flags field */
     fieldID = (*env)->GetFieldID(env, jInitArgsClass, "flags", "J");
-    if (fieldID == NULL) { return NULL; }
+    if (fieldID == NULL) {
+        free(ckpInitArgs);
+        return NULL;
+    }
     jFlags = (*env)->GetLongField(env, jInitArgs, fieldID);
     ckpInitArgs->flags = jLongToCKULong(jFlags);
 
     /* pReserved should be NULL_PTR in this version */
     fieldID = (*env)->GetFieldID(env, jInitArgsClass, "pReserved", "Ljava/lang/Object;");
-    if (fieldID == NULL) { return NULL; }
+    if (fieldID == NULL) {
+        free(ckpInitArgs);
+        return NULL;
+    }
     jReserved = (*env)->GetObjectField(env, jInitArgs, fieldID);
 
     /* we try to convert the reserved parameter also */
@@ -178,9 +196,8 @@ CK_C_INITIALIZE_ARGS_PTR makeCKInitArgsAdapter(JNIEnv *env, jobject jInitArgs)
  */
 CK_RV callJCreateMutex(CK_VOID_PTR_PTR ppMutex)
 {
-    JavaVM *jvm;
+    extern JavaVM *jvm;
     JNIEnv *env;
-    jsize actualNumberVMs;
     jint returnValue;
     jthrowable pkcs11Exception;
     jclass pkcs11ExceptionClass;
@@ -196,8 +213,7 @@ CK_RV callJCreateMutex(CK_VOID_PTR_PTR ppMutex)
 
 
     /* Get the currently running Java VM */
-    returnValue = JNI_GetCreatedJavaVMs(&jvm, (jsize) 1, &actualNumberVMs);
-    if ((returnValue != 0) || (actualNumberVMs <= 0)) { return rv ;} /* there is no VM running */
+    if (jvm == NULL) { return rv ;} /* there is no VM running */
 
     /* Determine, if current thread is already attached */
     returnValue = (*jvm)->GetEnv(jvm, (void **) &env, JNI_VERSION_1_2);
@@ -273,9 +289,8 @@ CK_RV callJCreateMutex(CK_VOID_PTR_PTR ppMutex)
  */
 CK_RV callJDestroyMutex(CK_VOID_PTR pMutex)
 {
-    JavaVM *jvm;
+    extern JavaVM *jvm;
     JNIEnv *env;
-    jsize actualNumberVMs;
     jint returnValue;
     jthrowable pkcs11Exception;
     jclass pkcs11ExceptionClass;
@@ -291,8 +306,7 @@ CK_RV callJDestroyMutex(CK_VOID_PTR pMutex)
 
 
     /* Get the currently running Java VM */
-    returnValue = JNI_GetCreatedJavaVMs(&jvm, (jsize) 1, &actualNumberVMs);
-    if ((returnValue != 0) || (actualNumberVMs <= 0)) { return rv ; } /* there is no VM running */
+    if (jvm == NULL) { return rv ; } /* there is no VM running */
 
     /* Determine, if current thread is already attached */
     returnValue = (*jvm)->GetEnv(jvm, (void **) &env, JNI_VERSION_1_2);
@@ -367,9 +381,8 @@ CK_RV callJDestroyMutex(CK_VOID_PTR pMutex)
  */
 CK_RV callJLockMutex(CK_VOID_PTR pMutex)
 {
-    JavaVM *jvm;
+    extern JavaVM *jvm;
     JNIEnv *env;
-    jsize actualNumberVMs;
     jint returnValue;
     jthrowable pkcs11Exception;
     jclass pkcs11ExceptionClass;
@@ -385,8 +398,7 @@ CK_RV callJLockMutex(CK_VOID_PTR pMutex)
 
 
     /* Get the currently running Java VM */
-    returnValue = JNI_GetCreatedJavaVMs(&jvm, (jsize) 1, &actualNumberVMs);
-    if ((returnValue != 0) || (actualNumberVMs <= 0)) { return rv ; } /* there is no VM running */
+    if (jvm == NULL) { return rv ; } /* there is no VM running */
 
     /* Determine, if current thread is already attached */
     returnValue = (*jvm)->GetEnv(jvm, (void **) &env, JNI_VERSION_1_2);
@@ -457,9 +469,8 @@ CK_RV callJLockMutex(CK_VOID_PTR pMutex)
  */
 CK_RV callJUnlockMutex(CK_VOID_PTR pMutex)
 {
-    JavaVM *jvm;
+    extern JavaVM *jvm;
     JNIEnv *env;
-    jsize actualNumberVMs;
     jint returnValue;
     jthrowable pkcs11Exception;
     jclass pkcs11ExceptionClass;
@@ -475,8 +486,7 @@ CK_RV callJUnlockMutex(CK_VOID_PTR pMutex)
 
 
     /* Get the currently running Java VM */
-    returnValue = JNI_GetCreatedJavaVMs(&jvm, (jsize) 1, &actualNumberVMs);
-    if ((returnValue != 0) || (actualNumberVMs <= 0)) { return rv ; } /* there is no VM running */
+    if (jvm == NULL) { return rv ; } /* there is no VM running */
 
     /* Determine, if current thread is already attached */
     returnValue = (*jvm)->GetEnv(jvm, (void **) &env, JNI_VERSION_1_2);

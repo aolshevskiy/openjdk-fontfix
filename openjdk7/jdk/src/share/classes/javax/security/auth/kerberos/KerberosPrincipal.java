@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,6 @@
 package javax.security.auth.kerberos;
 
 import java.io.*;
-import sun.security.krb5.Asn1Exception;
 import sun.security.krb5.KrbException;
 import sun.security.krb5.PrincipalName;
 import sun.security.krb5.Realm;
@@ -81,14 +80,12 @@ public final class KerberosPrincipal
 
     public static final int KRB_NT_UID = 5;
 
-
     private transient String fullName;
 
     private transient String realm;
 
     private transient int nameType;
 
-    private static final char NAME_REALM_SEPARATOR = '@';
 
     /**
      * Constructs a KerberosPrincipal from the provided string input. The
@@ -184,11 +181,11 @@ public final class KerberosPrincipal
     /**
      * Returns a hashcode for this principal. The hash code is defined to
      * be the result of the following  calculation:
-     * <pre><code>
+     * <pre>{@code
      *  hashCode = getName().hashCode();
-     * </code></pre>
+     * }</pre>
      *
-     * @return a hashCode() for the <code>KerberosPrincipal</code>
+     * @return a hashCode() for the {@code KerberosPrincipal}
      */
     public int hashCode() {
         return getName().hashCode();
@@ -197,11 +194,11 @@ public final class KerberosPrincipal
     /**
      * Compares the specified Object with this Principal for equality.
      * Returns true if the given object is also a
-     * <code>KerberosPrincipal</code> and the two
-     * <code>KerberosPrincipal</code> instances are equivalent.
-     * More formally two <code>KerberosPrincipal</code> instances are equal
-     * if the values returned by <code>getName()</code> are equal and the
-     * values returned by <code>getNameType()</code> are equal.
+     * {@code KerberosPrincipal} and the two
+     * {@code KerberosPrincipal} instances are equivalent.
+     * More formally two {@code KerberosPrincipal} instances are equal
+     * if the values returned by {@code getName()} are equal and the
+     * values returned by {@code getNameType()} are equal.
      *
      * @param other the Object to compare to
      * @return true if the Object passed in represents the same principal
@@ -228,46 +225,40 @@ public final class KerberosPrincipal
     /**
      * Save the KerberosPrincipal object to a stream
      *
-     * @serialData this <code>KerberosPrincipal</code> is serialized
+     * @serialData this {@code KerberosPrincipal} is serialized
      *          by writing out the PrincipalName and the
      *          realm in their DER-encoded form as specified in Section 5.2.2 of
      *          <a href=http://www.ietf.org/rfc/rfc4120.txt> RFC4120</a>.
      */
-
     private void writeObject(ObjectOutputStream oos)
-        throws IOException {
+            throws IOException {
 
-        PrincipalName krb5Principal = null;
+        PrincipalName krb5Principal;
         try {
-            krb5Principal  = new PrincipalName(fullName,nameType);
+            krb5Principal  = new PrincipalName(fullName, nameType);
             oos.writeObject(krb5Principal.asn1Encode());
             oos.writeObject(krb5Principal.getRealm().asn1Encode());
         } catch (Exception e) {
-            IOException ioe = new IOException(e.getMessage());
-            ioe.initCause(e);
-            throw ioe;
+            throw new IOException(e);
         }
     }
 
     /**
      * Reads this object from a stream (i.e., deserializes it)
      */
-
     private void readObject(ObjectInputStream ois)
-         throws IOException, ClassNotFoundException {
+            throws IOException, ClassNotFoundException {
         byte[] asn1EncPrincipal = (byte [])ois.readObject();
         byte[] encRealm = (byte [])ois.readObject();
         try {
-           PrincipalName krb5Principal = new PrincipalName(new
-                                                DerValue(asn1EncPrincipal));
-           realm = (new Realm(new DerValue(encRealm))).toString();
-           fullName = krb5Principal.toString() + NAME_REALM_SEPARATOR +
-                         realm.toString();
+           Realm realmObject = new Realm(new DerValue(encRealm));
+           PrincipalName krb5Principal = new PrincipalName(
+                   new DerValue(asn1EncPrincipal), realmObject);
+           realm = realmObject.toString();
+           fullName = krb5Principal.toString();
            nameType = krb5Principal.getNameType();
         } catch (Exception e) {
-            IOException ioe = new IOException(e.getMessage());
-            ioe.initCause(e);
-            throw ioe;
+            throw new IOException(e);
         }
     }
 
@@ -288,9 +279,7 @@ public final class KerberosPrincipal
      * <a href=http://www.ietf.org/rfc/rfc4120.txt> RFC4120</a>.
      *
      * @return the name type.
-     *
      */
-
     public int getNameType() {
         return nameType;
     }

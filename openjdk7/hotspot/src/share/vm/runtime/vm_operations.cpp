@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,21 +34,10 @@
 #include "runtime/deoptimization.hpp"
 #include "runtime/interfaceSupport.hpp"
 #include "runtime/sweeper.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/vm_operations.hpp"
 #include "services/threadService.hpp"
 #include "trace/tracing.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
 
 #define VM_OP_NAME_INITIALIZE(name) #name,
 
@@ -189,7 +178,8 @@ void VM_HandleFullCodeCache::doit() {
 }
 
 void VM_Verify::doit() {
-  Universe::verify();
+  Universe::heap()->prepare_for_verify();
+  Universe::verify(_silent);
 }
 
 bool VM_PrintThreads::doit_prologue() {

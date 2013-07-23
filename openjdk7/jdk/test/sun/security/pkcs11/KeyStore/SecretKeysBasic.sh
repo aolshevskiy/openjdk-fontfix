@@ -26,7 +26,7 @@
 # @summary Ensure that re-assigning the alias works
 #
 # @library ..
-# @build SecretKeysBasic 
+# @build SecretKeysBasic
 # @run shell SecretKeysBasic.sh
 #
 # To run by hand:
@@ -45,10 +45,9 @@ fi
 if [ "${TESTCLASSES}" = "" ] ; then
     TESTCLASSES=`pwd`
 fi
-
 if [ "${TESTJAVA}" = "" ] ; then
     JAVAC_CMD=`which javac`
-    TESTJAVA=`dirname $JAVAC_CMD`/.. 
+    TESTJAVA=`dirname $JAVAC_CMD`/..
 fi
 echo TESTSRC=${TESTSRC}
 echo TESTCLASSES=${TESTCLASSES}
@@ -86,12 +85,12 @@ case "$OS" in
   CYGWIN* )
     FS="/"
     PS=";"
-    TOKENS="nss" 
+    TOKENS="nss"
     ;;
   * )
     FS="/"
     PS=":"
-    TOKENS="nss" 
+    TOKENS="nss"
     ;;
 esac
 
@@ -99,6 +98,7 @@ CP="cp -f"
 RM="rm -rf"
 MKDIR="mkdir -p"
 CHMOD="chmod"
+
 
 STATUS=0
 for token in ${TOKENS}
@@ -141,7 +141,7 @@ fi
 
 # run test
 cd ${TESTSRC}
-${TESTJAVA}${FS}bin${FS}java \
+${TESTJAVA}${FS}bin${FS}java ${TESTVMOPTS} \
 	-DDIR=${TESTSRC}${FS}BasicData${FS} \
         -classpath ${TESTCLASSES}${PS}${TESTSRC}${FS}loader.jar \
         -DCUSTOM_DB_DIR=${TESTCLASSES} \

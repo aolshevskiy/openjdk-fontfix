@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -75,7 +75,6 @@ TraceOutDir=$(HOTSPOTBUILDSPACE)\$(Variant)\generated\tracefiles
 !endif
 
 HS_INTERNAL_NAME=jvm
-!include $(HOTSPOTWORKSPACE)/make/windows/makefiles/launcher.make
 
 default:: $(AdditionalTargets) $(JvmtiGeneratedFiles) $(TraceGeneratedFiles)
 

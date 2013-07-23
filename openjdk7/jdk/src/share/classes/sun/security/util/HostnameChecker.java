@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -266,8 +266,8 @@ public class HostnameChecker {
      */
     private static boolean matchAllWildcards(String name,
          String template) {
-        name = name.toLowerCase();
-        template = template.toLowerCase();
+        name = name.toLowerCase(Locale.ENGLISH);
+        template = template.toLowerCase(Locale.ENGLISH);
         StringTokenizer nameSt = new StringTokenizer(name, ".");
         StringTokenizer templateSt = new StringTokenizer(template, ".");
 
@@ -296,8 +296,8 @@ public class HostnameChecker {
      */
     private static boolean matchLeftmostWildcard(String name,
                          String template) {
-        name = name.toLowerCase();
-        template = template.toLowerCase();
+        name = name.toLowerCase(Locale.ENGLISH);
+        template = template.toLowerCase(Locale.ENGLISH);
 
         // Retreive leftmost component
         int templateIdx = template.indexOf(".");

@@ -32,8 +32,9 @@
 #include "gc_implementation/shared/spaceDecorator.hpp"
 #include "memory/space.inline.hpp"
 #include "memory/watermark.hpp"
+#include "utilities/macros.hpp"
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 
 // A HeapRegion is the smallest piece of a G1CollectedHeap that
 // can be collected independently.
@@ -85,7 +86,7 @@ protected:
 
   void walk_mem_region_with_cl(MemRegion mr,
                                HeapWord* bottom, HeapWord* top,
-                               OopClosure* cl);
+                               ExtendedOopClosure* cl);
 
   // We don't specialize this for FilteringClosure; filtering is handled by
   // the "FilterKind" mechanism.  But we provide this to avoid a compiler
@@ -94,7 +95,7 @@ protected:
                                HeapWord* bottom, HeapWord* top,
                                FilteringClosure* cl) {
     HeapRegionDCTOC::walk_mem_region_with_cl(mr, bottom, top,
-                                                       (OopClosure*)cl);
+                                             (ExtendedOopClosure*)cl);
   }
 
   // Get the actual top of the area on which the closure will
@@ -119,7 +120,7 @@ protected:
 
 public:
   HeapRegionDCTOC(G1CollectedHeap* g1,
-                  HeapRegion* hr, OopClosure* cl,
+                  HeapRegion* hr, ExtendedOopClosure* cl,
                   CardTableModRefBS::PrecisionStyle precision,
                   FilterKind fk);
 };
@@ -165,10 +166,8 @@ class G1OffsetTableContigSpace: public ContiguousSpace {
   HeapWord* _pre_dummy_top;
 
  public:
-  // Constructor.  If "is_zeroed" is true, the MemRegion "mr" may be
-  // assumed to contain zeros.
   G1OffsetTableContigSpace(G1BlockOffsetSharedArray* sharedOffsetArray,
-                           MemRegion mr, bool is_zeroed = false);
+                           MemRegion mr);
 
   void set_bottom(HeapWord* value);
   void set_end(HeapWord* value);
@@ -189,7 +188,6 @@ class G1OffsetTableContigSpace: public ContiguousSpace {
   }
   void reset_pre_dummy_top() { _pre_dummy_top = NULL; }
 
-  virtual void initialize(MemRegion mr, bool clear_space, bool mangle_space);
   virtual void clear(bool mangle_space);
 
   HeapWord* block_start(const void* p);
@@ -231,7 +229,7 @@ class HeapRegion: public G1OffsetTableContigSpace {
 
   // Requires that the region "mr" be dense with objects, and begin and end
   // with an object.
-  void oops_in_mr_iterate(MemRegion mr, OopClosure* cl);
+  void oops_in_mr_iterate(MemRegion mr, ExtendedOopClosure* cl);
 
   // The remembered set for this region.
   // (Might want to make this "inline" later, to avoid some alloc failure
@@ -340,10 +338,9 @@ class HeapRegion: public G1OffsetTableContigSpace {
   size_t _predicted_bytes_to_copy;
 
  public:
-  // If "is_zeroed" is "true", the region "mr" can be assumed to contain zeros.
   HeapRegion(uint hrs_index,
              G1BlockOffsetSharedArray* sharedOffsetArray,
-             MemRegion mr, bool is_zeroed);
+             MemRegion mr);
 
   static int    LogOfHRGrainBytes;
   static int    LogOfHRGrainWords;
@@ -598,15 +595,13 @@ class HeapRegion: public G1OffsetTableContigSpace {
   void hr_clear(bool par, bool clear_space);
   void par_clear();
 
-  void initialize(MemRegion mr, bool clear_space, bool mangle_space);
-
   // Get the start of the unmarked area in this region.
   HeapWord* prev_top_at_mark_start() const { return _prev_top_at_mark_start; }
   HeapWord* next_top_at_mark_start() const { return _next_top_at_mark_start; }
 
   // Apply "cl->do_oop" to (the addresses of) all reference fields in objects
   // allocated in the current region before the last call to "save_mark".
-  void oop_before_save_marks_iterate(OopClosure* cl);
+  void oop_before_save_marks_iterate(ExtendedOopClosure* cl);
 
   // Note the start or end of marking. This tells the heap region
   // that the collector is about to start or has finished (concurrently)
@@ -843,6 +838,6 @@ class HeapRegionClosure : public StackObj {
   bool complete() { return _complete; }
 };
 
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
 #endif // SHARE_VM_GC_IMPLEMENTATION_G1_HEAPREGION_HPP

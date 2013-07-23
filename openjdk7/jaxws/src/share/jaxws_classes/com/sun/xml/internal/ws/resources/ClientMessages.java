@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.xml.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -125,24 +124,12 @@ public final class ClientMessages {
         return localizer.localize(localizableHTTP_NOT_FOUND(arg0));
     }
 
-    public static Localizable localizableHTTP_CLIENT_CANNOT_CONNECT(Object arg0) {
-        return messageFactory.getMessage("http.client.cannot.connect", arg0);
-    }
-
-    /**
-     * cannot connect to server: {0}
-     *
-     */
-    public static String HTTP_CLIENT_CANNOT_CONNECT(Object arg0) {
-        return localizer.localize(localizableHTTP_CLIENT_CANNOT_CONNECT(arg0));
-    }
-
     public static Localizable localizableINVALID_EPR_PORT_NAME(Object arg0, Object arg1) {
         return messageFactory.getMessage("invalid.epr.port.name", arg0, arg1);
     }
 
     /**
-     * Endpoint Name specified in EPR {0}  is not a WSDL port QName, valid Ports are {1}
+     * EndpointName specified in EPR {0}  is not a WSDL port QName, valid Ports are {1}
      *
      */
     public static String INVALID_EPR_PORT_NAME(Object arg0, Object arg1) {
@@ -284,18 +271,6 @@ public final class ClientMessages {
         return localizer.localize(localizableHTTP_CLIENT_FAILED(arg0));
     }
 
-    public static Localizable localizableHTTP_CLIENT_CANNOT_CREATE_MESSAGE_FACTORY() {
-        return messageFactory.getMessage("http.client.cannotCreateMessageFactory");
-    }
-
-    /**
-     * cannot create message factory
-     *
-     */
-    public static String HTTP_CLIENT_CANNOT_CREATE_MESSAGE_FACTORY() {
-        return localizer.localize(localizableHTTP_CLIENT_CANNOT_CREATE_MESSAGE_FACTORY());
-    }
-
     public static Localizable localizableINVALID_SERVICE_NAME_NULL(Object arg0) {
         return messageFactory.getMessage("invalid.service.name.null", arg0);
     }
@@ -318,18 +293,6 @@ public final class ClientMessages {
      */
     public static String INVALID_WSDL_URL(Object arg0) {
         return localizer.localize(localizableINVALID_WSDL_URL(arg0));
-    }
-
-    public static Localizable localizableHTTP_CLIENT_UNAUTHORIZED(Object arg0) {
-        return messageFactory.getMessage("http.client.unauthorized", arg0);
-    }
-
-    /**
-     * request requires HTTP authentication: {0}
-     *
-     */
-    public static String HTTP_CLIENT_UNAUTHORIZED(Object arg0) {
-        return localizer.localize(localizableHTTP_CLIENT_UNAUTHORIZED(arg0));
     }
 
     public static Localizable localizableINVALID_PORT_NAME(Object arg0, Object arg1) {

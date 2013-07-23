@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -114,7 +114,8 @@ public class MethodEntryExitEvents extends TestScaffold {
      *     http://java.sun.com/javase/technologies/core/toolsapis/jpda/
      */
     private String[] excludes = {"java.*", "javax.*", "sun.*",
-                                 "com.sun.*"};
+                                 "com.sun.*", "com.oracle.*",
+                                 "oracle.*"};
 
     MethodEntryExitEvents (String args[]) {
         super(args);

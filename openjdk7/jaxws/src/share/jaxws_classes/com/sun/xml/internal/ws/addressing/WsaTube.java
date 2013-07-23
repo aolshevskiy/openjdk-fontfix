@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ import com.sun.xml.internal.ws.addressing.model.MissingAddressingHeaderException
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
+import com.sun.xml.internal.ws.api.message.AddressingUtils;
 import com.sun.xml.internal.ws.api.message.Header;
 import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.message.Messages;
@@ -83,6 +84,7 @@ abstract class WsaTube extends AbstractFilterTubeImpl {
         super(next);
         this.wsdlPort = wsdlPort;
         this.binding = binding;
+        addKnownHeadersToBinding(binding);
         addressingVersion = binding.getAddressingVersion();
         soapVersion = binding.getSOAPVersion();
         helper = getTubeHelper();
@@ -97,6 +99,19 @@ abstract class WsaTube extends AbstractFilterTubeImpl {
         addressingVersion = that.addressingVersion;
         soapVersion = that.soapVersion;
         addressingRequired = that.addressingRequired;
+    }
+
+    private void addKnownHeadersToBinding(WSBinding binding) {
+        for (AddressingVersion addrVersion: AddressingVersion.values()) {
+          binding.addKnownHeader(addrVersion.actionTag);
+          binding.addKnownHeader(addrVersion.faultDetailTag);
+          binding.addKnownHeader(addrVersion.faultToTag);
+          binding.addKnownHeader(addrVersion.fromTag);
+          binding.addKnownHeader(addrVersion.messageIDTag);
+          binding.addKnownHeader(addrVersion.relatesToTag);
+          binding.addKnownHeader(addrVersion.replyToTag);
+          binding.addKnownHeader(addrVersion.toTag);
+        }
     }
 
     @Override
@@ -185,7 +200,9 @@ abstract class WsaTube extends AbstractFilterTubeImpl {
         if (packet.getMessage().getHeaders() != null)
             return false;
 
-        String action = packet.getMessage().getHeaders().getAction(addressingVersion, soapVersion);
+        String action = AddressingUtils.getAction(
+                packet.getMessage().getHeaders(),
+                addressingVersion, soapVersion);
         if (action == null)
             return true;
 
@@ -349,7 +366,9 @@ abstract class WsaTube extends AbstractFilterTubeImpl {
     }
 
     protected void validateSOAPAction(Packet packet) {
-        String gotA = packet.getMessage().getHeaders().getAction(addressingVersion, soapVersion);
+        String gotA = AddressingUtils.getAction(
+                packet.getMessage().getHeaders(),
+                addressingVersion, soapVersion);
         if (gotA == null)
             throw new WebServiceException(AddressingMessages.VALIDATION_SERVER_NULL_ACTION());
         if(packet.soapAction != null && !packet.soapAction.equals("\"\"") && !packet.soapAction.equals("\""+gotA+"\"")) {

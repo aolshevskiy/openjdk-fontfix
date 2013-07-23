@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  */
 
 /* Copyright  (c) 2002 Graz University of Technology. All rights reserved.
@@ -96,8 +96,8 @@
 #define P11_ENABLE_C_CLOSESESSION
 #undef  P11_ENABLE_C_CLOSEALLSESSIONS
 #define P11_ENABLE_C_GETSESSIONINFO
-#undef  P11_ENABLE_C_GETOPERATIONSTATE
-#undef  P11_ENABLE_C_SETOPERATIONSTATE
+#define P11_ENABLE_C_GETOPERATIONSTATE
+#define P11_ENABLE_C_SETOPERATIONSTATE
 #define P11_ENABLE_C_LOGIN
 #define P11_ENABLE_C_LOGOUT
 #define P11_ENABLE_C_CREATEOBJECT
@@ -228,7 +228,6 @@
 #define CLASS_PKCS11EXCEPTION "sun/security/pkcs11/wrapper/PKCS11Exception"
 #define CLASS_PKCS11RUNTIMEEXCEPTION "sun/security/pkcs11/wrapper/PKCS11RuntimeException"
 #define CLASS_FILE_NOT_FOUND_EXCEPTION "java/io/FileNotFoundException"
-#define CLASS_IO_EXCEPTION "java/io/IOException"
 #define CLASS_C_INITIALIZE_ARGS "sun/security/pkcs11/wrapper/CK_C_INITIALIZE_ARGS"
 #define CLASS_CREATEMUTEX "sun/security/pkcs11/wrapper/CK_CREATEMUTEX"
 #define CLASS_DESTROYMUTEX "sun/security/pkcs11/wrapper/CK_DESTROYMUTEX"
@@ -280,6 +279,8 @@
  */
 
 jlong ckAssertReturnValueOK(JNIEnv *env, CK_RV returnValue);
+void throwOutOfMemoryError(JNIEnv *env, const char *message);
+void throwNullPointerException(JNIEnv *env, const char *message);
 void throwIOException(JNIEnv *env, const char *message);
 void throwPKCS11RuntimeException(JNIEnv *env, const char *message);
 void throwDisconnectedRuntimeException(JNIEnv *env);
@@ -451,7 +452,12 @@ extern CK_C_INITIALIZE_ARGS_PTR ckpGlobalInitArgs;
 void *p11malloc(size_t c, char *file, int line);
 void p11free(void *p, char *file, int line);
 
-#define malloc(c)       (p11malloc((c), __FILE__, __LINE__))
-#define free(c)         (p11free((c), __FILE__, __LINE__))
+/* Use THIS_FILE when it is available. */
+#ifndef THIS_FILE
+    #define THIS_FILE __FILE__
+#endif
+
+#define malloc(c)       (p11malloc((c), THIS_FILE, __LINE__))
+#define free(c)         (p11free((c), THIS_FILE, __LINE__))
 
 #endif

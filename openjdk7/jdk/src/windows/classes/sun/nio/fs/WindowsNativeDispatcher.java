@@ -844,6 +844,23 @@ class WindowsNativeDispatcher {
     static native void AdjustTokenPrivileges(long token, long luid, int attributes)
         throws WindowsException;
 
+
+    /**
+     * AccessCheck(
+     *   PSECURITY_DESCRIPTOR pSecurityDescriptor,
+     *   HANDLE ClientToken,
+     *   DWORD DesiredAccess,
+     *   PGENERIC_MAPPING GenericMapping,
+     *   PPRIVILEGE_SET PrivilegeSet,
+     *   LPDWORD PrivilegeSetLength,
+     *   LPDWORD GrantedAccess,
+     *   LPBOOL AccessStatus
+     * )
+     */
+    static native boolean AccessCheck(long token, long securityInfo, int accessMask,
+        int genericRead, int genericWrite, int genericExecute, int genericAll)
+        throws WindowsException;
+
     /**
      */
     static long LookupPrivilegeValue(String name) throws WindowsException {
@@ -855,28 +872,6 @@ class WindowsNativeDispatcher {
         }
     }
     private static native long LookupPrivilegeValue0(long lpName)
-        throws WindowsException;
-
-    /**
-     * BuildTrusteeWithSid(
-     *   PTRUSTEE pTrustee,
-     *   PSID pSid
-     * )
-     *
-     * @return  pTrustee
-     */
-    static native long BuildTrusteeWithSid(long pSid);
-
-    /**
-     * GetEffectiveRightsFromAcl(
-     *   PACL pacl,
-     *   PTRUSTEE pTrustee,
-     *   PACCESS_MASK pAccessRights
-     * )
-     *
-     * @return  AccessRights
-     */
-    static native int GetEffectiveRightsFromAcl(long pAcl, long pTrustee)
         throws WindowsException;
 
     /**
@@ -978,19 +973,19 @@ class WindowsNativeDispatcher {
      * HANDLE CreateIoCompletionPort (
      *   HANDLE FileHandle,
      *   HANDLE ExistingCompletionPort,
-     *   DWORD CompletionKey,
+     *   ULONG_PTR CompletionKey,
      *   DWORD NumberOfConcurrentThreads
      * )
      */
     static native long CreateIoCompletionPort(long fileHandle, long existingPort,
-        int completionKey) throws WindowsException;
+        long completionKey) throws WindowsException;
 
 
     /**
      * GetQueuedCompletionStatus(
      *   HANDLE CompletionPort,
      *   LPDWORD lpNumberOfBytesTransferred,
-     *   LPDWORD lpCompletionKey,
+     *   PULONG_PTR lpCompletionKey,
      *   LPOVERLAPPED *lpOverlapped,
      *   DWORD dwMilliseconds
      */
@@ -1004,12 +999,12 @@ class WindowsNativeDispatcher {
     static class CompletionStatus {
         private int error;
         private int bytesTransferred;
-        private int completionKey;
+        private long completionKey;
         private CompletionStatus() { }
 
         int error() { return error; }
         int bytesTransferred() { return bytesTransferred; }
-        int completionKey() { return completionKey; }
+        long completionKey() { return completionKey; }
     }
     private static native void GetQueuedCompletionStatus0(long completionPort,
         CompletionStatus status) throws WindowsException;
@@ -1018,12 +1013,12 @@ class WindowsNativeDispatcher {
      * PostQueuedCompletionStatus(
      *   HANDLE CompletionPort,
      *   DWORD dwNumberOfBytesTransferred,
-     *   DWORD dwCompletionKey,
+     *   ULONG_PTR dwCompletionKey,
      *   LPOVERLAPPED lpOverlapped
      * )
      */
     static native void PostQueuedCompletionStatus(long completionPort,
-        int completionKey) throws WindowsException;
+        long completionKey) throws WindowsException;
 
     /**
      * ReadDirectoryChangesW(

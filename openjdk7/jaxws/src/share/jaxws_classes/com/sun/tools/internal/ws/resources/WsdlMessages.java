@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.tools.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -90,18 +89,6 @@ public final class WsdlMessages {
         return localizer.localize(localizablePARSING_PARSE_FAILED());
     }
 
-    public static Localizable localizableVALIDATION_INVALID_PREFIX(Object arg0) {
-        return messageFactory.getMessage("validation.invalidPrefix", arg0);
-    }
-
-    /**
-     * undeclared namespace prefix: "{0}"
-     *
-     */
-    public static String VALIDATION_INVALID_PREFIX(Object arg0) {
-        return localizer.localize(localizableVALIDATION_INVALID_PREFIX(arg0));
-    }
-
     public static Localizable localizablePARSING_INVALID_ATTRIBUTE_VALUE(Object arg0, Object arg1) {
         return messageFactory.getMessage("parsing.invalidAttributeValue", arg0, arg1);
     }
@@ -124,18 +111,6 @@ public final class WsdlMessages {
      */
     public static String VALIDATION_INVALID_ATTRIBUTE_VALUE(Object arg0, Object arg1) {
         return localizer.localize(localizableVALIDATION_INVALID_ATTRIBUTE_VALUE(arg0, arg1));
-    }
-
-    public static Localizable localizableVALIDATION_INVALID_RANGE(Object arg0, Object arg1) {
-        return messageFactory.getMessage("validation.invalidRange", arg0, arg1);
-    }
-
-    /**
-     * invalid range found (min: {0}, max: {1})
-     *
-     */
-    public static String VALIDATION_INVALID_RANGE(Object arg0, Object arg1) {
-        return localizer.localize(localizableVALIDATION_INVALID_RANGE(arg0, arg1));
     }
 
     public static Localizable localizablePARSING_INVALID_TAG(Object arg0, Object arg1) {
@@ -235,18 +210,6 @@ public final class WsdlMessages {
         return localizer.localize(localizablePARSING_INVALID_WSDL_ELEMENT(arg0));
     }
 
-    public static Localizable localizableVALIDATION_INVALID_COMPLEX_TYPE_IN_ELEMENT(Object arg0, Object arg1) {
-        return messageFactory.getMessage("validation.invalidComplexTypeInElement", arg0, arg1);
-    }
-
-    /**
-     * invalid element: "{1}", has named complexType: "{0}"
-     *
-     */
-    public static String VALIDATION_INVALID_COMPLEX_TYPE_IN_ELEMENT(Object arg0, Object arg1) {
-        return localizer.localize(localizableVALIDATION_INVALID_COMPLEX_TYPE_IN_ELEMENT(arg0, arg1));
-    }
-
     public static Localizable localizablePARSING_NON_WHITESPACE_TEXT_FOUND(Object arg0) {
         return messageFactory.getMessage("parsing.nonWhitespaceTextFound", arg0);
     }
@@ -269,18 +232,6 @@ public final class WsdlMessages {
      */
     public static String INTERNALIZER_TARGET_NOT_FOUND(Object arg0) {
         return localizer.localize(localizableINTERNALIZER_TARGET_NOT_FOUND(arg0));
-    }
-
-    public static Localizable localizableVALIDATION_NOT_SIMPLE_TYPE(Object arg0) {
-        return messageFactory.getMessage("validation.notSimpleType", arg0);
-    }
-
-    /**
-     * not a simple type: "{0}"
-     *
-     */
-    public static String VALIDATION_NOT_SIMPLE_TYPE(Object arg0) {
-        return localizer.localize(localizableVALIDATION_NOT_SIMPLE_TYPE(arg0));
     }
 
     public static Localizable localizablePARSING_SAX_EXCEPTION_WITH_SYSTEM_ID(Object arg0) {
@@ -442,18 +393,6 @@ public final class WsdlMessages {
         return localizer.localize(localizableVALIDATION_MISSING_REQUIRED_ATTRIBUTE(arg0, arg1));
     }
 
-    public static Localizable localizableINTERNALIZER_X_PATH_EVAULATES_TO_TOO_MANY_TARGETS(Object arg0, Object arg1) {
-        return messageFactory.getMessage("internalizer.XPathEvaulatesToTooManyTargets", arg0, arg1);
-    }
-
-    /**
-     * XPath evaluation of "{0}" results in too many ({1}) target nodes
-     *
-     */
-    public static String INTERNALIZER_X_PATH_EVAULATES_TO_TOO_MANY_TARGETS(Object arg0, Object arg1) {
-        return localizer.localize(localizableINTERNALIZER_X_PATH_EVAULATES_TO_TOO_MANY_TARGETS(arg0, arg1));
-    }
-
     public static Localizable localizablePARSING_IO_EXCEPTION(Object arg0) {
         return messageFactory.getMessage("parsing.ioException", arg0);
     }
@@ -464,6 +403,18 @@ public final class WsdlMessages {
      */
     public static String PARSING_IO_EXCEPTION(Object arg0) {
         return localizer.localize(localizablePARSING_IO_EXCEPTION(arg0));
+    }
+
+    public static Localizable localizableINTERNALIZER_X_PATH_EVAULATES_TO_TOO_MANY_TARGETS(Object arg0, Object arg1) {
+        return messageFactory.getMessage("internalizer.XPathEvaulatesToTooManyTargets", arg0, arg1);
+    }
+
+    /**
+     * XPath evaluation of "{0}" results in too many ({1}) target nodes
+     *
+     */
+    public static String INTERNALIZER_X_PATH_EVAULATES_TO_TOO_MANY_TARGETS(Object arg0, Object arg1) {
+        return localizer.localize(localizableINTERNALIZER_X_PATH_EVAULATES_TO_TOO_MANY_TARGETS(arg0, arg1));
     }
 
     public static Localizable localizablePARSER_NOT_A_BINDING_FILE(Object arg0, Object arg1) {
@@ -536,18 +487,6 @@ public final class WsdlMessages {
      */
     public static String INTERNALIZER_X_PATH_EVALUATION_ERROR(Object arg0) {
         return localizer.localize(localizableINTERNALIZER_X_PATH_EVALUATION_ERROR(arg0));
-    }
-
-    public static Localizable localizableVALIDATION_INVALID_TOKEN(Object arg0) {
-        return messageFactory.getMessage("validation.invalidToken", arg0);
-    }
-
-    /**
-     * invalid token "{0}"
-     *
-     */
-    public static String VALIDATION_INVALID_TOKEN(Object arg0) {
-        return localizer.localize(localizableVALIDATION_INVALID_TOKEN(arg0));
     }
 
     public static Localizable localizableVALIDATION_INVALID_SUB_ENTITY(Object arg0, Object arg1) {
@@ -742,18 +681,6 @@ public final class WsdlMessages {
         return localizer.localize(localizableINVALID_WSDL(arg0, arg1, arg2, arg3));
     }
 
-    public static Localizable localizableVALIDATION_UNSUPPORTED_SCHEMA_FEATURE(Object arg0) {
-        return messageFactory.getMessage("validation.unsupportedSchemaFeature", arg0);
-    }
-
-    /**
-     * unsupported XML Schema feature: "{0}"
-     *
-     */
-    public static String VALIDATION_UNSUPPORTED_SCHEMA_FEATURE(Object arg0) {
-        return localizer.localize(localizableVALIDATION_UNSUPPORTED_SCHEMA_FEATURE(arg0));
-    }
-
     public static Localizable localizablePARSING_UNKNOWN_IMPORTED_DOCUMENT_TYPE(Object arg0) {
         return messageFactory.getMessage("parsing.unknownImportedDocumentType", arg0);
     }
@@ -800,6 +727,18 @@ public final class WsdlMessages {
      */
     public static String PARSING_WSDL_NOT_DEFAULT_NAMESPACE(Object arg0) {
         return localizer.localize(localizablePARSING_WSDL_NOT_DEFAULT_NAMESPACE(arg0));
+    }
+
+    public static Localizable localizablePARSING_UNKNOWN_EXTENSIBILITY_ELEMENT_OR_ATTRIBUTE(Object arg0, Object arg1) {
+        return messageFactory.getMessage("parsing.unknownExtensibilityElementOrAttribute", arg0, arg1);
+    }
+
+    /**
+     * unknown extensibility element or attribute "{0}" (in namespace "{1}")
+     *
+     */
+    public static String PARSING_UNKNOWN_EXTENSIBILITY_ELEMENT_OR_ATTRIBUTE(Object arg0, Object arg1) {
+        return localizer.localize(localizablePARSING_UNKNOWN_EXTENSIBILITY_ELEMENT_OR_ATTRIBUTE(arg0, arg1));
     }
 
     public static Localizable localizableVALIDATION_DUPLICATED_ELEMENT(Object arg0) {
@@ -915,7 +854,7 @@ public final class WsdlMessages {
     }
 
     /**
-     * Not a WSI-BP compliant WSDL (R2002). wsdl:import must not be used to import XML Schema embedded in the WSDL document. Expected wsdl namespace: {0}, found: {1}
+     * Not a WSI-BP compliant WSDL (R2002). wsdl:import must not be used to import XML Schema embedded in the WSDL document. Expected WSDL namespace: {0}, found: {1}
      *
      */
     public static String WARNING_WSI_R_2002(Object arg0, Object arg1) {
@@ -999,7 +938,7 @@ public final class WsdlMessages {
     }
 
     /**
-     * failed.noservice=Could not find wsdl:service in the provided WSDL(s):
+     * Could not find wsdl:service in the provided WSDL(s):
      *
      * {0} At least one WSDL with at least one service definition needs to be provided.
      *

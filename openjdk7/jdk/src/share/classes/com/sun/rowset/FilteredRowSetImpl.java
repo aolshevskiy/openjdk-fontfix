@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -66,6 +66,7 @@ public class FilteredRowSetImpl extends WebRowSetImpl implements Serializable, C
      * @param env a Hashtable containing a desired synchconizatation provider
      * name-value pair.
      */
+    @SuppressWarnings("rawtypes")
     public FilteredRowSetImpl(Hashtable env) throws SQLException {
         super(env);
     }
@@ -127,7 +128,7 @@ public class FilteredRowSetImpl extends WebRowSetImpl implements Serializable, C
          for(int rows=this.getRow(); rows<=this.size();rows++) {
              bool = super.internalNext();
 
-             if( p == null) {
+             if( !bool || p == null) {
                return bool;
              }
              if(p.evaluate(this)){
@@ -838,7 +839,7 @@ public class FilteredRowSetImpl extends WebRowSetImpl implements Serializable, C
 
       if(onInsertRow) {
          if(p != null) {
-            bool = p.evaluate(new Float(x) , columnIndex);
+            bool = p.evaluate(Float.valueOf(x), columnIndex);
 
             if(!bool) {
                throw new SQLException(resBundle.handleGetObject("filteredrowsetimpl.notallowed").toString());
@@ -905,7 +906,7 @@ public class FilteredRowSetImpl extends WebRowSetImpl implements Serializable, C
 
       if(onInsertRow) {
          if(p != null) {
-            bool = p.evaluate(new Double(x) , columnIndex);
+            bool = p.evaluate(Double.valueOf(x) , columnIndex);
 
             if(!bool) {
                throw new SQLException(resBundle.handleGetObject("filteredrowsetimpl.notallowed").toString());

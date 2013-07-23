@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,6 @@
 #include "gc_implementation/parallelScavenge/psMarkSweep.hpp"
 #include "gc_implementation/parallelScavenge/psMarkSweepDecorator.hpp"
 #include "gc_implementation/parallelScavenge/psOldGen.hpp"
-#include "gc_implementation/parallelScavenge/psPermGen.hpp"
 #include "gc_implementation/parallelScavenge/psScavenge.hpp"
 #include "gc_implementation/parallelScavenge/psYoungGen.hpp"
 #include "gc_implementation/shared/gcHeapSummary.hpp"
@@ -40,6 +39,7 @@
 #include "gc_implementation/shared/gcTrace.hpp"
 #include "gc_implementation/shared/gcTraceTime.hpp"
 #include "gc_implementation/shared/isGCActiveMark.hpp"
+#include "gc_implementation/shared/markSweep.hpp"
 #include "gc_implementation/shared/spaceDecorator.hpp"
 #include "gc_interface/gcCause.hpp"
 #include "memory/gcLocker.inline.hpp"
@@ -56,7 +56,6 @@
 #include "utilities/stack.inline.hpp"
 
 elapsedTimer        PSMarkSweep::_accumulated_time;
-unsigned int        PSMarkSweep::_total_invocations = 0;
 jlong               PSMarkSweep::_time_of_last_gc   = 0;
 CollectorCounters*  PSMarkSweep::_counters = NULL;
 
@@ -97,8 +96,8 @@ void PSMarkSweep::invoke(bool maximum_heap_compaction) {
   const bool clear_all_soft_refs =
     heap->collector_policy()->should_clear_all_soft_refs();
 
-  int count = (maximum_heap_compaction)?1:MarkSweepAlwaysCompactCount;
-  IntFlagSetting flag_setting(MarkSweepAlwaysCompactCount, count);
+  uint count = maximum_heap_compaction ? 1 : MarkSweepAlwaysCompactCount;
+  UIntFlagSetting flag_setting(MarkSweepAlwaysCompactCount, count);
   PSMarkSweep::invoke_no_policy(clear_all_soft_refs || maximum_heap_compaction);
 }
 
@@ -127,7 +126,6 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
 
   PSYoungGen* young_gen = heap->young_gen();
   PSOldGen* old_gen = heap->old_gen();
-  PSPermGen* perm_gen = heap->perm_gen();
 
   // Increment the invocation count
   heap->increment_total_collections(true /* full */);
@@ -149,15 +147,13 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
 
   if (VerifyBeforeGC && heap->total_collections() >= VerifyGCStartAt) {
     HandleMark hm;  // Discard invalid handles created during verification
-    gclog_or_tty->print(" VerifyBeforeGC:");
-    Universe::verify();
+    Universe::verify(" VerifyBeforeGC:");
   }
 
   // Verify object start arrays
   if (VerifyObjectStartArray &&
       VerifyBeforeGC) {
     old_gen->verify_object_start_array();
-    perm_gen->verify_object_start_array();
   }
 
   heap->pre_full_gc_dump(_gc_timer);
@@ -181,8 +177,6 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
     // Let the size policy know we're starting
     size_policy->major_collection_begin();
 
-    // When collecting the permanent generation methodOops may be moving,
-    // so we either have to flush all bcp data or convert it into bci.
     CodeCache::gc_prologue();
     Threads::gc_prologue();
     BiasedLocking::preserve_marks();
@@ -190,8 +184,8 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
     // Capture heap size before collection for printing.
     size_t prev_used = heap->used();
 
-    // Capture perm gen size before collection for sizing.
-    size_t perm_gen_prev_used = perm_gen->used_in_bytes();
+    // Capture metadata size before collection for sizing.
+    size_t metadata_prev_used = MetaspaceAux::allocated_used_bytes();
 
     // For PrintGCDetails
     size_t old_gen_prev_used = old_gen->used_in_bytes();
@@ -243,15 +237,16 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
     if (bs->is_a(BarrierSet::ModRef)) {
       ModRefBarrierSet* modBS = (ModRefBarrierSet*)bs;
       MemRegion old_mr = heap->old_gen()->reserved();
-      MemRegion perm_mr = heap->perm_gen()->reserved();
-      assert(perm_mr.end() <= old_mr.start(), "Generations out of order");
-
       if (young_gen_empty) {
-        modBS->clear(MemRegion(perm_mr.start(), old_mr.end()));
+        modBS->clear(MemRegion(old_mr.start(), old_mr.end()));
       } else {
-        modBS->invalidate(MemRegion(perm_mr.start(), old_mr.end()));
+        modBS->invalidate(MemRegion(old_mr.start(), old_mr.end()));
       }
     }
+
+    // Delete metaspaces for unloaded class loaders and clean up loader_data graph
+    ClassLoaderDataGraph::purge();
+    MetaspaceAux::verify_metrics();
 
     BiasedLocking::restore_marks();
     Threads::gc_epilogue();
@@ -276,10 +271,8 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
         gclog_or_tty->print_cr(" collection: %d ",
                        heap->total_collections());
         if (Verbose) {
-          gclog_or_tty->print("old_gen_capacity: %d young_gen_capacity: %d"
-            " perm_gen_capacity: %d ",
-            old_gen->capacity_in_bytes(), young_gen->capacity_in_bytes(),
-            perm_gen->capacity_in_bytes());
+          gclog_or_tty->print("old_gen_capacity: %d young_gen_capacity: %d",
+            old_gen->capacity_in_bytes(), young_gen->capacity_in_bytes());
         }
       }
 
@@ -293,19 +286,36 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
           young_gen->from_space()->capacity_in_bytes() +
           young_gen->to_space()->capacity_in_bytes(),
           "Sizes of space in young gen are out-of-bounds");
+
+        size_t young_live = young_gen->used_in_bytes();
+        size_t eden_live = young_gen->eden_space()->used_in_bytes();
+        size_t old_live = old_gen->used_in_bytes();
+        size_t cur_eden = young_gen->eden_space()->capacity_in_bytes();
+        size_t max_old_gen_size = old_gen->max_gen_size();
         size_t max_eden_size = young_gen->max_size() -
           young_gen->from_space()->capacity_in_bytes() -
           young_gen->to_space()->capacity_in_bytes();
-        size_policy->compute_generation_free_space(young_gen->used_in_bytes(),
-                                 young_gen->eden_space()->used_in_bytes(),
-                                 old_gen->used_in_bytes(),
-                                 perm_gen->used_in_bytes(),
-                                 young_gen->eden_space()->capacity_in_bytes(),
-                                 old_gen->max_gen_size(),
-                                 max_eden_size,
-                                 true /* full gc*/,
-                                 gc_cause,
-                                 heap->collector_policy());
+
+        // Used for diagnostics
+        size_policy->clear_generation_free_space_flags();
+
+        size_policy->compute_generations_free_space(young_live,
+                                                    eden_live,
+                                                    old_live,
+                                                    cur_eden,
+                                                    max_old_gen_size,
+                                                    max_eden_size,
+                                                    true /* full gc*/);
+
+        size_policy->check_gc_overhead_limit(young_live,
+                                             eden_live,
+                                             max_old_gen_size,
+                                             max_eden_size,
+                                             true /* full gc*/,
+                                             gc_cause,
+                                             heap->collector_policy());
+
+        size_policy->decay_supplemental_growth(true /* full gc*/);
 
         heap->resize_old_gen(size_policy->calculated_old_free_size_in_bytes());
 
@@ -332,8 +342,8 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
 
     heap->resize_all_tlabs();
 
-    // We collected the perm gen, so we'll resize it here.
-    perm_gen->compute_new_size(perm_gen_prev_used);
+    // We collected the heap, recalculate the metaspace capacity
+    MetaspaceGC::compute_new_size();
 
     if (TraceGen1Time) accumulated_time()->stop();
 
@@ -345,11 +355,8 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
         old_gen->print_used_change(old_gen_prev_used);
       }
       heap->print_heap_change(prev_used);
-      // Do perm gen after heap becase prev_used does
-      // not include the perm gen (done this way in the other
-      // collectors).
       if (PrintGCDetails) {
-        perm_gen->print_used_change(perm_gen_prev_used);
+        MetaspaceAux::print_metaspace_change(metadata_prev_used);
       }
     }
 
@@ -360,20 +367,17 @@ bool PSMarkSweep::invoke_no_policy(bool clear_all_softrefs) {
 
   if (VerifyAfterGC && heap->total_collections() >= VerifyGCStartAt) {
     HandleMark hm;  // Discard invalid handles created during verification
-    gclog_or_tty->print(" VerifyAfterGC:");
-    Universe::verify();
+    Universe::verify(" VerifyAfterGC:");
   }
 
   // Re-verify object start arrays
   if (VerifyObjectStartArray &&
       VerifyAfterGC) {
     old_gen->verify_object_start_array();
-    perm_gen->verify_object_start_array();
   }
 
   if (ZapUnusedHeapArea) {
     old_gen->object_space()->check_mangled_unused_area_complete();
-    perm_gen->object_space()->check_mangled_unused_area_complete();
   }
 
   NOT_PRODUCT(ref_processor()->verify_no_references_recorded());
@@ -504,8 +508,6 @@ void PSMarkSweep::deallocate_stacks() {
   _preserved_oop_stack.clear(true);
   _marking_stack.clear();
   _objarray_stack.clear(true);
-  _revisit_klass_stack.clear(true);
-  _revisit_mdo_stack.clear(true);
 }
 
 void PSMarkSweep::mark_sweep_phase1(bool clear_all_softrefs) {
@@ -516,18 +518,23 @@ void PSMarkSweep::mark_sweep_phase1(bool clear_all_softrefs) {
   ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
   assert(heap->kind() == CollectedHeap::ParallelScavengeHeap, "Sanity");
 
+  // Need to clear claim bits before the tracing starts.
+  ClassLoaderDataGraph::clear_claimed_marks();
+
   // General strong roots.
   {
     ParallelScavengeHeap::ParStrongRootsScope psrs;
     Universe::oops_do(mark_and_push_closure());
     JNIHandles::oops_do(mark_and_push_closure());   // Global (strong) JNI handles
+    CLDToOopClosure mark_and_push_from_cld(mark_and_push_closure());
     CodeBlobToOopClosure each_active_code_blob(mark_and_push_closure(), /*do_marking=*/ true);
-    Threads::oops_do(mark_and_push_closure(), &each_active_code_blob);
+    Threads::oops_do(mark_and_push_closure(), &mark_and_push_from_cld, &each_active_code_blob);
     ObjectSynchronizer::oops_do(mark_and_push_closure());
     FlatProfiler::oops_do(mark_and_push_closure());
     Management::oops_do(mark_and_push_closure());
     JvmtiExport::oops_do(mark_and_push_closure());
     SystemDictionary::always_strong_oops_do(mark_and_push_closure());
+    ClassLoaderDataGraph::always_strong_oops_do(mark_and_push_closure(), follow_klass_closure(), true);
     // Do not treat nmethods as strong roots for mark/sweep, since we can unload them.
     //CodeCache::scavenge_root_nmethods_do(CodeBlobToOopClosure(mark_and_push_closure()));
   }
@@ -544,28 +551,23 @@ void PSMarkSweep::mark_sweep_phase1(bool clear_all_softrefs) {
     gc_tracer()->report_gc_reference_stats(stats);
   }
 
-  // Follow system dictionary roots and unload classes
+  // This is the point where the entire marking should have completed.
+  assert(_marking_stack.is_empty(), "Marking should have completed");
+
+  // Unload classes and purge the SystemDictionary.
   bool purged_class = SystemDictionary::do_unloading(is_alive_closure());
 
-  // Follow code cache roots
-  CodeCache::do_unloading(is_alive_closure(), mark_and_push_closure(),
-                          purged_class);
-  follow_stack(); // Flush marking stack
+  // Unload nmethods.
+  CodeCache::do_unloading(is_alive_closure(), purged_class);
 
-  // Update subklass/sibling/implementor links of live klasses
-  follow_weak_klass_links();
-  assert(_marking_stack.is_empty(), "just drained");
+  // Prune dead klasses from subklass/sibling/implementor lists.
+  Klass::clean_weak_klass_links(is_alive_closure());
 
-  // Visit memoized mdo's and clear unmarked weak refs
-  follow_mdo_weak_refs();
-  assert(_marking_stack.is_empty(), "just drained");
-
-  // Visit interned string tables and delete unmarked oops
+  // Delete entries for dead interned strings.
   StringTable::unlink(is_alive_closure());
+
   // Clean up unreferenced symbols in symbol table.
   SymbolTable::unlink();
-
-  assert(_marking_stack.is_empty(), "stack should be empty by now");
   _gc_tracer->report_object_count_after_gc(is_alive_closure());
 }
 
@@ -576,13 +578,6 @@ void PSMarkSweep::mark_sweep_phase2() {
 
   // Now all live objects are marked, compute the new object addresses.
 
-  // It is imperative that we traverse perm_gen LAST. If dead space is
-  // allowed a range of dead object may get overwritten by a dead int
-  // array. If perm_gen is not traversed last a klassOop may get
-  // overwritten. This is fine since it is dead, but if the class has dead
-  // instances we have to skip them, and in order to find their size we
-  // need the klassOop!
-  //
   // It is not required that we traverse spaces in the same order in
   // phase2, phase3 and phase4, but the ValidateMarkSweep live oops
   // tracking expects us to do so. See comment under phase4.
@@ -591,24 +586,17 @@ void PSMarkSweep::mark_sweep_phase2() {
   assert(heap->kind() == CollectedHeap::ParallelScavengeHeap, "Sanity");
 
   PSOldGen* old_gen = heap->old_gen();
-  PSPermGen* perm_gen = heap->perm_gen();
 
   // Begin compacting into the old gen
   PSMarkSweepDecorator::set_destination_decorator_tenured();
 
   // This will also compact the young gen spaces.
   old_gen->precompact();
-
-  // Compact the perm gen into the perm gen
-  PSMarkSweepDecorator::set_destination_decorator_perm_gen();
-
-  perm_gen->precompact();
 }
 
 // This should be moved to the shared markSweep code!
 class PSAlwaysTrueClosure: public BoolObjectClosure {
 public:
-  void do_object(oop p) { ShouldNotReachHere(); }
   bool do_object_b(oop p) { return true; }
 };
 static PSAlwaysTrueClosure always_true;
@@ -623,35 +611,37 @@ void PSMarkSweep::mark_sweep_phase3() {
 
   PSYoungGen* young_gen = heap->young_gen();
   PSOldGen* old_gen = heap->old_gen();
-  PSPermGen* perm_gen = heap->perm_gen();
+
+  // Need to clear claim bits before the tracing starts.
+  ClassLoaderDataGraph::clear_claimed_marks();
 
   // General strong roots.
-  Universe::oops_do(adjust_root_pointer_closure());
-  JNIHandles::oops_do(adjust_root_pointer_closure());   // Global (strong) JNI handles
-  Threads::oops_do(adjust_root_pointer_closure(), NULL);
-  ObjectSynchronizer::oops_do(adjust_root_pointer_closure());
-  FlatProfiler::oops_do(adjust_root_pointer_closure());
-  Management::oops_do(adjust_root_pointer_closure());
-  JvmtiExport::oops_do(adjust_root_pointer_closure());
+  Universe::oops_do(adjust_pointer_closure());
+  JNIHandles::oops_do(adjust_pointer_closure());   // Global (strong) JNI handles
+  CLDToOopClosure adjust_from_cld(adjust_pointer_closure());
+  Threads::oops_do(adjust_pointer_closure(), &adjust_from_cld, NULL);
+  ObjectSynchronizer::oops_do(adjust_pointer_closure());
+  FlatProfiler::oops_do(adjust_pointer_closure());
+  Management::oops_do(adjust_pointer_closure());
+  JvmtiExport::oops_do(adjust_pointer_closure());
   // SO_AllClasses
-  SystemDictionary::oops_do(adjust_root_pointer_closure());
-  //CodeCache::scavenge_root_nmethods_oops_do(adjust_root_pointer_closure());
+  SystemDictionary::oops_do(adjust_pointer_closure());
+  ClassLoaderDataGraph::oops_do(adjust_pointer_closure(), adjust_klass_closure(), true);
 
   // Now adjust pointers in remaining weak roots.  (All of which should
   // have been cleared if they pointed to non-surviving objects.)
   // Global (weak) JNI handles
-  JNIHandles::weak_oops_do(&always_true, adjust_root_pointer_closure());
+  JNIHandles::weak_oops_do(&always_true, adjust_pointer_closure());
 
   CodeCache::oops_do(adjust_pointer_closure());
-  StringTable::oops_do(adjust_root_pointer_closure());
-  ref_processor()->weak_oops_do(adjust_root_pointer_closure());
-  PSScavenge::reference_processor()->weak_oops_do(adjust_root_pointer_closure());
+  StringTable::oops_do(adjust_pointer_closure());
+  ref_processor()->weak_oops_do(adjust_pointer_closure());
+  PSScavenge::reference_processor()->weak_oops_do(adjust_pointer_closure());
 
   adjust_marks();
 
   young_gen->adjust_pointers();
   old_gen->adjust_pointers();
-  perm_gen->adjust_pointers();
 }
 
 void PSMarkSweep::mark_sweep_phase4() {
@@ -661,18 +651,12 @@ void PSMarkSweep::mark_sweep_phase4() {
 
   // All pointers are now adjusted, move objects accordingly
 
-  // It is imperative that we traverse perm_gen first in phase4. All
-  // classes must be allocated earlier than their instances, and traversing
-  // perm_gen first makes sure that all klassOops have moved to their new
-  // location before any instance does a dispatch through it's klass!
   ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
   assert(heap->kind() == CollectedHeap::ParallelScavengeHeap, "Sanity");
 
   PSYoungGen* young_gen = heap->young_gen();
   PSOldGen* old_gen = heap->old_gen();
-  PSPermGen* perm_gen = heap->perm_gen();
 
-  perm_gen->compact();
   old_gen->compact();
   young_gen->compact();
 }

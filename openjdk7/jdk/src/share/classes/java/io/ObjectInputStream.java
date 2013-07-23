@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -690,9 +690,9 @@ public class ObjectInputStream
         boolean hasNonPublicInterface = false;
 
         // define proxy in class loader of non-public interface(s), if any
-        Class[] classObjs = new Class[interfaces.length];
+        Class<?>[] classObjs = new Class<?>[interfaces.length];
         for (int i = 0; i < interfaces.length; i++) {
-            Class cl = Class.forName(interfaces[i], false, latestLoader);
+            Class<?> cl = Class.forName(interfaces[i], false, latestLoader);
             if ((cl.getModifiers() & Modifier.PUBLIC) == 0) {
                 if (hasNonPublicInterface) {
                     if (nonPublicLoader != cl.getClassLoader()) {
@@ -1230,7 +1230,7 @@ public class ObjectInputStream
      * "enableSubclassImplementation" SerializablePermission is checked.
      */
     private void verifySubclass() {
-        Class cl = getClass();
+        Class<?> cl = getClass();
         if (cl == ObjectInputStream.class) {
             return;
         }
@@ -1474,12 +1474,12 @@ public class ObjectInputStream
      * ClassNotFoundException will be associated with the class' handle in the
      * handle table).
      */
-    private Class readClass(boolean unshared) throws IOException {
+    private Class<?> readClass(boolean unshared) throws IOException {
         if (bin.readByte() != TC_CLASS) {
             throw new InternalError();
         }
         ObjectStreamClass desc = readClassDesc(false);
-        Class cl = desc.forClass();
+        Class<?> cl = desc.forClass();
         passHandle = handles.assign(unshared ? unsharedMarker : cl);
 
         ClassNotFoundException resolveEx = desc.getResolveException();
@@ -1549,7 +1549,7 @@ public class ObjectInputStream
             ifaces[i] = bin.readUTF();
         }
 
-        Class cl = null;
+        Class<?> cl = null;
         ClassNotFoundException resolveEx = null;
         bin.setBlockDataMode(true);
         try {
@@ -1602,7 +1602,7 @@ public class ObjectInputStream
                 "failed to read class descriptor").initCause(ex);
         }
 
-        Class cl = null;
+        Class<?> cl = null;
         ClassNotFoundException resolveEx = null;
         bin.setBlockDataMode(true);
         final boolean checksRequired = isCustomSubclass();
@@ -1662,7 +1662,7 @@ public class ObjectInputStream
         int len = bin.readInt();
 
         Object array = null;
-        Class cl, ccl = null;
+        Class<?> cl, ccl = null;
         if ((cl = desc.forClass()) != null) {
             ccl = cl.getComponentType();
             array = Array.newInstance(ccl, len);
@@ -1715,7 +1715,7 @@ public class ObjectInputStream
      * Reads in and returns enum constant, or null if enum type is
      * unresolvable.  Sets passHandle to enum constant's assigned handle.
      */
-    private Enum readEnum(boolean unshared) throws IOException {
+    private Enum<?> readEnum(boolean unshared) throws IOException {
         if (bin.readByte() != TC_ENUM) {
             throw new InternalError();
         }
@@ -1732,24 +1732,26 @@ public class ObjectInputStream
         }
 
         String name = readString(false);
-        Enum en = null;
-        Class cl = desc.forClass();
+        Enum<?> result = null;
+        Class<?> cl = desc.forClass();
         if (cl != null) {
             try {
-                en = Enum.valueOf(cl, name);
+                @SuppressWarnings("unchecked")
+                Enum<?> en = Enum.valueOf((Class)cl, name);
+                result = en;
             } catch (IllegalArgumentException ex) {
                 throw (IOException) new InvalidObjectException(
                     "enum constant " + name + " does not exist in " +
                     cl).initCause(ex);
             }
             if (!unshared) {
-                handles.setObject(enumHandle, en);
+                handles.setObject(enumHandle, result);
             }
         }
 
         handles.finish(enumHandle);
         passHandle = enumHandle;
-        return en;
+        return result;
     }
 
     /**
@@ -1966,7 +1968,7 @@ public class ObjectInputStream
         throws IOException
     {
         // REMIND: is isInstance check necessary?
-        Class cl = desc.forClass();
+        Class<?> cl = desc.forClass();
         if (cl != null && obj != null && !cl.isInstance(obj)) {
             throw new ClassCastException();
         }
@@ -2165,7 +2167,7 @@ public class ObjectInputStream
          * class descriptor, returns -1.  Throws IllegalArgumentException if
          * neither incoming nor local class descriptor contains a match.
          */
-        private int getFieldOffset(String name, Class type) {
+        private int getFieldOffset(String name, Class<?> type) {
             ObjectStreamField field = desc.getField(name, type);
             if (field != null) {
                 return field.getOffset();
@@ -2863,6 +2865,7 @@ public class ObjectInputStream
             return readUTFBody(readUnsignedShort());
         }
 
+        @SuppressWarnings("deprecation")
         public String readLine() throws IOException {
             return din.readLine();      // deprecated, not worth optimizing
         }

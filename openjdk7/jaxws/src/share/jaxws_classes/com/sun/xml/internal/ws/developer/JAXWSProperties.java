@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -61,7 +61,7 @@ public interface JAXWSProperties {
 
     /**
      * Set this property on the {@link BindingProvider#getRequestContext()} to
-     * enable {@link HttpURLConnection#httpConnection.setReadTimeout(int)}
+     * enable {@link HttpURLConnection#setReadTimeout(int)}
      *
      *<p>
      * int timeout = ...;
@@ -231,4 +231,5 @@ public interface JAXWSProperties {
      * @since 2.1.4
      */
     public static final String REST_BINDING = "http://jax-ws.dev.java.net/rest";
+
 }

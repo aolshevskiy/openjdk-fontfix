@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -362,12 +362,13 @@ public class TestHttpCookie {
         eq(c1, c2, false);
 
         header("Test domainMatches()");
-        dm(".foo.com",  "y.x.foo.com",      false);
-        dm(".foo.com",  "x.foo.com",        true);
-        dm(".com",      "whatever.com",     false);
-        dm(".com.",     "whatever.com",     false);
-        dm(".ajax.com", "ajax.com",         true);
-        dm(".local",    "example.local",    true);
+        dm(".foo.com",      "y.x.foo.com",      false);
+        dm(".foo.com",      "x.foo.com",        true);
+        dm(".com",          "whatever.com",     false);
+        dm(".com.",         "whatever.com",     false);
+        dm(".ajax.com",     "ajax.com",         true);
+        dm(".local",        "example.local",    true);
+        dm("example.local", "example",          true);
 
         // bug 6277808
         testCount++;

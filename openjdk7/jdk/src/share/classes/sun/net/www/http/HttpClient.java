@@ -125,7 +125,7 @@ public class HttpClient extends NetworkClient {
 
     private static final PlatformLogger logger = HttpURLConnection.getHttpLogger();
     private static void logFinest(String msg) {
-        if (logger.isLoggable(PlatformLogger.FINEST)) {
+        if (logger.isLoggable(PlatformLogger.Level.FINEST)) {
             logger.finest(msg);
         }
     }
@@ -439,7 +439,7 @@ public class HttpClient extends NetworkClient {
                 new BufferedOutputStream(out),
                                          false, encoding);
         } catch (UnsupportedEncodingException e) {
-            throw new InternalError(encoding+" encoding not found");
+            throw new InternalError(encoding+" encoding not found", e);
         }
         serverSocket.setTcpNoDelay(true);
     }
@@ -549,9 +549,7 @@ public class HttpClient extends NetworkClient {
 
     public String getURLFile() throws IOException {
 
-        String fileName = url.getFile();
-        if ((fileName == null) || (fileName.length() == 0))
-            fileName = "/";
+        String fileName;
 
         /**
          * proxyDisabled is set by subclass HttpsClient!
@@ -575,8 +573,24 @@ public class HttpClient extends NetworkClient {
                 result.append(url.getQuery());
             }
 
-            fileName =  result.toString();
+            fileName = result.toString();
+        } else {
+            fileName = url.getFile();
+
+            if ((fileName == null) || (fileName.length() == 0)) {
+                fileName = "/";
+            } else if (fileName.charAt(0) == '?') {
+                /* HTTP/1.1 spec says in 5.1.2. about Request-URI:
+                 * "Note that the absolute path cannot be empty; if
+                 * none is present in the original URI, it MUST be
+                 * given as "/" (the server root)."  So if the file
+                 * name here has only a query string, the path is
+                 * empty and we also have to add a "/".
+                 */
+                fileName = "/" + fileName;
+            }
         }
+
         if (fileName.indexOf('\n') == -1)
             return fileName;
         else
@@ -755,7 +769,7 @@ public class HttpClient extends NetworkClient {
                     failedOnce = true;
                     if (getRequestMethod().equals("CONNECT") ||
                         (httpuc.getRequestMethod().equals("POST") &&
-                        (!retryPostProp || streaming))) {
+                         (!retryPostProp || streaming))) {
                         // do not retry the request
                     } else {
                         closeServer();
@@ -941,7 +955,7 @@ public class HttpClient extends NetworkClient {
         if (requests != null) {
             String requestLine = requests.getKey(0);
             if (requestLine != null) {
-                return requestLine.split("\\s+")[0];
+               return requestLine.split("\\s+")[0];
             }
         }
         return "";

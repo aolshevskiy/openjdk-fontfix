@@ -117,6 +117,7 @@ static jfieldID IL_offset_fID;
 static jfieldID IL_nextRowOffset_fID;
 static jfieldID IL_width_fID;
 static jfieldID IL_height_fID;
+static jfieldID IL_imageAtOnce_fID;
 static jfieldID PF_ID_fID;
 
 JavaVM *javaVM;
@@ -159,7 +160,8 @@ void LCMS_freeTransform(JNIEnv *env, jlong ID)
  */
 JNIEXPORT jlong JNICALL Java_sun_java2d_cmm_lcms_LCMS_createNativeTransform
   (JNIEnv *env, jclass cls, jlongArray profileIDs, jint renderType,
-   jint inFormatter, jint outFormatter, jobject disposerRef)
+   jint inFormatter, jboolean isInIntPacked,
+   jint outFormatter, jboolean isOutIntPacked, jobject disposerRef)
 {
     cmsHPROFILE _iccArray[DF_ICC_BUF_SIZE];
     cmsHPROFILE *iccArray = &_iccArray[0];
@@ -169,6 +171,16 @@ JNIEXPORT jlong JNICALL Java_sun_java2d_cmm_lcms_LCMS_createNativeTransform
 
     size = (*env)->GetArrayLength (env, profileIDs);
     ids = (*env)->GetPrimitiveArrayCritical(env, profileIDs, 0);
+
+#ifdef _LITTLE_ENDIAN
+    /* Reversing data packed into int for LE archs */
+    if (isInIntPacked) {
+        inFormatter ^= DOSWAP_SH(1);
+    }
+    if (isOutIntPacked) {
+        outFormatter ^= DOSWAP_SH(1);
+    }
+#endif
 
     if (DF_ICC_BUF_SIZE < size*2) {
         iccArray = (cmsHPROFILE*) malloc(
@@ -226,7 +238,7 @@ JNIEXPORT jlong JNICALL Java_sun_java2d_cmm_lcms_LCMS_createNativeTransform
  * Method:    loadProfile
  * Signature: ([B)J
  */
-JNIEXPORT jlong JNICALL Java_sun_java2d_cmm_lcms_LCMS_loadProfile
+JNIEXPORT jlong JNICALL Java_sun_java2d_cmm_lcms_LCMS_loadProfileNative
   (JNIEnv *env, jobject obj, jbyteArray data)
 {
     jbyte* dataArray;
@@ -253,6 +265,16 @@ JNIEXPORT jlong JNICALL Java_sun_java2d_cmm_lcms_LCMS_loadProfile
 
     if (sProf.pf == NULL) {
         JNU_ThrowIllegalArgumentException(env, "Invalid profile data");
+    } else {
+        /* Sanity check: try to save the profile in order
+         * to force basic validation.
+         */
+        cmsUInt32Number pfSize = 0;
+        if (!cmsSaveProfileToMem(sProf.pf, NULL, &pfSize) ||
+            pfSize < sizeof(cmsICCHeader))
+        {
+            JNU_ThrowIllegalArgumentException(env, "Invalid profile data");
+        }
     }
 
     return sProf.j;
@@ -263,7 +285,7 @@ JNIEXPORT jlong JNICALL Java_sun_java2d_cmm_lcms_LCMS_loadProfile
  * Method:    freeProfile
  * Signature: (J)V
  */
-JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_freeProfile
+JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_freeProfileNative
   (JNIEnv *env, jobject obj, jlong id)
 {
     storeID_t sProf;
@@ -348,48 +370,22 @@ static cmsBool _getHeaderInfo(cmsHPROFILE pf, jbyte* pBuffer, jint bufferSize);
 static cmsBool _setHeaderInfo(cmsHPROFILE pf, jbyte* pBuffer, jint bufferSize);
 static cmsBool _writeCookedTag(cmsHPROFILE pfTarget, cmsTagSignature sig, jbyte *pData, jint size);
 
-/*
- * Class:     sun_java2d_cmm_lcms_LCMS
- * Method:    getTagSize
- * Signature: (JI)I
- */
-JNIEXPORT jint JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagSize
-  (JNIEnv *env, jobject obj, jlong id, jint tagSig)
-{
-    storeID_t sProf;
-    TagSignature_t sig;
-    jint result = -1;
-
-    sProf.j = id;
-    sig.j = tagSig;
-
-    if (tagSig == SigHead) {
-        result = sizeof(cmsICCHeader);
-    } else {
-      if (cmsIsTag(sProf.pf, sig.cms)) {
-          result = cmsReadRawTag(sProf.pf, sig.cms, NULL, 0);
-        } else {
-            JNU_ThrowByName(env, "java/awt/color/CMMException",
-                            "ICC profile tag not found");
-        }
-    }
-
-    return result;
-}
 
 /*
  * Class:     sun_java2d_cmm_lcms_LCMS
  * Method:    getTagData
  * Signature: (JI[B)V
  */
-JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagData
-  (JNIEnv *env, jobject obj, jlong id, jint tagSig, jbyteArray data)
+JNIEXPORT jbyteArray JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagNative
+  (JNIEnv *env, jobject obj, jlong id, jint tagSig)
 {
     storeID_t sProf;
     TagSignature_t sig;
     cmsInt32Number tagSize;
 
-    jbyte* dataArray;
+    jbyte* dataArray = NULL;
+    jbyteArray data = NULL;
+
     jint bufSize;
 
     sProf.j = id;
@@ -398,12 +394,14 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagData
     if (tagSig == SigHead) {
         cmsBool status;
 
-        bufSize =(*env)->GetArrayLength(env, data);
+        // allocate java array
+        bufSize = sizeof(cmsICCHeader);
+        data = (*env)->NewByteArray(env, bufSize);
 
-        if (bufSize < sizeof(cmsICCHeader)) {
-           JNU_ThrowByName(env, "java/awt/color/CMMException",
-                            "Insufficient buffer capacity");
-           return;
+        if (data == NULL) {
+            JNU_ThrowByName(env, "java/awt/color/CMMException",
+                            "Unable to allocate buffer");
+            return NULL;
         }
 
         dataArray = (*env)->GetByteArrayElements (env, data, 0);
@@ -411,7 +409,7 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagData
         if (dataArray == NULL) {
            JNU_ThrowByName(env, "java/awt/color/CMMException",
                             "Unable to get buffer");
-           return;
+           return NULL;
         }
 
         status = _getHeaderInfo(sProf.pf, dataArray, bufSize);
@@ -421,9 +419,10 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagData
         if (!status) {
             JNU_ThrowByName(env, "java/awt/color/CMMException",
                             "ICC Profile header not found");
+            return NULL;
         }
 
-        return;
+        return data;
     }
 
     if (cmsIsTag(sProf.pf, sig.cms)) {
@@ -431,16 +430,15 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagData
     } else {
         JNU_ThrowByName(env, "java/awt/color/CMMException",
                         "ICC profile tag not found");
-        return;
+        return NULL;
     }
 
-    // verify data buffer capacity
-    bufSize = (*env)->GetArrayLength(env, data);
-
-    if (tagSize < 0 || 0 > bufSize || tagSize > bufSize) {
+    // allocate java array
+    data = (*env)->NewByteArray(env, tagSize);
+    if (data == NULL) {
         JNU_ThrowByName(env, "java/awt/color/CMMException",
-                        "Insufficient buffer capacity.");
-        return;
+                        "Unable to allocate buffer");
+        return NULL;
     }
 
     dataArray = (*env)->GetByteArrayElements (env, data, 0);
@@ -448,7 +446,7 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagData
     if (dataArray == NULL) {
         JNU_ThrowByName(env, "java/awt/color/CMMException",
                         "Unable to get buffer");
-        return;
+        return NULL;
     }
 
     bufSize = cmsReadRawTag(sProf.pf, sig.cms, dataArray, tagSize);
@@ -458,8 +456,9 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagData
     if (bufSize != tagSize) {
         JNU_ThrowByName(env, "java/awt/color/CMMException",
                         "Can not get tag data.");
+        return NULL;
     }
-    return;
+    return data;
 }
 
 /*
@@ -467,7 +466,7 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_getTagData
  * Method:    setTagData
  * Signature: (JI[B)V
  */
-JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_setTagData
+JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_setTagDataNative
   (JNIEnv *env, jobject obj, jlong id, jint tagSig, jbyteArray data)
 {
     storeID_t sProf;
@@ -557,7 +556,7 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_colorConvert
   (JNIEnv *env, jclass obj, jobject trans, jobject src, jobject dst)
 {
     storeID_t sTrans;
-    int inFmt, outFmt, srcDType, dstDType;
+    int srcDType, dstDType;
     int srcOffset, srcNextRowOffset, dstOffset, dstNextRowOffset;
     int width, height, i;
     void* inputBuffer;
@@ -565,24 +564,18 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_colorConvert
     char* inputRow;
     char* outputRow;
     jobject srcData, dstData;
+    jboolean srcAtOnce = JNI_FALSE, dstAtOnce = JNI_FALSE;
 
-    inFmt = (*env)->GetIntField (env, src, IL_pixelType_fID);
-    outFmt = (*env)->GetIntField (env, dst, IL_pixelType_fID);
     srcOffset = (*env)->GetIntField (env, src, IL_offset_fID);
     srcNextRowOffset = (*env)->GetIntField (env, src, IL_nextRowOffset_fID);
     dstOffset = (*env)->GetIntField (env, dst, IL_offset_fID);
     dstNextRowOffset = (*env)->GetIntField (env, dst, IL_nextRowOffset_fID);
     width = (*env)->GetIntField (env, src, IL_width_fID);
     height = (*env)->GetIntField (env, src, IL_height_fID);
-#ifdef _LITTLE_ENDIAN
-    /* Reversing data packed into int for LE archs */
-    if ((*env)->GetBooleanField (env, src, IL_isIntPacked_fID) == JNI_TRUE) {
-        inFmt ^= DOSWAP_SH(1);
-    }
-    if ((*env)->GetBooleanField (env, dst, IL_isIntPacked_fID) == JNI_TRUE) {
-        outFmt ^= DOSWAP_SH(1);
-    }
-#endif
+
+    srcAtOnce = (*env)->GetBooleanField(env, src, IL_imageAtOnce_fID);
+    dstAtOnce = (*env)->GetBooleanField(env, dst, IL_imageAtOnce_fID);
+
     sTrans.j = (*env)->GetLongField (env, trans, Trans_ID_fID);
 
     if (sTrans.xf == NULL) {
@@ -614,10 +607,14 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_colorConvert
     inputRow = (char*)inputBuffer + srcOffset;
     outputRow = (char*)outputBuffer + dstOffset;
 
-    for (i = 0; i < height; i++) {
-        cmsDoTransform(sTrans.xf, inputRow, outputRow, width);
-        inputRow += srcNextRowOffset;
-        outputRow += dstNextRowOffset;
+    if (srcAtOnce && dstAtOnce) {
+        cmsDoTransform(sTrans.xf, inputRow, outputRow, width * height);
+    } else {
+        for (i = 0; i < height; i++) {
+            cmsDoTransform(sTrans.xf, inputRow, outputRow, width);
+            inputRow += srcNextRowOffset;
+            outputRow += dstNextRowOffset;
+        }
     }
 
     releaseILData(env, inputBuffer, srcDType, srcData);
@@ -659,6 +656,7 @@ JNIEXPORT void JNICALL Java_sun_java2d_cmm_lcms_LCMS_initLCMS
     IL_width_fID = (*env)->GetFieldID (env, IL, "width", "I");
     IL_height_fID = (*env)->GetFieldID (env, IL, "height", "I");
     IL_offset_fID = (*env)->GetFieldID (env, IL, "offset", "I");
+    IL_imageAtOnce_fID = (*env)->GetFieldID (env, IL, "imageAtOnce", "Z");
     IL_nextRowOffset_fID = (*env)->GetFieldID (env, IL, "nextRowOffset", "I");
 
     PF_ID_fID = (*env)->GetFieldID (env, Pf, "ID", "J");

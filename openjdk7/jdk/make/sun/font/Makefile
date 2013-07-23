@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,11 @@ PRODUCT = sun
 CPLUSPLUSLIBRARY=true
 
 # Use higher optimization level
+ifeq ($(PLATFORM), windows)
+OPTIMIZATION_LEVEL = HIGHEST
+else
 OPTIMIZATION_LEVEL = HIGHER
+endif
 
 include $(BUILDDIR)/common/Defs.gmk
 
@@ -62,7 +66,7 @@ FILES_export = \
     java/text/Bidi.java \
     sun/font/FileFont.java \
     sun/font/FileFontStrike.java \
-    sun/font/FontManager.java \
+    sun/font/SunFontManager.java \
     sun/font/GlyphList.java \
     sun/font/NativeFont.java \
     sun/font/StrikeCache.java \
@@ -178,7 +182,7 @@ else # PLATFORM
 # Libraries to link, and other C flags.
 #
 
-ifeq ($(PLATFORM), macosx))
+ifeq ($(PLATFORM), macosx)
 OTHER_INCLUDES += -I$(X11_PATH)/include
 OTHER_LDLIBS  += -lawt $(LIBM) $(LIBCXX)
  ifeq ($(OS_VENDOR),Apple)
@@ -190,7 +194,7 @@ else
 ifeq ($(PLATFORM), solaris)
   # Note that on Solaris, fontmanager is built against the headless library.
   LDFLAGS      += -L$(LIBDIR)/$(LIBARCH)/headless
-  OTHER_LDLIBS += -lawt -L$(LIBDIR)/$(LIBARCH)/xawt -lmawt -lc $(LIBM) $(LIBCXX)
+  OTHER_LDLIBS += -lawt -lawt_xawt -lc $(LIBM) $(LIBCXX)
 else # PLATFORM is linux
  OTHER_LDLIBS  += -lawt $(LIBM) $(LIBCXX)
   ifeq ("$(CC_VER_MAJOR)", "3")
@@ -203,7 +207,7 @@ endif # PLATFORM
 
 # set up compile flags..
 
-ifeq ($(PLATFORM), macosx))
+ifeq ($(PLATFORM), macosx)
 CPPFLAGS += -I$(CLASSHDRDIR)
 endif
 

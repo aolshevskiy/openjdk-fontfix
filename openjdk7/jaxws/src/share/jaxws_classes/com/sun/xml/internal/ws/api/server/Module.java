@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
 package com.sun.xml.internal.ws.api.server;
 
 import com.sun.istack.internal.NotNull;
+import com.sun.istack.internal.Nullable;
+import com.sun.xml.internal.ws.api.Component;
 import com.sun.xml.internal.ws.transport.http.HttpAdapterList;
 
 import javax.xml.ws.wsaddressing.W3CEndpointReferenceBuilder;
@@ -57,7 +59,7 @@ import java.util.List;
  * @author Kohsuke Kawaguchi
  * @since 2.1 EA3
  */
-public abstract class Module {
+public abstract class Module implements Component {
     /**
      * Gets the list of {@link BoundEndpoint} deployed in this module.
      *
@@ -70,4 +72,9 @@ public abstract class Module {
      *      always return the same non-null instance.
      */
     public abstract @NotNull List<BoundEndpoint> getBoundEndpoints();
+
+    public @Nullable <S> S getSPI(@NotNull Class<S> spiType) {
+        return null;
+    }
+
 }

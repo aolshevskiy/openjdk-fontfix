@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,6 +44,7 @@
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubCodeGenerator.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/vframe.hpp"
 #include "services/heapDumper.hpp"
 #include "utilities/defaultStream.hpp"
@@ -52,19 +53,15 @@
 #include "utilities/vmError.hpp"
 #ifdef TARGET_OS_FAMILY_linux
 # include "os_linux.inline.hpp"
-# include "thread_linux.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_solaris
 # include "os_solaris.inline.hpp"
-# include "thread_solaris.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "os_windows.inline.hpp"
-# include "thread_windows.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_bsd
 # include "os_bsd.inline.hpp"
-# include "thread_bsd.inline.hpp"
 #endif
 
 #ifndef ASSERT
@@ -101,14 +98,13 @@ FormatBufferResource::FormatBufferResource(const char * format, ...)
 
 void warning(const char* format, ...) {
   if (PrintWarnings) {
-    // In case error happens before init or during shutdown
-    if (tty == NULL) ostream_init();
-
-    tty->print("%s warning: ", VM_Version::vm_name());
+    FILE* const err = defaultStream::error_stream();
+    jio_fprintf(err, "%s warning: ", VM_Version::vm_name());
     va_list ap;
     va_start(ap, format);
-    tty->vprint_cr(format, ap);
+    vfprintf(err, format, ap);
     va_end(ap);
+    fputc('\n', err);
   }
   if (BreakAtWarning) BREAKPOINT;
 }
@@ -232,28 +228,16 @@ void report_fatal(const char* file, int line, const char* message)
   report_vm_error(file, line, "fatal error", message);
 }
 
-// Used by report_vm_out_of_memory to detect recursion.
-static jint _exiting_out_of_mem = 0;
-
 void report_vm_out_of_memory(const char* file, int line, size_t size,
-                             const char* message) {
+                             VMErrorType vm_err_type, const char* message) {
   if (Debugging) return;
 
-  // We try to gather additional information for the first out of memory
-  // error only; gathering additional data might cause an allocation and a
-  // recursive out_of_memory condition.
+  Thread* thread = ThreadLocalStorage::get_thread_slow();
+  VMError(thread, file, line, size, vm_err_type, message).report_and_die();
 
-  const jint exiting = 1;
-  // If we succeed in changing the value, we're the first one in.
-  bool first_time_here = Atomic::xchg(exiting, &_exiting_out_of_mem) != exiting;
-
-  if (first_time_here) {
-    Thread* thread = ThreadLocalStorage::get_thread_slow();
-    VMError(thread, file, line, size, message).report_and_die();
-  }
-
-  // Dump core and abort
-  vm_abort(true);
+  // The UseOSErrorReporting option in report_and_die() may allow a return
+  // to here. If so then we'll have to figure out how to handle it.
+  guarantee(false, "report_and_die() should not return here");
 }
 
 void report_should_not_call(const char* file, int line) {
@@ -276,13 +260,13 @@ void report_untested(const char* file, int line, const char* message) {
 
 void report_out_of_shared_space(SharedSpaceType shared_space) {
   static const char* name[] = {
-    "permanent generation",
+    "native memory for metadata",
     "shared read only space",
     "shared read write space",
     "shared miscellaneous data space"
   };
   static const char* flag[] = {
-    "PermGen",
+    "Metaspace",
     "SharedReadOnlySize",
     "SharedReadWriteSize",
     "SharedMiscDataSize"
@@ -330,8 +314,8 @@ bool is_error_reported() {
 #ifndef PRODUCT
 #include <signal.h>
 
-void test_error_handler(size_t test_num)
-{
+void test_error_handler() {
+  uintx test_num = ErrorHandlerTest;
   if (test_num == 0) return;
 
   // If asserts are disabled, use the corresponding guarantee instead.
@@ -343,6 +327,8 @@ void test_error_handler(size_t test_num)
 
   const char* const eol = os::line_separator();
   const char* const msg = "this message should be truncated during formatting";
+  char * const dataPtr = NULL;  // bad data pointer
+  const void (*funcPtr)(void) = (const void(*)()) 0xF;  // bad function pointer
 
   // Keep this in sync with test/runtime/6888954/vmerrors.sh.
   switch (n) {
@@ -360,15 +346,20 @@ void test_error_handler(size_t test_num)
                            msg, eol, msg, eol, msg, eol, msg, eol, msg, eol,
                            msg, eol, msg, eol, msg, eol, msg, eol, msg, eol,
                            msg, eol, msg, eol, msg, eol, msg, eol, msg));
-    case  8: vm_exit_out_of_memory(num, "ChunkPool::allocate");
+    case  8: vm_exit_out_of_memory(num, OOM_MALLOC_ERROR, "ChunkPool::allocate");
     case  9: ShouldNotCallThis();
     case 10: ShouldNotReachHere();
     case 11: Unimplemented();
-    // This is last because it does not generate an hs_err* file on Windows.
-    case 12: os::signal_raise(SIGSEGV);
+    // There's no guarantee the bad data pointer will crash us
+    // so "break" out to the ShouldNotReachHere().
+    case 12: *dataPtr = '\0'; break;
+    // There's no guarantee the bad function pointer will crash us
+    // so "break" out to the ShouldNotReachHere().
+    case 13: (*funcPtr)(); break;
 
-    default: ShouldNotReachHere();
+    default: tty->print_cr("ERROR: %d: unexpected test_num value.", n);
   }
+  ShouldNotReachHere();
 }
 #endif // !PRODUCT
 
@@ -413,8 +404,8 @@ extern "C" void blob(CodeBlob* cb) {
 
 extern "C" void dump_vtable(address p) {
   Command c("dump_vtable");
-  klassOop k = (klassOop)p;
-  instanceKlass::cast(k)->vtable()->print();
+  Klass* k = (Klass*)p;
+  InstanceKlass::cast(k)->vtable()->print();
 }
 
 
@@ -612,119 +603,16 @@ extern "C" void events() {
   Events::print();
 }
 
-// Given a heap address that was valid before the most recent GC, if
-// the oop that used to contain it is still live, prints the new
-// location of the oop and the address. Useful for tracking down
-// certain kinds of naked oop and oop map bugs.
-extern "C" void pnl(intptr_t old_heap_addr) {
-  // Print New Location of old heap address
-  Command c("pnl");
-#ifndef VALIDATE_MARK_SWEEP
-  tty->print_cr("Requires build with VALIDATE_MARK_SWEEP defined (debug build) and RecordMarkSweepCompaction enabled");
-#else
-  MarkSweep::print_new_location_of_heap_address((HeapWord*) old_heap_addr);
-#endif
-}
-
-
-extern "C" methodOop findm(intptr_t pc) {
+extern "C" Method* findm(intptr_t pc) {
   Command c("findm");
   nmethod* nm = CodeCache::find_nmethod((address)pc);
-  return (nm == NULL) ? (methodOop)NULL : nm->method();
+  return (nm == NULL) ? (Method*)NULL : nm->method();
 }
 
 
 extern "C" nmethod* findnm(intptr_t addr) {
   Command c("findnm");
   return  CodeCache::find_nmethod((address)addr);
-}
-
-static address same_page(address x, address y) {
-  intptr_t page_bits = -os::vm_page_size();
-  if ((intptr_t(x) & page_bits) == (intptr_t(y) & page_bits)) {
-    return x;
-  } else if (x > y) {
-    return (address)(intptr_t(y) | ~page_bits) + 1;
-  } else {
-    return (address)(intptr_t(y) & page_bits);
-  }
-}
-
-class LookForRefInGenClosure : public OopsInGenClosure {
-public:
-  oop target;
-  void do_oop(oop* o) {
-    if (o != NULL && *o == target) {
-      tty->print_cr(INTPTR_FORMAT, o);
-    }
-  }
-  void do_oop(narrowOop* o) { ShouldNotReachHere(); }
-};
-
-
-class LookForRefInObjectClosure : public ObjectClosure {
-private:
-  LookForRefInGenClosure look_in_object;
-public:
-  LookForRefInObjectClosure(oop target) { look_in_object.target = target; }
-  void do_object(oop obj) {
-    obj->oop_iterate(&look_in_object);
-  }
-};
-
-
-static void findref(intptr_t x) {
-  CollectedHeap *ch = Universe::heap();
-  LookForRefInGenClosure lookFor;
-  lookFor.target = (oop) x;
-  LookForRefInObjectClosure look_in_object((oop) x);
-
-  tty->print_cr("Searching heap:");
-  ch->object_iterate(&look_in_object);
-
-  tty->print_cr("Searching strong roots:");
-  Universe::oops_do(&lookFor, false);
-  JNIHandles::oops_do(&lookFor);   // Global (strong) JNI handles
-  Threads::oops_do(&lookFor, NULL);
-  ObjectSynchronizer::oops_do(&lookFor);
-  //FlatProfiler::oops_do(&lookFor);
-  SystemDictionary::oops_do(&lookFor);
-
-  tty->print_cr("Searching code cache:");
-  CodeCache::oops_do(&lookFor);
-
-  tty->print_cr("Done.");
-}
-
-class FindClassObjectClosure: public ObjectClosure {
-  private:
-    const char* _target;
-  public:
-    FindClassObjectClosure(const char name[])  { _target = name; }
-
-    virtual void do_object(oop obj) {
-      if (obj->is_klass()) {
-        Klass* k = klassOop(obj)->klass_part();
-        if (k->name() != NULL) {
-          ResourceMark rm;
-          const char* ext = k->external_name();
-          if ( strcmp(_target, ext) == 0 ) {
-            tty->print_cr("Found " INTPTR_FORMAT, obj);
-            obj->print();
-          }
-        }
-      }
-    }
-};
-
-//
-extern "C" void findclass(const char name[]) {
-  Command c("findclass");
-  if (name != NULL) {
-    tty->print_cr("Finding class %s -> ", name);
-    FindClassObjectClosure srch(name);
-    Universe::heap()->permanent_object_iterate(&srch);
-  }
 }
 
 // Another interface that isn't ambiguous in dbx.
@@ -734,11 +622,6 @@ extern "C" void hsfind(intptr_t x) {
   os::print_location(tty, x, false);
 }
 
-
-extern "C" void hsfindref(intptr_t x) {
-  Command c("hsfindref");
-  findref(x);
-}
 
 extern "C" void find(intptr_t x) {
   Command c("find");
@@ -752,6 +635,17 @@ extern "C" void findpc(intptr_t x) {
 }
 
 
+// Need method pointer to find bcp, when not in permgen.
+extern "C" void findbcp(intptr_t method, intptr_t bcp) {
+  Command c("findbcp");
+  Method* mh = (Method*)method;
+  if (!mh->is_native()) {
+    tty->print_cr("bci_from(%p) = %d; print_codes():",
+                        mh, mh->bci_from(address(bcp)));
+    mh->print_codes_on(tty);
+  }
+}
+
 // int versions of all methods to avoid having to type type casts in the debugger
 
 void pp(intptr_t p)          { pp((void*)p); }
@@ -764,8 +658,8 @@ void help() {
   tty->print_cr("  pv(intptr_t p)- ((PrintableResourceObj*) p)->print()");
   tty->print_cr("  ps()          - print current thread stack");
   tty->print_cr("  pss()         - print all thread stacks");
-  tty->print_cr("  pm(int pc)    - print methodOop given compiled PC");
-  tty->print_cr("  findm(intptr_t pc) - finds methodOop");
+  tty->print_cr("  pm(int pc)    - print Method* given compiled PC");
+  tty->print_cr("  findm(intptr_t pc) - finds Method*");
   tty->print_cr("  find(intptr_t x)   - finds & prints nmethod/stub/bytecode/oop based on pointer into it");
 
   tty->print_cr("misc.");
@@ -777,153 +671,5 @@ void help() {
   tty->print_cr("  debug()       - to set things up for compiler debugging");
   tty->print_cr("  ndebug()      - undo debug");
 }
-
-#if 0
-
-// BobV's command parser for debugging on windows when nothing else works.
-
-enum CommandID {
-  CMDID_HELP,
-  CMDID_QUIT,
-  CMDID_HSFIND,
-  CMDID_PSS,
-  CMDID_PS,
-  CMDID_PSF,
-  CMDID_FINDM,
-  CMDID_FINDNM,
-  CMDID_PP,
-  CMDID_BPT,
-  CMDID_EXIT,
-  CMDID_VERIFY,
-  CMDID_THREADS,
-  CMDID_ILLEGAL = 99
-};
-
-struct CommandParser {
-   char *name;
-   CommandID code;
-   char *description;
-};
-
-struct CommandParser CommandList[] = {
-  (char *)"help", CMDID_HELP, "  Dump this list",
-  (char *)"quit", CMDID_QUIT, "  Return from this routine",
-  (char *)"hsfind", CMDID_HSFIND, "Perform an hsfind on an address",
-  (char *)"ps", CMDID_PS, "    Print Current Thread Stack Trace",
-  (char *)"pss", CMDID_PSS, "   Print All Thread Stack Trace",
-  (char *)"psf", CMDID_PSF, "   Print All Stack Frames",
-  (char *)"findm", CMDID_FINDM, " Find a methodOop from a PC",
-  (char *)"findnm", CMDID_FINDNM, "Find an nmethod from a PC",
-  (char *)"pp", CMDID_PP, "    Find out something about a pointer",
-  (char *)"break", CMDID_BPT, " Execute a breakpoint",
-  (char *)"exitvm", CMDID_EXIT, "Exit the VM",
-  (char *)"verify", CMDID_VERIFY, "Perform a Heap Verify",
-  (char *)"thread", CMDID_THREADS, "Dump Info on all Threads",
-  (char *)0, CMDID_ILLEGAL
-};
-
-
-// get_debug_command()
-//
-// Read a command from standard input.
-// This is useful when you have a debugger
-// which doesn't support calling into functions.
-//
-void get_debug_command()
-{
-  ssize_t count;
-  int i,j;
-  bool gotcommand;
-  intptr_t addr;
-  char buffer[256];
-  nmethod *nm;
-  methodOop m;
-
-  tty->print_cr("You have entered the diagnostic command interpreter");
-  tty->print("The supported commands are:\n");
-  for ( i=0; ; i++ ) {
-    if ( CommandList[i].code == CMDID_ILLEGAL )
-      break;
-    tty->print_cr("  %s \n", CommandList[i].name );
-  }
-
-  while ( 1 ) {
-    gotcommand = false;
-    tty->print("Please enter a command: ");
-    count = scanf("%s", buffer) ;
-    if ( count >=0 ) {
-      for ( i=0; ; i++ ) {
-        if ( CommandList[i].code == CMDID_ILLEGAL ) {
-          if (!gotcommand) tty->print("Invalid command, please try again\n");
-          break;
-        }
-        if ( strcmp(buffer, CommandList[i].name) == 0 ) {
-          gotcommand = true;
-          switch ( CommandList[i].code ) {
-              case CMDID_PS:
-                ps();
-                break;
-              case CMDID_PSS:
-                pss();
-                break;
-              case CMDID_PSF:
-                psf();
-                break;
-              case CMDID_FINDM:
-                tty->print("Please enter the hex addr to pass to findm: ");
-                scanf("%I64X", &addr);
-                m = (methodOop)findm(addr);
-                tty->print("findm(0x%I64X) returned 0x%I64X\n", addr, m);
-                break;
-              case CMDID_FINDNM:
-                tty->print("Please enter the hex addr to pass to findnm: ");
-                scanf("%I64X", &addr);
-                nm = (nmethod*)findnm(addr);
-                tty->print("findnm(0x%I64X) returned 0x%I64X\n", addr, nm);
-                break;
-              case CMDID_PP:
-                tty->print("Please enter the hex addr to pass to pp: ");
-                scanf("%I64X", &addr);
-                pp((void*)addr);
-                break;
-              case CMDID_EXIT:
-                exit(0);
-              case CMDID_HELP:
-                tty->print("Here are the supported commands: ");
-                for ( j=0; ; j++ ) {
-                  if ( CommandList[j].code == CMDID_ILLEGAL )
-                    break;
-                  tty->print_cr("  %s --  %s\n", CommandList[j].name,
-                                                 CommandList[j].description );
-                }
-                break;
-              case CMDID_QUIT:
-                return;
-                break;
-              case CMDID_BPT:
-                BREAKPOINT;
-                break;
-              case CMDID_VERIFY:
-                verify();;
-                break;
-              case CMDID_THREADS:
-                threads();;
-                break;
-              case CMDID_HSFIND:
-                tty->print("Please enter the hex addr to pass to hsfind: ");
-                scanf("%I64X", &addr);
-                tty->print("Calling hsfind(0x%I64X)\n", addr);
-                hsfind(addr);
-                break;
-              default:
-              case CMDID_ILLEGAL:
-                break;
-          }
-        }
-      }
-    }
-  }
-}
-#endif
 
 #endif // !PRODUCT

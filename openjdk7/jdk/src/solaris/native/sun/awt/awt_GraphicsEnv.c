@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,7 +46,6 @@
 #include <stdlib.h>
 
 #include "awt_GraphicsEnv.h"
-#include "awt_Window.h"
 #include "awt_util.h"
 #include "gdefs.h"
 #include <dlfcn.h>
@@ -95,8 +94,6 @@ jboolean awtLockInited = JNI_FALSE;
 
 struct X11GraphicsConfigIDs x11GraphicsConfigIDs;
 struct X11GraphicsDeviceIDs x11GraphicsDeviceIDs;
-extern struct WindowIDs mWindowIDs;
-extern struct MWindowPeerIDs mWindowPeerIDs;
 
 #ifndef HEADLESS
 int awtCreateX11Colormap(AwtGraphicsConfigDataPtr adata);
@@ -582,75 +579,6 @@ getAllConfigs (JNIEnv *env, int screen, AwtScreenDataPtr screenDataPtr) {
     AWT_UNLOCK ();
 }
 
-/*
- * Determing if this top-level has been moved onto another Xinerama screen.
- * Called from awt_TopLevel.c
- *
- * ASSUME: wdata != null
- */
-#ifndef HEADLESS
-void checkNewXineramaScreen(JNIEnv* env, jobject peer, struct FrameData* wdata,
-                            int32_t newX, int32_t newY,
-                            int32_t newWidth, int32_t newHeight) {
-    int i;
-    int amt;
-    int totAmt = 0;
-    int largestAmt = 0;
-    int largestAmtScr = 0;
-
-    int horiz;
-    int vert;
-
-    if (!usingXinerama) { return; }
-
-    totAmt = newWidth * newHeight;
-
-    /* assert that peer implements WindowPeer */
-    DASSERT(JNU_IsInstanceOfByName(env, peer, "java/awt/peer/WindowPeer"));
-
-    DTRACE_PRINTLN4("checkNewXineramaScreen() x=%i y=%i w=%i h=%i\n",newX, newY, newWidth, newHeight);
-
-    /* decide which screen we're on
-     * if we're spanning, figure out which screen we're most on
-     */
-    for (i = 0; i < awt_numScreens; i++) {
-        if (INTERSECTS(newX, newX + newWidth, newY, newY + newHeight,
-                       fbrects[i].x, fbrects[i].x + fbrects[i].width,
-                       fbrects[i].y, fbrects[i].y + fbrects[i].height)) {
-
-            /* calc how much of window is on this screen */
-            horiz = MIN(newX + newWidth, fbrects[i].x + fbrects[i].width) -
-                    MAX(newX, fbrects[i].x);
-            vert =  MIN(newY + newHeight, fbrects[i].y + fbrects[i].height) -
-                    MAX(newY, fbrects[i].y);
-            DASSERT(horiz > 0);
-            DASSERT(vert > 0);
-
-            amt = horiz * vert;
-            if (amt == totAmt) {
-                /* completely on this screen - done! */
-                largestAmtScr = i;
-                break;
-            }
-            if (amt > largestAmt) {
-                largestAmt = amt;
-                largestAmtScr = i;
-            }
-        }
-    }
-
-#ifndef XAWT
-    /* check if we're on a new screen */
-    if (largestAmtScr != wdata->screenNum) {
-        wdata->screenNum = largestAmtScr;
-        /* update peer, target Comp */
-        (*env)->CallVoidMethod(env, peer,
-                               mWindowPeerIDs.draggedToScreenMID, largestAmtScr);
-    }
-#endif /* XAWT */
-}
-#endif /* HEADLESS */
-
 #ifndef HEADLESS
 #if defined(__linux__) || defined(MACOSX)
 static void xinerama_init_linux()
@@ -825,11 +753,13 @@ awt_init_Display(JNIEnv *env, jobject this)
                      sizeof(errmsg),
                      "Can't connect to X11 window server using '%s' as the value of the DISPLAY variable.",
                      (getenv("DISPLAY") == NULL) ? ":0.0" : getenv("DISPLAY"));
-        JNU_ThrowInternalError(env, errmsg);
+        JNU_ThrowByName(env, "java/awt/AWTError", errmsg);
         return NULL;
     }
 
     XSetIOErrorHandler(xioerror_handler);
+    JNU_CallStaticMethodByName(env, NULL, "sun/awt/X11/XErrorHandlerUtil", "init", "(J)V",
+        ptr_to_jlong(awt_display));
 
     /* set awt_numScreens, and whether or not we're using Xinerama */
     xineramaInit();
@@ -976,28 +906,14 @@ Java_sun_awt_X11GraphicsDevice_getDisplay(JNIEnv *env, jobject this)
 
 static jint canUseShmExt = UNSET_MITSHM;
 static jint canUseShmExtPixmaps = UNSET_MITSHM;
-static jboolean xshmAttachFailed = JNI_FALSE;
 
-int J2DXErrHandler(Display *display, XErrorEvent *xerr) {
-    int ret = 0;
-    if (xerr->minor_code == X_ShmAttach) {
-        xshmAttachFailed = JNI_TRUE;
-    } else {
-        ret = (*xerror_saved_handler)(display, xerr);
-    }
-    return ret;
-}
-jboolean isXShmAttachFailed() {
-    return xshmAttachFailed;
-}
-void resetXShmAttachFailed() {
-    xshmAttachFailed = JNI_FALSE;
-}
+extern int mitShmPermissionMask;
 
 void TryInitMITShm(JNIEnv *env, jint *shmExt, jint *shmPixmaps) {
     XShmSegmentInfo shminfo;
     int XShmMajor, XShmMinor;
     int a, b, c;
+    jboolean xShmAttachResult;
 
     AWT_LOCK();
     if (canUseShmExt != UNSET_MITSHM) {
@@ -1016,7 +932,8 @@ void TryInitMITShm(JNIEnv *env, jint *shmExt, jint *shmPixmaps) {
      * we need to test that we can actually do XShmAttach.
      */
     if (XShmQueryExtension(awt_display)) {
-        shminfo.shmid = shmget(IPC_PRIVATE, 0x10000, IPC_CREAT|0777);
+        shminfo.shmid = shmget(IPC_PRIVATE, 0x10000,
+                               IPC_CREAT|mitShmPermissionMask);
         if (shminfo.shmid < 0) {
             AWT_UNLOCK();
             J2dRlsTraceLn1(J2D_TRACE_ERROR,
@@ -1035,21 +952,14 @@ void TryInitMITShm(JNIEnv *env, jint *shmExt, jint *shmPixmaps) {
         }
         shminfo.readOnly = True;
 
-        resetXShmAttachFailed();
-        /**
-         * The J2DXErrHandler handler will set xshmAttachFailed
-         * to JNI_TRUE if any Shm error has occured.
-         */
-        EXEC_WITH_XERROR_HANDLER(J2DXErrHandler,
-                                 XShmAttach(awt_display, &shminfo));
-
+        xShmAttachResult = TryXShmAttach(env, awt_display, &shminfo);
         /**
          * Get rid of the id now to reduce chances of leaking
          * system resources.
          */
         shmctl(shminfo.shmid, IPC_RMID, 0);
 
-        if (isXShmAttachFailed() == JNI_FALSE) {
+        if (xShmAttachResult == JNI_TRUE) {
             canUseShmExt = CAN_USE_MITSHM;
             /* check if we can use shared pixmaps */
             XShmQueryVersion(awt_display, &XShmMajor, &XShmMinor,
@@ -1063,6 +973,23 @@ void TryInitMITShm(JNIEnv *env, jint *shmExt, jint *shmPixmaps) {
         *shmPixmaps = canUseShmExtPixmaps;
     }
     AWT_UNLOCK();
+}
+
+/*
+ * Must be called with the acquired AWT lock.
+ */
+jboolean TryXShmAttach(JNIEnv *env, Display *display, XShmSegmentInfo *shminfo) {
+    jboolean errorOccurredFlag = JNI_FALSE;
+    jobject errorHandlerRef;
+
+    /*
+     * XShmAttachHandler will set its internal flag to JNI_TRUE, if any Shm error occurs.
+     */
+    EXEC_WITH_XERROR_HANDLER(env, "sun/awt/X11/XErrorHandler$XShmAttachHandler",
+        "()Lsun/awt/X11/XErrorHandler$XShmAttachHandler;", JNI_TRUE,
+        errorHandlerRef, errorOccurredFlag,
+        XShmAttach(display, shminfo));
+    return errorOccurredFlag == JNI_FALSE ? JNI_TRUE : JNI_FALSE;
 }
 #endif /* MITSHM */
 
@@ -1442,17 +1369,29 @@ Java_sun_awt_X11GraphicsConfig_pGetBounds(JNIEnv *env, jobject this, jint screen
     mid = (*env)->GetMethodID(env, clazz, "<init>", "(IIII)V");
     if (mid != NULL) {
         if (usingXinerama) {
-            bounds = (*env)->NewObject(env, clazz, mid, fbrects[screen].x,
-                                                        fbrects[screen].y,
-                                                        fbrects[screen].width,
-                                                        fbrects[screen].height);
-        }
-        else {
+            if (0 <= screen && screen < awt_numScreens) {
+                bounds = (*env)->NewObject(env, clazz, mid, fbrects[screen].x,
+                                                            fbrects[screen].y,
+                                                            fbrects[screen].width,
+                                                            fbrects[screen].height);
+            } else {
+                jclass exceptionClass = (*env)->FindClass(env, "java/lang/IllegalArgumentException");
+                if (exceptionClass != NULL) {
+                    (*env)->ThrowNew(env, exceptionClass, "Illegal screen index");
+                }
+            }
+        } else {
+            XWindowAttributes xwa;
+            memset(&xwa, 0, sizeof(xwa));
+
+            AWT_LOCK ();
+            XGetWindowAttributes(awt_display,
+                    RootWindow(awt_display, adata->awt_visInfo.screen),
+                    &xwa);
+            AWT_UNLOCK ();
+
             bounds = (*env)->NewObject(env, clazz, mid, 0, 0,
-                                   DisplayWidth(awt_display,
-                                                adata->awt_visInfo.screen),
-                                   DisplayHeight(awt_display,
-                                                 adata->awt_visInfo.screen));
+                    xwa.width, xwa.height);
         }
 
         if ((*env)->ExceptionOccurred(env)) {

@@ -86,11 +86,11 @@ define_pd_global(intx, CodeCacheExpansionSize,       32*K);
 // Ergonomics related flags
 define_pd_global(uint64_t,MaxRAM,                    4ULL*G);
 #endif
-define_pd_global(uintx,CodeCacheMinBlockLength,      4);
+define_pd_global(uintx, CodeCacheMinBlockLength,     4);
+define_pd_global(uintx, CodeCacheMinimumUseSpace,    400*K);
 
 // Heap related flags
-define_pd_global(uintx,PermSize,    ScaleForWordSize(16*M));
-define_pd_global(uintx,MaxPermSize, ScaleForWordSize(64*M));
+define_pd_global(uintx,MetaspaceSize,    ScaleForWordSize(16*M));
 
 // Ergonomics related flags
 define_pd_global(bool, NeverActAsServerClassMachine, false);

@@ -30,7 +30,7 @@ import java.util.Map;
 
 import javax.xml.namespace.QName;
 
-import com.sun.mirror.apt.AnnotationProcessorEnvironment;
+import javax.annotation.processing.ProcessingEnvironment;
 
 
 /**
@@ -50,7 +50,7 @@ public interface JavaCompiler {
      * closure of types that are referenced by the root types.
      *
      * <p>
-     * Errors will be sent to {@link AnnotationProcessorEnvironment#getMessager()}.
+     * Errors will be sent to {@link javax.annotation.processing.ProcessingEnvironment#getMessager()}.
      *
      * @param rootTypes
      *      The list of types that needs to be bound to XML.
@@ -79,5 +79,5 @@ public interface JavaCompiler {
             Collection<Reference> rootTypes,
             Map<QName, Reference> additionalElementDecls,
             String defaultNamespaceRemap,
-            AnnotationProcessorEnvironment source );
+            ProcessingEnvironment source);
 }

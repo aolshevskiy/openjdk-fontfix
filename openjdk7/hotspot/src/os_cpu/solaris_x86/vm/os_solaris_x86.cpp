@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
  */
 
 // no precompiled headers
-#include "assembler_x86.inline.hpp"
+#include "asm/macroAssembler.hpp"
 #include "classfile/classLoader.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmSymbols.hpp"
@@ -33,7 +33,6 @@
 #include "jvm_solaris.h"
 #include "memory/allocation.inline.hpp"
 #include "mutex_solaris.inline.hpp"
-#include "nativeInst_x86.hpp"
 #include "os_share_solaris.hpp"
 #include "prims/jniFastGetField.hpp"
 #include "prims/jvm.h"
@@ -48,8 +47,8 @@
 #include "runtime/osThread.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/timer.hpp"
-#include "thread_solaris.inline.hpp"
 #include "utilities/events.hpp"
 #include "utilities/vmError.hpp"
 
@@ -353,13 +352,6 @@ bool os::is_allocatable(size_t bytes) {
 
 }
 
-extern "C" void Fetch32PFI () ;
-extern "C" void Fetch32Resume () ;
-#ifdef AMD64
-extern "C" void FetchNPFI () ;
-extern "C" void FetchNResume () ;
-#endif // AMD64
-
 extern "C" JNIEXPORT int
 JVM_handle_solaris_signal(int sig, siginfo_t* info, void* ucVoid,
                           int abort_if_unrecognized) {
@@ -437,17 +429,10 @@ JVM_handle_solaris_signal(int sig, siginfo_t* info, void* ucVoid,
     // factor me: getPCfromContext
     pc = (address) uc->uc_mcontext.gregs[REG_PC];
 
-    // SafeFetch32() support
-    if (pc == (address) Fetch32PFI) {
-      uc->uc_mcontext.gregs[REG_PC] = intptr_t(Fetch32Resume) ;
-      return true ;
+    if (StubRoutines::is_safefetch_fault(pc)) {
+      uc->uc_mcontext.gregs[REG_PC] = intptr_t(StubRoutines::continuation_for_safefetch_fault(pc));
+      return true;
     }
-#ifdef AMD64
-    if (pc == (address) FetchNPFI) {
-       uc->uc_mcontext.gregs [REG_PC] = intptr_t(FetchNResume) ;
-       return true ;
-    }
-#endif // AMD64
 
     // Handle ALL stack overflow variations here
     if (sig == SIGSEGV && info->si_code == SEGV_ACCERR) {
@@ -728,7 +713,7 @@ JVM_handle_solaris_signal(int sig, siginfo_t* info, void* ucVoid,
   // on the thread stack, which could get a mapping error when touched.
   address addr = (address) info->si_addr;
   if (sig == SIGBUS && info->si_code == BUS_OBJERR && info->si_errno == ENOMEM) {
-    vm_exit_out_of_memory(0, "Out of swap space to map in thread stack.");
+    vm_exit_out_of_memory(0, OOM_MMAP_ERROR, "Out of swap space to map in thread stack.");
   }
 
   VMError err(t, sig, pc, info, ucVoid);

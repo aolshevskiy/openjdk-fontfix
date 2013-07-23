@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,9 @@
 
 package javax.lang.model.util;
 
+import java.lang.annotation.Annotation;
+import java.lang.annotation.AnnotationTypeMismatchException;
+import java.lang.annotation.IncompleteAnnotationException;
 import java.util.List;
 import javax.lang.model.element.*;
 import javax.lang.model.type.*;
@@ -49,12 +52,20 @@ public interface Types {
      * Returns {@code null} if the type is not one with a
      * corresponding element.
      *
+     * @param t the type to map to an element
      * @return the element corresponding to the given type
      */
     Element asElement(TypeMirror t);
 
     /**
      * Tests whether two {@code TypeMirror} objects represent the same type.
+     *
+     * <p>Since annotations are only meta-data associated with a type,
+     * the set of annotations on either argument is <em>not</em> taken
+     * into account when computing whether or not two {@code
+     * TypeMirror} objects are the same type. In particular, two
+     * {@code TypeMirror} objects can have different annotations and
+     * still be considered the same.
      *
      * <p>Caveat: if either of the arguments to this method represents a
      * wildcard, this method will return false.  As a consequence, a wildcard

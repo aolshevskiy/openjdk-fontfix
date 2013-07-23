@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -80,42 +80,24 @@ public class Ktab {
         } else {
             ktab.processArgs(args);
         }
-        try {
+        ktab.table = KeyTab.getInstance(ktab.name);
+        if (ktab.table.isMissing() && ktab.action != 'a') {
             if (ktab.name == null) {
-                //  ktab.admin = new KeyTabAdmin();    // use the default keytab.
-                ktab.table = KeyTab.getInstance();
-                if (ktab.table == null) {
-                    if (ktab.action == 'a') {
-                        ktab.table = KeyTab.create();
-                    } else {
-                        System.out.println("No default key table exists.");
-                        System.exit(-1);
-                    }
-                }
+                System.out.println("No default key table exists.");
             } else {
-                if ((ktab.action != 'a') &&
-                    !(new File(ktab.name)).exists()) {
-                    System.out.println("Key table " +
-                                ktab.name + " does not exist.");
-                    System.exit(-1);
-                } else {
-                    ktab.table = KeyTab.getInstance(ktab.name);
-                }
-                if (ktab.table == null) {
-                    if (ktab.action == 'a') {
-                        ktab.table = KeyTab.create(ktab.name);
-                    } else {
-                        System.out.println("The format of key table " +
-                                ktab.name + " is incorrect.");
-                        System.exit(-1);
-                    }
-                }
+                System.out.println("Key table " +
+                        ktab.name + " does not exist.");
             }
-        } catch (RealmException e) {
-            System.err.println("Error loading key table.");
             System.exit(-1);
-        } catch (IOException e) {
-            System.err.println("Error loading key table.");
+        }
+        if (!ktab.table.isValid()) {
+            if (ktab.name == null) {
+                System.out.println("The format of the default key table " +
+                        " is incorrect.");
+            } else {
+                System.out.println("The format of key table " +
+                        ktab.name + " is incorrect.");
+            }
             System.exit(-1);
         }
         switch (ktab.action) {
@@ -273,9 +255,6 @@ public class Ktab {
         PrincipalName pname = null;
         try {
             pname = new PrincipalName(principal);
-            if (pname.getRealm() == null) {
-                pname.setRealm(Config.getInstance().getDefaultRealm());
-            }
         } catch (KrbException e) {
             System.err.println("Failed to add " + principal +
                                " to keytab.");
@@ -382,9 +361,6 @@ public class Ktab {
         PrincipalName pname = null;
         try {
             pname = new PrincipalName(principal);
-            if (pname.getRealm() == null) {
-                pname.setRealm(Config.getInstance().getDefaultRealm());
-            }
             if (!forced) {
                 String answer;
                 BufferedReader cis =

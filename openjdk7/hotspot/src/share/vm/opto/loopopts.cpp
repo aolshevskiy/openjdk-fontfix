@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -232,7 +232,11 @@ void PhaseIdealLoop::dominated_by( Node *prevdom, Node *iff, bool flip, bool exc
   // Loop predicates may have depending checks which should not
   // be skipped. For example, range check predicate has two checks
   // for lower and upper bounds.
-  ProjNode* unc_proj = iff->as_If()->proj_out(1 - dp->as_Proj()->_con)->as_Proj();
+  if (dp == NULL)
+    return;
+
+  ProjNode* dp_proj  = dp->as_Proj();
+  ProjNode* unc_proj = iff->as_If()->proj_out(1 - dp_proj->_con)->as_Proj();
   if (exclude_loop_predicate &&
       is_uncommon_trap_proj(unc_proj, Deoptimization::Reason_predicate))
     return; // Let IGVN transformation change control dependence.
@@ -550,7 +554,7 @@ Node *PhaseIdealLoop::conditional_move( Node *region ) {
     // This will likely Split-If, a higher-payoff operation.
     for (DUIterator_Fast kmax, k = phi->fast_outs(kmax); k < kmax; k++) {
       Node* use = phi->fast_out(k);
-      if (use->is_Cmp() || use->is_DecodeN() || use->is_EncodeP())
+      if (use->is_Cmp() || use->is_DecodeNarrowPtr() || use->is_EncodeNarrowPtr())
         cost += ConditionalMoveLimit;
       // Is there a use inside the loop?
       // Note: check only basic types since CMoveP is pinned.
@@ -866,8 +870,11 @@ void PhaseIdealLoop::split_if_with_blocks_post( Node *n ) {
 
     // Now split the bool up thru the phi
     Node *bolphi = split_thru_phi( bol, n_ctrl, -1 );
+    guarantee(bolphi != NULL, "null boolean phi node");
+
     _igvn.replace_node( bol, bolphi );
     assert( iff->in(1) == bolphi, "" );
+
     if( bolphi->Value(&_igvn)->singleton() )
       return;
 
@@ -1006,7 +1013,7 @@ void PhaseIdealLoop::split_if_with_blocks_post( Node *n ) {
             // to fold a StoreP and an AddP together (as part of an
             // address expression) and the AddP and StoreP have
             // different controls.
-            if( !x->is_Load() && !x->is_DecodeN() ) _igvn._worklist.yank(x);
+            if (!x->is_Load() && !x->is_DecodeNarrowPtr()) _igvn._worklist.yank(x);
           }
           _igvn.remove_dead_node(n);
         }
@@ -1628,6 +1635,7 @@ ProjNode* PhaseIdealLoop::proj_clone(ProjNode* p, IfNode* iff) {
 //------------------------------ short_circuit_if -------------------------------------
 // Force the iff control output to be the live_proj
 Node* PhaseIdealLoop::short_circuit_if(IfNode* iff, ProjNode* live_proj) {
+  guarantee(live_proj != NULL, "null projection");
   int proj_con = live_proj->_con;
   assert(proj_con == 0 || proj_con == 1, "false or true projection");
   Node *con = _igvn.intcon(proj_con);
@@ -1686,6 +1694,7 @@ ProjNode* PhaseIdealLoop::insert_if_before_proj(Node* left, bool Signed, BoolTes
   set_idom(proj, new_if, ddepth);
 
   ProjNode* new_exit = proj_clone(other_proj, new_if)->as_Proj();
+  guarantee(new_exit != NULL, "null exit node");
   register_node(new_exit, get_loop(other_proj), new_if, ddepth);
 
   return new_exit;
@@ -1793,7 +1802,10 @@ IfNode* PhaseIdealLoop::insert_cmpi_loop_exit(IfNode* if_cmpu, IdealLoopTree *lo
   int stride = stride_of_possible_iv(if_cmpu);
   if (stride == 0) return NULL;
 
-  ProjNode* lp_continue = stay_in_loop(if_cmpu, loop)->as_Proj();
+  Node* lp_proj = stay_in_loop(if_cmpu, loop);
+  guarantee(lp_proj != NULL, "null loop node");
+
+  ProjNode* lp_continue = lp_proj->as_Proj();
   ProjNode* lp_exit     = if_cmpu->proj_out(!lp_continue->is_IfTrue())->as_Proj();
 
   Node* limit = NULL;
@@ -1805,6 +1817,7 @@ IfNode* PhaseIdealLoop::insert_cmpi_loop_exit(IfNode* if_cmpu, IdealLoopTree *lo
   }
   // Create a new region on the exit path
   RegionNode* reg = insert_region_before_proj(lp_exit);
+  guarantee(reg != NULL, "null region node");
 
   // Clone the if-cmpu-true-false using a signed compare
   BoolTest::mask rel_i = stride > 0 ? bol->_test._test : BoolTest::ge;
@@ -1926,8 +1939,8 @@ bool PhaseIdealLoop::has_use_internal_to_set( Node* n, VectorSet& vset, IdealLoo
 
 //------------------------------ clone_for_use_outside_loop -------------------------------------
 // clone "n" for uses that are outside of loop
-void PhaseIdealLoop::clone_for_use_outside_loop( IdealLoopTree *loop, Node* n, Node_List& worklist ) {
-
+int PhaseIdealLoop::clone_for_use_outside_loop( IdealLoopTree *loop, Node* n, Node_List& worklist ) {
+  int cloned = 0;
   assert(worklist.size() == 0, "should be empty");
   for (DUIterator_Fast jmax, j = n->fast_outs(jmax); j < jmax; j++) {
     Node* use = n->fast_out(j);
@@ -1947,6 +1960,7 @@ void PhaseIdealLoop::clone_for_use_outside_loop( IdealLoopTree *loop, Node* n, N
     // clone "n" and insert it between the inputs of "n" and the use outside the loop
     Node* n_clone = n->clone();
     _igvn.replace_input_of(use, j, n_clone);
+    cloned++;
     Node* use_c;
     if (!use->is_Phi()) {
       use_c = has_ctrl(use) ? get_ctrl(use) : use->in(0);
@@ -1964,6 +1978,7 @@ void PhaseIdealLoop::clone_for_use_outside_loop( IdealLoopTree *loop, Node* n, N
     }
 #endif
   }
+  return cloned;
 }
 
 
@@ -2482,6 +2497,7 @@ bool PhaseIdealLoop::partial_peel( IdealLoopTree *loop, Node_List &old_new ) {
 
   // Evacuate nodes in peel region into the not_peeled region if possible
   uint new_phi_cnt = 0;
+  uint cloned_for_outside_use = 0;
   for (i = 0; i < peel_list.size();) {
     Node* n = peel_list.at(i);
 #if !defined(PRODUCT)
@@ -2500,8 +2516,7 @@ bool PhaseIdealLoop::partial_peel( IdealLoopTree *loop, Node_List &old_new ) {
           // if not pinned and not a load (which maybe anti-dependent on a store)
           // and not a CMove (Matcher expects only bool->cmove).
           if ( n->in(0) == NULL && !n->is_Load() && !n->is_CMove() ) {
-            clone_for_use_outside_loop( loop, n, worklist );
-
+            cloned_for_outside_use += clone_for_use_outside_loop( loop, n, worklist );
             sink_list.push(n);
             peel     >>= n->_idx; // delete n from peel set.
             not_peel <<= n->_idx; // add n to not_peel set.
@@ -2538,6 +2553,12 @@ bool PhaseIdealLoop::partial_peel( IdealLoopTree *loop, Node_List &old_new ) {
     // Inhibit more partial peeling on this loop
     assert(!head->is_partial_peel_loop(), "not partial peeled");
     head->mark_partial_peel_failed();
+    if (cloned_for_outside_use > 0) {
+      // Terminate this round of loop opts because
+      // the graph outside this loop was changed.
+      C->set_major_progress();
+      return true;
+    }
     return false;
   }
 

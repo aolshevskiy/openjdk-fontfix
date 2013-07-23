@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 6948909 7083664
+# @bug 6948909
 # @summary Jarsigner removes MANIFEST.MF info for badly packages jar's
 #
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -83,6 +83,7 @@ import java.applet.Applet;
  * @author David Karlton
  * @author Arnaud Weber
  */
+@SuppressWarnings("serial")
 public class JPopupMenu extends JComponent implements Accessible,MenuElement {
 
     /**
@@ -852,6 +853,11 @@ public class JPopupMenu extends JComponent implements Accessible,MenuElement {
     /**
      * Sets the location of the upper left corner of the
      * popup menu using x, y coordinates.
+     * <p>
+     * The method changes the geometry-related data. Therefore,
+     * the native windowing system may ignore such requests, or it may modify
+     * the requested data, so that the {@code JPopupMenu} object is placed and sized
+     * in a way that corresponds closely to the desktop settings.
      *
      * @param x the x coordinate of the popup's new position
      *          in the screen's coordinate space
@@ -1200,6 +1206,7 @@ public class JPopupMenu extends JComponent implements Accessible,MenuElement {
      * Java Accessibility API appropriate to popup menu user-interface
      * elements.
      */
+    @SuppressWarnings("serial")
     protected class AccessibleJPopupMenu extends AccessibleJComponent
         implements PropertyChangeListener {
 
@@ -1268,7 +1275,7 @@ public class JPopupMenu extends JComponent implements Accessible,MenuElement {
         private void fireActiveDescendant() {
             if (JPopupMenu.this instanceof BasicComboPopup) {
                 // get the popup list
-                JList popupList = ((BasicComboPopup)JPopupMenu.this).getList();
+                JList<?> popupList = ((BasicComboPopup)JPopupMenu.this).getList();
                 if (popupList == null) {
                     return;
                 }
@@ -1335,7 +1342,7 @@ public class JPopupMenu extends JComponent implements Accessible,MenuElement {
         throws IOException, ClassNotFoundException {
         s.defaultReadObject();
 
-        Vector          values = (Vector)s.readObject();
+        Vector<?>          values = (Vector)s.readObject();
         int             indexCounter = 0;
         int             maxCounter = values.size();
 
@@ -1519,6 +1526,7 @@ public class JPopupMenu extends JComponent implements Accessible,MenuElement {
     /**
      * A popup menu-specific separator.
      */
+    @SuppressWarnings("serial")
     static public class Separator extends JSeparator
     {
         public Separator( )

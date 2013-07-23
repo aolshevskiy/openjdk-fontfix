@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -70,16 +70,24 @@ public class Debug {
         System.err.println();
         System.err.println("all           turn on all debugging");
         System.err.println("access        print all checkPermission results");
+        System.err.println("certpath      PKIX CertPathBuilder and");
+        System.err.println("              CertPathValidator debugging");
         System.err.println("combiner      SubjectDomainCombiner debugging");
         System.err.println("gssloginconfig");
+        System.err.println("              GSS LoginConfigImpl debugging");
         System.err.println("configfile    JAAS ConfigFile loading");
         System.err.println("configparser  JAAS ConfigFile parsing");
-        System.err.println("              GSS LoginConfigImpl debugging");
         System.err.println("jar           jar verification");
         System.err.println("logincontext  login context results");
+        System.err.println("jca           JCA engine class debugging");
         System.err.println("policy        loading and granting");
         System.err.println("provider      security provider debugging");
+        System.err.println("pkcs11        PKCS11 session manager debugging");
+        System.err.println("pkcs11keystore");
+        System.err.println("              PKCS11 KeyStore debugging");
+        System.err.println("sunpkcs11     SunPKCS11 provider debugging");
         System.err.println("scl           permissions SecureClassLoader assigns");
+        System.err.println("ts            timestamping");
         System.err.println();
         System.err.println("The following can be used with access:");
         System.err.println();

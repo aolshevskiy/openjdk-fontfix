@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,9 +26,7 @@
 package sun.lwawt.macosx;
 
 import java.awt.*;
-import java.awt.event.*;
 import java.awt.geom.Rectangle2D;
-import java.awt.image.VolatileImage;
 
 import sun.awt.CGraphicsConfig;
 import sun.awt.CGraphicsEnvironment;
@@ -56,18 +54,26 @@ public class CPlatformView extends CFRetainedResource {
     }
 
     public void initialize(LWWindowPeer peer, CPlatformResponder responder) {
-        this.peer = peer;
-        this.responder = responder;
+        initializeBase(peer, responder);
 
         if (!LWCToolkit.getSunAwtDisableCALayers()) {
-            this.windowLayer = new CGLLayer(peer);
+            this.windowLayer = createCGLayer();
         }
         setPtr(nativeCreateView(0, 0, 0, 0, getWindowLayerPtr()));
     }
 
+    public CGLLayer createCGLayer() {
+        return new CGLLayer(peer);
+    }
+
+    protected void initializeBase(LWWindowPeer peer, CPlatformResponder responder) {
+        this.peer = peer;
+        this.responder = responder;
+    }
+
     public long getAWTView() {
         return ptr;
-        }
+    }
 
     public boolean isOpaque() {
         return !peer.isTranslucent();
@@ -98,35 +104,19 @@ public class CPlatformView extends CFRetainedResource {
         CWrapper.NSView.exitFullScreenMode(ptr);
     }
 
+    public void setToolTip(String msg) {
+        CWrapper.NSView.setToolTip(ptr, msg);
+    }
+
     // ----------------------------------------------------------------------
     // PAINTING METHODS
     // ----------------------------------------------------------------------
-
-    public void drawImageOnPeer(VolatileImage xBackBuffer, int x1, int y1, int x2, int y2) {
-        Graphics g = peer.getGraphics();
-        try {
-            g.drawImage(xBackBuffer, x1, y1, x2, y2, x1, y1, x2, y2, null);
-        } finally {
-            g.dispose();
-        }
-    }
-
-    public Image createBackBuffer() {
-        Rectangle r = peer.getBounds();
-        Image im = null;
-        if (!r.isEmpty()) {
-            int transparency = (isOpaque() ? Transparency.OPAQUE : Transparency.TRANSLUCENT);
-            im = peer.getGraphicsConfiguration().createCompatibleImage(r.width, r.height, transparency);
-        }
-        return im;
-    }
-
     public SurfaceData replaceSurfaceData() {
         if (!LWCToolkit.getSunAwtDisableCALayers()) {
             surfaceData = windowLayer.replaceSurfaceData();
         } else {
             if (surfaceData == null) {
-                CGraphicsConfig graphicsConfig = (CGraphicsConfig)peer.getGraphicsConfiguration();
+                CGraphicsConfig graphicsConfig = (CGraphicsConfig)getGraphicsConfiguration();
                 surfaceData = graphicsConfig.createSurfaceData(this);
             } else {
                 validateSurface();
@@ -220,7 +210,7 @@ public class CPlatformView extends CFRetainedResource {
 
     private void deliverKeyEvent(NSEvent event) {
         responder.handleKeyEvent(event.getType(), event.getModifierFlags(),
-                                 event.getCharactersIgnoringModifiers(), event.getKeyCode(), true);
+                                 event.getCharactersIgnoringModifiers(), event.getKeyCode(), true, false);
     }
 
     /**

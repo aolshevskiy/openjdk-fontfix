@@ -1,7 +1,7 @@
 #!/bin/sh
 
 #
-# Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -40,7 +40,7 @@ if [ $? -eq 2 ]; then
 fi
 
 rm -f jrunscriptTest.out 2>/dev/null
-${JRUNSCRIPT} > jrunscriptTest.out 2>&1 <<EOF
+${JRUNSCRIPT} -J-Djava.awt.headless=true -l nashorn > jrunscriptTest.out 2>&1 <<EOF
 v = 2 + 5;
 v *= 5;
 v = v + " is the value";
@@ -52,25 +52,7 @@ EOF
 $golden_diff jrunscriptTest.out ${TESTSRC}/repl.out
 if [ $? != 0 ]
 then
-  echo "Output of jrunscript session differ from expected output. Failed."
-  rm -f jrunscriptTest.out 2>/dev/null
-  exit 1
-fi
-
-rm -f jrunscriptTest.out 2>/dev/null
-${JRUNSCRIPT} -l js > jrunscriptTest.out 2>&1 <<EOF
-v = 2 + 5;
-v *= 5;
-v = v + " is the value";
-if (v != 0) { println('yes v != 0'); }
-java.lang.System.out.println('hello world from script');
-new java.lang.Runnable() { run: function() { println('I am runnable'); }}.run();
-EOF
-
-$golden_diff jrunscriptTest.out ${TESTSRC}/repl.out
-if [ $? != 0 ]
-then
-  echo "Output of jrunscript -l js differ from expected output. Failed."
+  echo "Output of jrunscript -l nashorn differ from expected output. Failed."
   rm -f jrunscriptTest.out 2>/dev/null
   exit 1
 fi

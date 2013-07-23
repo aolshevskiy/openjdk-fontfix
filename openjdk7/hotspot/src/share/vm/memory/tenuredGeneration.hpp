@@ -29,6 +29,7 @@
 #include "gc_implementation/shared/gcStats.hpp"
 #include "gc_implementation/shared/generationCounters.hpp"
 #include "memory/generation.hpp"
+#include "utilities/macros.hpp"
 
 // TenuredGeneration models the heap containing old (promoted/tenured) objects.
 
@@ -37,19 +38,12 @@ class ParGCAllocBufferWithBOT;
 class TenuredGeneration: public OneContigSpaceCardGeneration {
   friend class VMStructs;
  protected:
-  // current shrinking effect: this damps shrinking when the heap gets empty.
-  size_t _shrink_factor;
-  // Some statistics from before gc started.
-  // These are gathered in the gc_prologue (and should_collect)
-  // to control growing/shrinking policy in spite of promotions.
-  size_t _capacity_at_prologue;
-  size_t _used_at_prologue;
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   // To support parallel promotion: an array of parallel allocation
   // buffers, one per thread, initially NULL.
   ParGCAllocBufferWithBOT** _alloc_buffers;
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   // Retire all alloc buffers before a full GC, so that they will be
   // re-allocated at the start of the next young GC.
@@ -79,9 +73,6 @@ class TenuredGeneration: public OneContigSpaceCardGeneration {
     return !CollectGen0First;
   }
 
-  // Mark sweep support
-  void compute_new_size();
-
   virtual void gc_prologue(bool full);
   virtual void gc_epilogue(bool full);
   bool should_collect(bool   full,
@@ -92,15 +83,16 @@ class TenuredGeneration: public OneContigSpaceCardGeneration {
                        bool clear_all_soft_refs,
                        size_t size,
                        bool is_tlab);
+  virtual void compute_new_size();
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   // Overrides.
   virtual oop par_promote(int thread_num,
                           oop obj, markOop m, size_t word_sz);
   virtual void par_promote_alloc_undo(int thread_num,
                                       HeapWord* obj, size_t word_sz);
   virtual void par_promote_alloc_done(int thread_num);
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   // Performance Counter support
   void update_counters();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -137,7 +137,7 @@ public class JStack {
     }
 
     // Returns sun.jvm.hotspot.tools.JStack if available, otherwise null.
-    private static Class loadSAClass() {
+    private static Class<?> loadSAClass() {
         //
         // Attempt to load JStack class - we specify the system class
         // loader so as to cater for development environments where

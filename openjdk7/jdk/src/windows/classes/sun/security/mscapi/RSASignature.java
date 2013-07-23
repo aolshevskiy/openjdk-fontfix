@@ -30,14 +30,10 @@ import java.security.PublicKey;
 import java.security.PrivateKey;
 import java.security.InvalidKeyException;
 import java.security.InvalidParameterException;
-import java.security.InvalidAlgorithmParameterException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.ProviderException;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
-import java.security.Signature;
-import java.security.SignatureSpi;
 import java.security.SignatureException;
 import java.math.BigInteger;
 
@@ -61,8 +57,8 @@ import sun.security.rsa.RSAKeyFactory;
  *
  * NOTE: NONEwithRSA must be supplied with a pre-computed message digest.
  *       Only the following digest algorithms are supported: MD5, SHA-1,
- *       SHA-256, SHA-384, SHA-512 and a special-purpose digest algorithm
- *       which is a concatenation of SHA-1 and MD5 digests.
+ *       SHA-256, SHA-384, SHA-512 and a special-purpose digest
+ *       algorithm which is a concatenation of SHA-1 and MD5 digests.
  *
  * @since   1.6
  * @author  Stanley Man-Kit Ho
@@ -474,6 +470,7 @@ abstract class RSASignature extends java.security.SignatureSpi
      * #engineSetParameter(java.security.spec.AlgorithmParameterSpec)
      * engineSetParameter}.
      */
+    @Deprecated
     protected void engineSetParameter(String param, Object value)
         throws InvalidParameterException
     {
@@ -503,6 +500,7 @@ abstract class RSASignature extends java.security.SignatureSpi
      *
      * @deprecated
      */
+    @Deprecated
     protected Object engineGetParameter(String param)
         throws InvalidParameterException
     {

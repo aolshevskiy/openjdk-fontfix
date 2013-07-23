@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.tools.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -69,7 +68,7 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * An service endpoint interface cannot contain constant declaration: Interface: {0} field: {1}.
+     * A service endpoint interface cannot contain constant declaration: Interface: {0} field: {1}.
      *
      */
     public static String WEBSERVICEAP_SEI_CANNOT_CONTAIN_CONSTANT_VALUES(Object arg0, Object arg1) {
@@ -93,7 +92,7 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * All rpc literal parameters must have a WebParam annotation.  Class: {0} method: {1} parameter {2}
+     * All RPC literal parameters must have a WebParam annotation.  Class: {0} method: {1} parameter {2}
      *
      */
     public static String WEBSERVICEAP_RPC_LITERAL_PARAMETERS_MUST_HAVE_WEBPARAM(Object arg0, Object arg1, Object arg2) {
@@ -237,23 +236,11 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * Service endpointpoint interface: {0} has cannot have a WebService.endpointInterface annotation: {1}
+     * Service endpoint interface: {0} cannot have a WebService.endpointInterface annotation: {1}
      *
      */
     public static String WEBSERVICEAP_ENDPOINTINTERFACE_ON_INTERFACE(Object arg0, Object arg1) {
         return localizer.localize(localizableWEBSERVICEAP_ENDPOINTINTERFACE_ON_INTERFACE(arg0, arg1));
-    }
-
-    public static Localizable localizableWEBSERVICEAP_NESTED_MODEL_ERROR(Object arg0) {
-        return messageFactory.getMessage("webserviceap.nestedModelError", arg0);
-    }
-
-    /**
-     * modeler error: {0}
-     *
-     */
-    public static String WEBSERVICEAP_NESTED_MODEL_ERROR(Object arg0) {
-        return localizer.localize(localizableWEBSERVICEAP_NESTED_MODEL_ERROR(arg0));
     }
 
     public static Localizable localizableWEBSERVICEAP_ONEWAY_AND_OUT(Object arg0, Object arg1) {
@@ -273,7 +260,7 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * All rpc literal WebParams must specify a name.  Class: {0} method {1} paramter {2}
+     * All RPC literal WebParams must specify a name.  Class: {0} method {1} parameter {2}
      *
      */
     public static String WEBSERVICEAP_RPC_LITERAL_WEBPARAMS_MUST_SPECIFY_NAME(Object arg0, Object arg1, Object arg2) {
@@ -453,7 +440,7 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * All WebParam annotations on header parameters must specify a name.  Class: {0} method {1} paramter {2}
+     * All WebParam annotations on header parameters must specify a name.  Class: {0} method {1} parameter {2}
      *
      */
     public static String WEBSERVICEAP_HEADER_PARAMETERS_MUST_HAVE_WEBPARAM_NAME(Object arg0, Object arg1, Object arg2) {
@@ -561,7 +548,7 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * Could not get TypeDeclaration for: {0} in apt round: {1}
+     * Could not get TypeElement for: {0} in annotation processing round: {1}
      *
      */
     public static String WEBSERVICEAP_COULD_NOT_FIND_TYPEDECL(Object arg0, Object arg1) {
@@ -645,7 +632,7 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * RPC literal SOAPBindings must have parameterStyle WRAPPPED. Class: {0}.
+     * RPC literal SOAPBindings must have parameterStyle WRAPPED. Class: {0}.
      *
      */
     public static String WEBSERVICEAP_RPC_LITERAL_MUST_NOT_BE_BARE(Object arg0) {
@@ -669,7 +656,7 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * The {0} class has a rpc/encoded SOAPBinding.  Rpc/encoded SOAPBindings are not supported in JAXWS 2.0.
+     * The class {0} has a rpc/encoded SOAPBinding.  Rpc/encoded SOAPBindings are not supported in JAXWS 2.0.
      *
      */
     public static String WEBSERVICEAP_RPC_ENCODED_NOT_SUPPORTED(Object arg0) {
@@ -710,6 +697,18 @@ public final class WebserviceapMessages {
      */
     public static String WEBSERVICEAP_METHOD_NOT_IMPLEMENTED(Object arg0, Object arg1, Object arg2) {
         return localizer.localize(localizableWEBSERVICEAP_METHOD_NOT_IMPLEMENTED(arg0, arg1, arg2));
+    }
+
+    public static Localizable localizableWEBSERVICEAP_PARSING_JAVAC_OPTIONS_ERROR() {
+        return messageFactory.getMessage("webserviceap.parsing.javac.options.error");
+    }
+
+    /**
+     * Can't get javac options from processingEnv.
+     *
+     */
+    public static String WEBSERVICEAP_PARSING_JAVAC_OPTIONS_ERROR() {
+        return localizer.localize(localizableWEBSERVICEAP_PARSING_JAVAC_OPTIONS_ERROR());
     }
 
     public static Localizable localizableWEBSERVICE_ENCODED_NOT_SUPPORTED(Object arg0, Object arg1) {
@@ -813,7 +812,7 @@ public final class WebserviceapMessages {
     }
 
     /**
-     * The method {1} of class {0} is annotated @Oneway but contains inout or out paramerters (javax.xml.ws.Holder)
+     * The method {1} of class {0} is annotated @Oneway but contains INOUT or OUT parameters (javax.xml.ws.Holder)
      *
      */
     public static String WEBSERVICEAP_ONEWAY_OPERATION_CANNOT_HAVE_HOLDERS(Object arg0, Object arg1) {

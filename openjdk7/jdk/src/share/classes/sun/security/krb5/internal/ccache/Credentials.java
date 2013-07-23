@@ -36,9 +36,7 @@ import sun.security.krb5.internal.*;
 public class Credentials {
 
     PrincipalName cname;
-    Realm crealm;
     PrincipalName sname;
-    Realm srealm;
     EncryptionKey key;
     KerberosTime authtime;
     KerberosTime starttime;//optional
@@ -67,25 +65,14 @@ public class Credentials {
             Ticket new_ticket,
             Ticket new_secondTicket) {
         cname = (PrincipalName) new_cname.clone();
-        if (new_cname.getRealm() != null) {
-            crealm = (Realm) new_cname.getRealm().clone();
-        }
-
         sname = (PrincipalName) new_sname.clone();
-        if (new_sname.getRealm() != null) {
-            srealm = (Realm) new_sname.getRealm().clone();
-        }
-
         key = (EncryptionKey) new_key.clone();
 
-        authtime = (KerberosTime) new_authtime.clone();
-        if (new_starttime != null) {
-            starttime = (KerberosTime) new_starttime.clone();
-        }
-        endtime = (KerberosTime) new_endtime.clone();
-        if (new_renewTill != null) {
-            renewTill = (KerberosTime) new_renewTill.clone();
-        }
+        authtime = new_authtime;
+        starttime = new_starttime;
+        endtime = new_endtime;
+        renewTill = new_renewTill;
+
         if (new_caddr != null) {
             caddr = (HostAddresses) new_caddr.clone();
         }
@@ -110,20 +97,15 @@ public class Credentials {
         {
             return;
         }
-        crealm = (Realm) kdcRep.crealm.clone();
         cname = (PrincipalName) kdcRep.cname.clone();
         ticket = (Ticket) kdcRep.ticket.clone();
         key = (EncryptionKey) kdcRep.encKDCRepPart.key.clone();
         flags = (TicketFlags) kdcRep.encKDCRepPart.flags.clone();
-        authtime = (KerberosTime) kdcRep.encKDCRepPart.authtime.clone();
-        if (kdcRep.encKDCRepPart.starttime != null) {
-            starttime = (KerberosTime) kdcRep.encKDCRepPart.starttime.clone();
-        }
-        endtime = (KerberosTime) kdcRep.encKDCRepPart.endtime.clone();
-        if (kdcRep.encKDCRepPart.renewTill != null) {
-            renewTill = (KerberosTime) kdcRep.encKDCRepPart.renewTill.clone();
-        }
-        srealm = (Realm) kdcRep.encKDCRepPart.srealm.clone();
+        authtime = kdcRep.encKDCRepPart.authtime;
+        starttime = kdcRep.encKDCRepPart.starttime;
+        endtime = kdcRep.encKDCRepPart.endtime;
+        renewTill = kdcRep.encKDCRepPart.renewTill;
+
         sname = (PrincipalName) kdcRep.encKDCRepPart.sname.clone();
         caddr = (HostAddresses) kdcRep.encKDCRepPart.caddr.clone();
         secondTicket = (Ticket) new_secondTicket.clone();
@@ -138,30 +120,12 @@ public class Credentials {
 
     public Credentials(KDCRep kdcRep, Ticket new_ticket) {
         sname = (PrincipalName) kdcRep.encKDCRepPart.sname.clone();
-        srealm = (Realm) kdcRep.encKDCRepPart.srealm.clone();
-        try {
-            sname.setRealm(srealm);
-        } catch (RealmException e) {
-        }
         cname = (PrincipalName) kdcRep.cname.clone();
-        crealm = (Realm) kdcRep.crealm.clone();
-        try {
-            cname.setRealm(crealm);
-        } catch (RealmException e) {
-        }
         key = (EncryptionKey) kdcRep.encKDCRepPart.key.clone();
-        authtime = (KerberosTime) kdcRep.encKDCRepPart.authtime.clone();
-        if (kdcRep.encKDCRepPart.starttime != null) {
-            starttime = (KerberosTime) kdcRep.encKDCRepPart.starttime.clone();
-        } else {
-            starttime = null;
-        }
-        endtime = (KerberosTime) kdcRep.encKDCRepPart.endtime.clone();
-        if (kdcRep.encKDCRepPart.renewTill != null) {
-            renewTill = (KerberosTime) kdcRep.encKDCRepPart.renewTill.clone();
-        } else {
-            renewTill = null;
-        }
+        authtime = kdcRep.encKDCRepPart.authtime;
+        starttime = kdcRep.encKDCRepPart.starttime;
+        endtime = kdcRep.encKDCRepPart.endtime;
+        renewTill = kdcRep.encKDCRepPart.renewTill;
         // if (kdcRep.msgType == Krb5.KRB_AS_REP) {
         //    isEncInSKey = false;
         //    secondTicket = null;
@@ -202,15 +166,26 @@ public class Credentials {
     }
 
     public PrincipalName getServicePrincipal() throws RealmException {
-        if (sname.getRealm() == null) {
-            sname.setRealm(srealm);
-        }
         return sname;
     }
 
     public sun.security.krb5.Credentials setKrbCreds() {
+        // Note: We will not pass authorizationData to s.s.k.Credentials. The
+        // field in that class will be passed to Krb5Context as the return
+        // value of ExtendedGSSContext.inquireSecContext(KRB5_GET_AUTHZ_DATA),
+        // which is documented as the authData in the service ticket. That
+        // is on the acceptor side.
+        //
+        // This class is for the initiator side. Also, authdata inside a ccache
+        // is most likely to be the one in Authenticator in PA-TGS-REQ encoded
+        // in TGS-REQ, therefore only stored with a service ticket. Currently
+        // in Java, we only reads TGTs.
         return new sun.security.krb5.Credentials(ticket,
                 cname, sname, key, flags, authtime, starttime, endtime, renewTill, caddr);
+    }
+
+    public KerberosTime getStartTime() {
+        return starttime;
     }
 
     public KerberosTime getAuthTime() {
@@ -221,11 +196,19 @@ public class Credentials {
         return endtime;
     }
 
+    public KerberosTime getRenewTill() {
+        return renewTill;
+    }
+
     public TicketFlags getTicketFlags() {
         return flags;
     }
 
     public int getEType() {
         return key.getEType();
+    }
+
+    public int getTktEType() {
+        return ticket.encPart.getEType();
     }
 }

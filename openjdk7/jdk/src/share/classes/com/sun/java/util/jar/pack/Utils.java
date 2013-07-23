@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,12 +25,6 @@
 
 package com.sun.java.util.jar.pack;
 
-import com.sun.java.util.jar.pack.ConstantPool.ClassEntry;
-import com.sun.java.util.jar.pack.ConstantPool.DescriptorEntry;
-import com.sun.java.util.jar.pack.ConstantPool.LiteralEntry;
-import com.sun.java.util.jar.pack.ConstantPool.MemberEntry;
-import com.sun.java.util.jar.pack.ConstantPool.SignatureEntry;
-import com.sun.java.util.jar.pack.ConstantPool.Utf8Entry;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -38,9 +32,8 @@ import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Collections;
 import java.util.Date;
-import java.util.Enumeration;
-import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
@@ -60,7 +53,7 @@ class Utils {
      * If >3, print tons of comments (e.g., processing of references).
      * (installer only)
      */
-    static final String DEBUG_VERBOSE = Utils.COM_PREFIX+"verbose";
+    static final String DEBUG_VERBOSE = COM_PREFIX+"verbose";
 
     /*
      * Disables use of native code, prefers the Java-coded implementation.
@@ -129,38 +122,20 @@ class Utils {
      */
     static final String PACK_ZIP_ARCHIVE_MARKER_COMMENT = "PACK200";
 
+    /*
+     * behaviour when we hit a class format error, but not necessarily
+     * an unknown attribute, by default it is allowed to PASS.
+     */
+    static final String CLASS_FORMAT_ERROR = COM_PREFIX+"class.format.error";
+
     // Keep a TLS point to the global data and environment.
     // This makes it simpler to supply environmental options
     // to the engine code, especially the native code.
     static final ThreadLocal<TLGlobals> currentInstance = new ThreadLocal<>();
 
-    // convenience methods to access the TL globals
+    // convenience method to access the TL globals
     static TLGlobals getTLGlobals() {
         return currentInstance.get();
-    }
-
-    static Map<String, Utf8Entry> getUtf8Entries() {
-        return getTLGlobals().getUtf8Entries();
-    }
-
-    static Map<String, ClassEntry> getClassEntries() {
-        return getTLGlobals().getClassEntries();
-    }
-
-    static Map<Object, LiteralEntry> getLiteralEntries() {
-        return getTLGlobals().getLiteralEntries();
-    }
-
-    static Map<String, DescriptorEntry> getDescriptorEntries() {
-         return getTLGlobals().getDescriptorEntries();
-    }
-
-    static Map<String, SignatureEntry> getSignatureEntries() {
-        return getTLGlobals().getSignatureEntries();
-    }
-
-    static Map<String, MemberEntry> getMemberEntries() {
-        return getTLGlobals().getMemberEntries();
     }
 
     static PropMap currentPropMap() {
@@ -173,8 +148,19 @@ class Utils {
     }
 
     static final boolean nolog
-        = Boolean.getBoolean(Utils.COM_PREFIX+"nolog");
+        = Boolean.getBoolean(COM_PREFIX+"nolog");
 
+    static final boolean SORT_MEMBERS_DESCR_MAJOR
+        = Boolean.getBoolean(COM_PREFIX+"sort.members.descr.major");
+
+    static final boolean SORT_HANDLES_KIND_MAJOR
+        = Boolean.getBoolean(COM_PREFIX+"sort.handles.kind.major");
+
+    static final boolean SORT_INDY_BSS_MAJOR
+        = Boolean.getBoolean(COM_PREFIX+"sort.indy.bss.major");
+
+    static final boolean SORT_BSS_BSM_MAJOR
+        = Boolean.getBoolean(COM_PREFIX+"sort.bss.bsm.major");
 
     static class Pack200Logger {
         private final String name;
@@ -224,9 +210,7 @@ class Utils {
     static String getVersionString() {
         return "Pack200, Vendor: " +
             System.getProperty("java.vendor") +
-            ", Version: " +
-            Constants.JAVA6_PACKAGE_MAJOR_VERSION + "." +
-            Constants.JAVA6_PACKAGE_MINOR_VERSION;
+            ", Version: " + Constants.MAX_PACKAGE_VERSION;
     }
 
     static void markJarFile(JarOutputStream out) throws IOException {
@@ -253,8 +237,7 @@ class Utils {
     }
     static void copyJarFile(JarFile in, JarOutputStream out) throws IOException {
         byte[] buffer = new byte[1 << 14];
-        for (Enumeration e = in.entries(); e.hasMoreElements(); ) {
-            JarEntry je = (JarEntry) e.nextElement();
+        for (JarEntry je : Collections.list(in.entries())) {
             out.putNextEntry(je);
             InputStream ein = in.getInputStream(je);
             for (int nr; 0 < (nr = ein.read(buffer)); ) {

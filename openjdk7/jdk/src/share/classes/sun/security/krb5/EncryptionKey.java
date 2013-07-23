@@ -98,36 +98,6 @@ public class EncryptionKey
     }
 
     /**
-     * Obtains the latest version of the secret key of
-     * the principal from a keytab.
-     *
-     * @param princ the principal whose secret key is desired
-     * @param keytab the path to the keytab file. A value of null
-     * will be accepted to indicate that the default path should be
-     * searched.
-     * @returns the secret key or null if none was found.
-     */
-    /*
-    // Replaced by acquireSecretKeys
-    public static EncryptionKey acquireSecretKey(PrincipalName princ,
-                                                 String keytab)
-        throws KrbException, IOException {
-
-        if (princ == null) {
-            throw new IllegalArgumentException(
-                "Cannot have null pricipal name to look in keytab.");
-        }
-
-        KeyTab ktab = KeyTab.getInstance(keytab);
-
-        if (ktab == null)
-            return null;
-
-        return ktab.readServiceKey(princ);
-    }
-    */
-
-    /**
      * Obtains all versions of the secret key of the principal from a
      * keytab.
      *
@@ -208,9 +178,6 @@ public class EncryptionKey
             String salt) throws KrbException {
 
         int[] etypes = EType.getDefaults("default_tkt_enctypes");
-        if (etypes == null) {
-            etypes = EType.getBuiltInDefaults();
-        }
 
         EncryptionKey[] encKeys = new EncryptionKey[etypes.length];
         for (int i = 0; i < etypes.length; i++) {
@@ -330,9 +297,11 @@ public class EncryptionKey
 
     /**
      * Generates a sub-sessionkey from a given session key.
+     *
+     * Used in AcceptSecContextToken and KrbApReq by acceptor- and initiator-
+     * side respectively.
      */
-     // Used in KrbApRep, KrbApReq
-    EncryptionKey(EncryptionKey key) throws KrbCryptoException {
+    public EncryptionKey(EncryptionKey key) throws KrbCryptoException {
         // generate random sub-session key
         keyValue = Confounder.bytes(key.keyValue.length);
         for (int i = 0; i < keyValue.length; i++) {
@@ -555,6 +524,12 @@ public class EncryptionKey
 
         int ktype;
         boolean etypeFound = false;
+
+        // When no matched kvno is found, returns tke key of the same
+        // etype with the highest kvno
+        int kvno_found = 0;
+        EncryptionKey key_found = null;
+
         for (int i = 0; i < keys.length; i++) {
             ktype = keys[i].getEType();
             if (EType.isSupported(ktype)) {
@@ -563,6 +538,10 @@ public class EncryptionKey
                     etypeFound = true;
                     if (versionMatches(kvno, kv)) {
                         return keys[i];
+                    } else if (kv > kvno_found) {
+                        // kv is not null
+                        key_found = keys[i];
+                        kvno_found = kv;
                     }
                 }
             }
@@ -580,12 +559,17 @@ public class EncryptionKey
                     etypeFound = true;
                     if (versionMatches(kvno, kv)) {
                         return new EncryptionKey(etype, keys[i].getBytes());
+                    } else if (kv > kvno_found) {
+                        key_found = new EncryptionKey(etype, keys[i].getBytes());
+                        kvno_found = kv;
                     }
                 }
             }
         }
         if (etypeFound) {
-            throw new KrbException(Krb5.KRB_AP_ERR_BADKEYVER);
+            return key_found;
+            // For compatibility, will not fail here.
+            //throw new KrbException(Krb5.KRB_AP_ERR_BADKEYVER);
         }
         return null;
     }

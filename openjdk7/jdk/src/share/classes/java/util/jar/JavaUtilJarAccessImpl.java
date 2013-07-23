@@ -37,6 +37,10 @@ class JavaUtilJarAccessImpl implements JavaUtilJarAccess {
         return jar.hasClassPathAttribute();
     }
 
+    public boolean jarFileHasProfileAttribute(JarFile jar) throws IOException {
+        return jar.hasProfileAttribute();
+    }
+
     public CodeSource[] getCodeSources(JarFile jar, URL url) {
         return jar.getCodeSources(url);
     }
@@ -57,7 +61,7 @@ class JavaUtilJarAccessImpl implements JavaUtilJarAccess {
         jar.setEagerValidation(eager);
     }
 
-    public List getManifestDigests(JarFile jar) {
+    public List<Object> getManifestDigests(JarFile jar) {
         return jar.getManifestDigests();
     }
 }

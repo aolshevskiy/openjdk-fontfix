@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,21 +26,22 @@
 package com.sun.xml.internal.ws.encoding;
 
 import com.sun.xml.internal.ws.api.SOAPVersion;
-import com.sun.xml.internal.ws.api.WSBinding;
+import com.sun.xml.internal.ws.api.WSFeatureList;
 import com.sun.xml.internal.ws.api.message.Attachment;
+import com.sun.xml.internal.ws.api.message.AttachmentEx;
 import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.pipe.Codec;
 import com.sun.xml.internal.ws.api.pipe.ContentType;
 import com.sun.xml.internal.ws.developer.StreamingAttachmentFeature;
-
 import javax.activation.CommandMap;
 import javax.activation.MailcapCommandMap;
-import javax.activation.DataContentHandler;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.channels.ReadableByteChannel;
+import java.util.Iterator;
 import java.util.UUID;
 
 /**
@@ -91,20 +92,21 @@ abstract class MimeCodec implements Codec {
 
     public static final String MULTIPART_RELATED_MIME_TYPE = "multipart/related";
 
-    private String boundary;
-    private String messageContentType;
-    private boolean hasAttachments;
-    protected Codec rootCodec;
+    protected Codec mimeRootCodec;
     protected final SOAPVersion version;
-    protected final WSBinding binding;
+    protected final WSFeatureList features;
 
-    protected MimeCodec(SOAPVersion version, WSBinding binding) {
+    protected MimeCodec(SOAPVersion version, WSFeatureList f) {
         this.version = version;
-        this.binding = binding;
+        this.features = f;
     }
 
     public String getMimeType() {
         return MULTIPART_RELATED_MIME_TYPE;
+    }
+
+    protected Codec getMimeRootCodec(Packet packet) {
+        return mimeRootCodec;
     }
 
     // TODO: preencode String literals to byte[] so that they don't have to
@@ -114,7 +116,10 @@ abstract class MimeCodec implements Codec {
         if (msg == null) {
             return null;
         }
-
+        ContentTypeImpl ctImpl = (ContentTypeImpl)getStaticContentType(packet);
+        String boundary = ctImpl.getBoundary();
+        boolean hasAttachments = (boundary != null);
+        Codec rootCodec = getMimeRootCodec(packet);
         if (hasAttachments) {
             writeln("--"+boundary, out);
             ContentType ct = rootCodec.getStaticContentType(packet);
@@ -136,6 +141,7 @@ abstract class MimeCodec implements Codec {
                     cid = '<' + cid + '>';
                 writeln("Content-Id:" + cid, out);
                 writeln("Content-Type: " + att.getContentType(), out);
+                writeCustomMimeHeaders(att, out);
                 writeln("Content-Transfer-Encoding: binary", out);
                 writeln(out);                    // write \r\n
                 att.writeTo(out);
@@ -145,23 +151,46 @@ abstract class MimeCodec implements Codec {
             writeAsAscii("--", out);
         }
         // TODO not returing correct multipart/related type(no boundary)
-        return hasAttachments ? new ContentTypeImpl(messageContentType, packet.soapAction, null) : primaryCt;
+        return hasAttachments ? ctImpl : primaryCt;
+    }
+
+    private void writeCustomMimeHeaders(Attachment att, OutputStream out) throws IOException {
+        if (att instanceof AttachmentEx) {
+            Iterator<AttachmentEx.MimeHeader> allMimeHeaders = ((AttachmentEx) att).getMimeHeaders();
+            while (allMimeHeaders.hasNext()) {
+                AttachmentEx.MimeHeader mh = allMimeHeaders.next();
+                String name = mh.getName();
+
+                if (!"Content-Type".equalsIgnoreCase(name) && !"Content-Id".equalsIgnoreCase(name)) {
+                    writeln(name +": " + mh.getValue(), out);
+                }
+            }
+        }
     }
 
     public ContentType getStaticContentType(Packet packet) {
+        ContentType ct = (ContentType) packet.getInternalContentType();
+        if ( ct != null ) return ct;
         Message msg = packet.getMessage();
-        hasAttachments = !msg.getAttachments().isEmpty();
+        boolean hasAttachments = !msg.getAttachments().isEmpty();
+        Codec rootCodec = getMimeRootCodec(packet);
 
         if (hasAttachments) {
-            boundary = "uuid:" + UUID.randomUUID().toString();
+            String boundary = "uuid:" + UUID.randomUUID().toString();
             String boundaryParameter = "boundary=\"" + boundary + "\"";
             // TODO use primaryEncoder to get type
-            messageContentType =  MULTIPART_RELATED_MIME_TYPE +
+            String messageContentType =  MULTIPART_RELATED_MIME_TYPE +
                     "; type=\"" + rootCodec.getMimeType() + "\"; " +
                     boundaryParameter;
-            return new ContentTypeImpl(messageContentType, packet.soapAction, null);
+            ContentTypeImpl impl = new ContentTypeImpl(messageContentType, packet.soapAction, null);
+            impl.setBoundary(boundary);
+            impl.setBoundaryParameter(boundaryParameter);
+            packet.setContentType(impl);
+            return impl;
         } else {
-            return rootCodec.getStaticContentType(packet);
+            ct = rootCodec.getStaticContentType(packet);
+            packet.setContentType(ct);
+            return ct;
         }
     }
 
@@ -170,11 +199,11 @@ abstract class MimeCodec implements Codec {
      */
     protected MimeCodec(MimeCodec that) {
         this.version = that.version;
-        this.binding = that.binding;
+        this.features = that.features;
     }
 
     public void decode(InputStream in, String contentType, Packet packet) throws IOException {
-        MimeMultipartParser parser = new MimeMultipartParser(in, contentType, binding.getFeature(StreamingAttachmentFeature.class));
+        MimeMultipartParser parser = new MimeMultipartParser(in, contentType, features.get(StreamingAttachmentFeature.class));
         decode(parser,packet);
     }
 

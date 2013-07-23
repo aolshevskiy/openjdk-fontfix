@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,10 @@ package com.sun.xml.internal.ws.transport.http.server;
 
 import com.sun.istack.internal.Nullable;
 import com.sun.xml.internal.stream.buffer.XMLStreamBufferResult;
+import com.sun.xml.internal.ws.api.Component;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.BindingID;
+import com.sun.xml.internal.ws.api.databinding.MetadataReader;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.binding.BindingImpl;
 import com.sun.xml.internal.ws.api.server.*;
@@ -136,8 +138,67 @@ public class EndpointImpl extends Endpoint {
      * @deprecated This is a backdoor method. Don't use it unless you know what you are doing.
      */
     public EndpointImpl(WSEndpoint wse, Object serverContext) {
+        this(wse, serverContext, null);
+    }
+
+    /**
+     * Wraps an already created {@link WSEndpoint} into an {@link EndpointImpl},
+     * and immediately publishes it with the given context.
+     *
+     * @param wse created endpoint
+     * @param serverContext supported http context
+     * @param ctxt endpoint context
+     * @deprecated This is a backdoor method. Don't use it unless you know what you are doing.
+     */
+    public EndpointImpl(WSEndpoint wse, Object serverContext, EndpointContext ctxt) {
+        endpointContext = ctxt;
         actualEndpoint = new HttpEndpoint(null, getAdapter(wse, ""));
         ((HttpEndpoint) actualEndpoint).publish(serverContext);
+        binding = wse.getBinding();
+        implementor = null; // this violates the semantics, but hey, this is a backdoor.
+        implClass = null;
+        invoker = null;
+    }
+
+    /**
+     * Wraps an already created {@link WSEndpoint} into an {@link EndpointImpl},
+     * and immediately publishes it with the given context.
+     *
+     * @param wse created endpoint
+     * @param address endpoint address
+     * @deprecated This is a backdoor method. Don't use it unless you know what you are doing.
+     */
+    public EndpointImpl(WSEndpoint wse, String address) {
+        this(wse, address, null);
+    }
+
+
+    /**
+     * Wraps an already created {@link WSEndpoint} into an {@link EndpointImpl},
+     * and immediately publishes it with the given context.
+     *
+     * @param wse created endpoint
+     * @param address endpoint address
+     * @param ctxt endpoint context
+     * @deprecated This is a backdoor method. Don't use it unless you know what you are doing.
+     */
+    public EndpointImpl(WSEndpoint wse, String address, EndpointContext ctxt) {
+        URL url;
+        try {
+            url = new URL(address);
+        } catch (MalformedURLException ex) {
+            throw new IllegalArgumentException("Cannot create URL for this address " + address);
+        }
+        if (!url.getProtocol().equals("http")) {
+            throw new IllegalArgumentException(url.getProtocol() + " protocol based address is not supported");
+        }
+        if (!url.getPath().startsWith("/")) {
+            throw new IllegalArgumentException("Incorrect WebService address=" + address +
+                    ". The address's path should start with /");
+        }
+        endpointContext = ctxt;
+        actualEndpoint = new HttpEndpoint(null, getAdapter(wse, url.getPath()));
+        ((HttpEndpoint) actualEndpoint).publish(address);
         binding = wse.getBinding();
         implementor = null; // this violates the semantics, but hey, this is a backdoor.
         implClass = null;
@@ -243,6 +304,7 @@ public class EndpointImpl extends Endpoint {
             throw new UnsupportedOperationException("Couldn't load light weight http server", e);
         }
         container = getContainer();
+        MetadataReader metadataReader = EndpointFactory.getExternalMetadatReader(implClass, binding);
         WSEndpoint wse = WSEndpoint.create(
                 implClass, true,
                 invoker,
@@ -250,7 +312,7 @@ public class EndpointImpl extends Endpoint {
                 getProperty(QName.class, Endpoint.WSDL_PORT),
                 container,
                 binding,
-                getPrimaryWsdl(),
+                getPrimaryWsdl(metadataReader),
                 buildDocList(),
                 (EntityResolver) null,
                 false
@@ -300,10 +362,10 @@ public class EndpointImpl extends Endpoint {
     /**
      * Gets wsdl from @WebService or @WebServiceProvider
      */
-    private @Nullable SDDocumentSource getPrimaryWsdl() {
+    private @Nullable SDDocumentSource getPrimaryWsdl(MetadataReader metadataReader) {
         // Takes care of @WebService, @WebServiceProvider's wsdlLocation
-        EndpointFactory.verifyImplementorClass(implClass);
-        String wsdlLocation = EndpointFactory.getWsdlLocation(implClass);
+        EndpointFactory.verifyImplementorClass(implClass, metadataReader);
+        String wsdlLocation = EndpointFactory.getWsdlLocation(implClass, metadataReader);
         if (wsdlLocation != null) {
             ClassLoader cl = implClass.getClassLoader();
             URL url = cl.getResource(wsdlLocation);
@@ -345,13 +407,19 @@ public class EndpointImpl extends Endpoint {
     private HttpAdapter getAdapter(WSEndpoint endpoint, String urlPattern) {
         HttpAdapterList adapterList = null;
         if (endpointContext != null) {
-            for(Endpoint e : endpointContext.getEndpoints()) {
-                if (e.isPublished() && e != this) {
-                    adapterList = ((HttpEndpoint)(((EndpointImpl)e).actualEndpoint)).getAdapterOwner();
-                    assert adapterList != null;
-                    break;
+                if (endpointContext instanceof Component) {
+                        adapterList = ((Component) endpointContext).getSPI(HttpAdapterList.class);
                 }
-            }
+
+                if (adapterList == null) {
+                    for(Endpoint e : endpointContext.getEndpoints()) {
+                        if (e.isPublished() && e != this) {
+                            adapterList = ((HttpEndpoint)(((EndpointImpl)e).actualEndpoint)).getAdapterOwner();
+                            assert adapterList != null;
+                            break;
+                        }
+                    }
+                }
         }
         if (adapterList == null) {
             adapterList = new ServerAdapterList();
@@ -364,6 +432,12 @@ public class EndpointImpl extends Endpoint {
      */
     private Container getContainer() {
         if (endpointContext != null) {
+                if (endpointContext instanceof Component) {
+                        Container c = ((Component) endpointContext).getSPI(Container.class);
+                        if (c != null)
+                                return c;
+                }
+
             for(Endpoint e : endpointContext.getEndpoints()) {
                 if (e.isPublished() && e != this) {
                     return ((EndpointImpl)e).container;

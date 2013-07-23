@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,7 @@
 // Maximum MAX_GENERATIONS generation data can be tracked.
 #define MAX_GENERATIONS  512
 
-class GenerationData : public _ValueObj {
+class GenerationData VALUE_OBJ_CLASS_SPEC {
  private:
   int           _number_of_classes;
   MemRecorder*  _recorder_list;

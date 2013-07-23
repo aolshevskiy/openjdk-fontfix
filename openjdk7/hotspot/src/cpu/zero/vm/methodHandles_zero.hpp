@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2011, 2013, Red Hat, Inc.
+ * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2011 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,9 +31,9 @@ enum /* platform_dependent_constants */ {
 
 private:
   static oop popFromStack(TRAPS);
-  static void invoke_target(methodOop method, TRAPS);
-  static int method_handle_entry_invokeBasic(methodOop method, intptr_t UNUSED, TRAPS);
-  static int method_handle_entry_linkToStaticOrSpecial(methodOop method, intptr_t UNUSED, TRAPS);
-  static int method_handle_entry_linkToVirtual(methodOop method, intptr_t UNUSED, TRAPS);
-  static int method_handle_entry_linkToInterface(methodOop method, intptr_t UNUSED, TRAPS);
-  static int method_handle_entry_invalid(methodOop method, intptr_t UNUSED, TRAPS);
+  static void invoke_target(Method* method, TRAPS);
+  static int method_handle_entry_invokeBasic(Method* method, intptr_t UNUSED, TRAPS);
+  static int method_handle_entry_linkToStaticOrSpecial(Method* method, intptr_t UNUSED, TRAPS);
+  static int method_handle_entry_linkToVirtual(Method* method, intptr_t UNUSED, TRAPS);
+  static int method_handle_entry_linkToInterface(Method* method, intptr_t UNUSED, TRAPS);
+  static int method_handle_entry_invalid(Method* method, intptr_t UNUSED, TRAPS);

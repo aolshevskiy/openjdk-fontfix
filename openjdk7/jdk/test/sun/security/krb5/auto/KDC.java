@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -66,10 +66,6 @@ import sun.security.util.DerValue;
  * System properties recognized:
  * <ul>
  * <li>test.kdc.save.ccache
- * </ul>
- * Support policies:
- * <ul>
- * <li>ok-as-delegate
  * </ul>
  * Issues and TODOs:
  * <ol>
@@ -178,6 +174,24 @@ public class KDC {
          * Multiple ETYPE-INFO-ENTRY with same etype but different salt
          */
         DUP_ETYPE,
+        /**
+         * What backend server can be delegated to
+         */
+        OK_AS_DELEGATE,
+        /**
+         * Allow S4U2self, List<String> of middle servers.
+         * If not set, means KDC does not understand S4U2self at all, therefore
+         * would ignore any PA-FOR-USER request and send a ticket using the
+         * cname of teh requestor. If set, it returns FORWARDABLE tickets to
+         * a server with its name in the list
+         */
+        ALLOW_S4U2SELF,
+        /**
+         * Allow S4U2proxy, Map<String,List<String>> of middle servers to
+         * backends. If not set or a backend not in a server's list,
+         * Krb5.KDC_ERR_POLICY will be send for S4U2proxy request.
+         */
+        ALLOW_S4U2PROXY,
     };
 
     static {
@@ -232,84 +246,92 @@ public class KDC {
      * @param obj the value
      */
     public void setOption(Option key, Object value) {
-        options.put(key, value);
+        if (value == null) {
+            options.remove(key);
+        } else {
+            options.put(key, value);
+        }
     }
 
     /**
-     * Writes or appends KDC keys into a keytab. See doc for writeMultiKtab.
+     * Writes or appends keys into a keytab.
+     * <p>
+     * Attention: This is the most basic one of a series of methods below on
+     * keytab creation or modification. All these methods reference krb5.conf
+     * settings. If you need to modify krb5.conf or switch to another krb5.conf
+     * later, please call <code>Config.refresh()</code> again. For example:
+     * <pre>
+     * kdc.writeKtab("/etc/kdc/ktab", true);  // Config is initialized,
+     * System.setProperty("java.security.krb5.conf", "/home/mykrb5.conf");
+     * Config.refresh();
+     * </pre>
+     * Inside this method there are 2 places krb5.conf is used:
+     * <ol>
+     * <li> (Fatal) Generating keys: EncryptionKey.acquireSecretKeys
+     * <li> (Has workaround) Creating PrincipalName
+     * </ol>
+     * @param tab the keytab file name
      * @param append true if append, otherwise, overwrite.
+     * @param names the names to write into, write all if names is empty
      */
-    private static void writeKtab0(String tab, boolean append, KDC... kdcs)
+    public void writeKtab(String tab, boolean append, String... names)
             throws IOException, KrbException {
         KeyTab ktab = append ? KeyTab.getInstance(tab) : KeyTab.create(tab);
-        for (KDC kdc: kdcs) {
-            for (String name : kdc.passwords.keySet()) {
-                char[] pass = kdc.passwords.get(name);
-                int kvno = 0;
-                if (Character.isDigit(pass[pass.length-1])) {
-                    kvno = pass[pass.length-1] - '0';
-                }
-                ktab.addEntry(new PrincipalName(name,
+        Iterable<String> entries =
+                (names.length != 0) ? Arrays.asList(names): passwords.keySet();
+        for (String name : entries) {
+            char[] pass = passwords.get(name);
+            int kvno = 0;
+            if (Character.isDigit(pass[pass.length-1])) {
+                kvno = pass[pass.length-1] - '0';
+            }
+            PrincipalName pn = new PrincipalName(name,
                         name.indexOf('/') < 0 ?
                             PrincipalName.KRB_NT_UNKNOWN :
-                            PrincipalName.KRB_NT_SRV_HST),
-                            pass,
-                            kvno,
-                            true);
-            }
+                            PrincipalName.KRB_NT_SRV_HST);
+            ktab.addEntry(pn,
+                        getSalt(pn),
+                        pass,
+                        kvno,
+                        true);
         }
         ktab.save();
     }
 
     /**
      * Writes all principals' keys from multiple KDCs into one keytab file.
-     * Note that the keys for the krbtgt principals will not be written.
-     * <p>
-     * Attention: This method references krb5.conf settings. If you need to
-     * setup krb5.conf later, please call <code>Config.refresh()</code> after
-     * the new setting. For example:
-     * <pre>
-     * KDC.writeKtab("/etc/kdc/ktab", kdc);  // Config is initialized,
-     * System.setProperty("java.security.krb5.conf", "/home/mykrb5.conf");
-     * Config.refresh();
-     * </pre>
-     *
-     * Inside this method there are 2 places krb5.conf is used:
-     * <ol>
-     * <li> (Fatal) Generating keys: EncryptionKey.acquireSecretKeys
-     * <li> (Has workaround) Creating PrincipalName
-     * </ol>
-     * @param tab The keytab filename to write to.
      * @throws java.io.IOException for any file output error
      * @throws sun.security.krb5.KrbException for any realm and/or principal
      *         name error.
      */
     public static void writeMultiKtab(String tab, KDC... kdcs)
             throws IOException, KrbException {
-        writeKtab0(tab, false, kdcs);
+        KeyTab.create(tab).save();      // Empty the old keytab
+        appendMultiKtab(tab, kdcs);
     }
 
     /**
      * Appends all principals' keys from multiple KDCs to one keytab file.
-     * See writeMultiKtab for details.
      */
     public static void appendMultiKtab(String tab, KDC... kdcs)
             throws IOException, KrbException {
-        writeKtab0(tab, true, kdcs);
+        for (KDC kdc: kdcs) {
+            kdc.writeKtab(tab, true);
+        }
     }
 
     /**
      * Write a ktab for this KDC.
      */
     public void writeKtab(String tab) throws IOException, KrbException {
-        KDC.writeMultiKtab(tab, this);
+        writeKtab(tab, false);
     }
 
     /**
      * Appends keys in this KDC to a ktab.
      */
     public void appendKtab(String tab) throws IOException, KrbException {
-        KDC.appendMultiKtab(tab, this);
+        writeKtab(tab, true);
     }
 
     /**
@@ -514,7 +536,7 @@ public class KDC {
         if (pass == null) {
             throw new KrbException(server?
                 Krb5.KDC_ERR_S_PRINCIPAL_UNKNOWN:
-                Krb5.KDC_ERR_C_PRINCIPAL_UNKNOWN);
+                Krb5.KDC_ERR_C_PRINCIPAL_UNKNOWN, pn.toString());
         }
         return pass;
     }
@@ -524,7 +546,7 @@ public class KDC {
      * @param p principal
      * @return the salt
      */
-    private String getSalt(PrincipalName p) {
+    protected String getSalt(PrincipalName p) {
         String pn = p.toString();
         if (p.getRealmString() == null) {
             pn = pn + "@" + getRealm();
@@ -577,53 +599,6 @@ public class KDC {
         }
     }
 
-    private Map<String,String> policies = new HashMap<>();
-
-    public void setPolicy(String rule, String value) {
-        if (value == null) {
-            policies.remove(rule);
-        } else {
-            policies.put(rule, value);
-        }
-    }
-    /**
-     * If the provided client/server pair matches a rule
-     *
-     * A system property named test.kdc.policy.RULE will be consulted.
-     * If it's unset, returns false. If its value is "", any pair is
-     * matched. Otherwise, it should contains the server name matched.
-     *
-     * TODO: client name is not used currently.
-     *
-     * @param c client name
-     * @param s server name
-     * @param rule rule name
-     * @return if a match is found
-     */
-    private boolean configMatch(String c, String s, String rule) {
-        String policy = policies.get(rule);
-        boolean result = false;
-        if (policy == null) {
-            result = false;
-        } else if (policy.length() == 0) {
-            result = true;
-        } else {
-            String[] names = policy.split("\\s+");
-            for (String name: names) {
-                if (name.equals(s)) {
-                    result = true;
-                    break;
-                }
-            }
-        }
-        if (result) {
-            System.out.printf(">>>> Policy match result (%s vs %s on %s) %b\n",
-                    c, s, rule, result);
-        }
-        return result;
-    }
-
-
     /**
      * Processes an incoming request and generates a response.
      * @param in the request
@@ -647,9 +622,8 @@ public class KDC {
         TGSReq tgsReq = new TGSReq(in);
         PrincipalName service = tgsReq.reqBody.sname;
         if (options.containsKey(KDC.Option.RESP_NT)) {
-            service = new PrincipalName(service.getNameStrings(),
-                    (int)options.get(KDC.Option.RESP_NT));
-            service.setRealm(service.getRealm());
+            service = new PrincipalName((int)options.get(KDC.Option.RESP_NT),
+                    service.getNameStrings(), service.getRealm());
         }
         try {
             System.out.println(realm + "> " + tgsReq.reqBody.cname +
@@ -660,26 +634,53 @@ public class KDC {
             int e2 = eTypes[0];     // etype for outgoing session key
             int e3 = eTypes[0];     // etype for outgoing ticket
 
-            PAData[] pas = kDCReqDotPAData(tgsReq);
+            PAData[] pas = KDCReqDotPAData(tgsReq);
 
             Ticket tkt = null;
             EncTicketPart etp = null;
+
+            PrincipalName cname = null;
+            boolean allowForwardable = true;
+
             if (pas == null || pas.length == 0) {
                 throw new KrbException(Krb5.KDC_ERR_PADATA_TYPE_NOSUPP);
             } else {
+                PrincipalName forUserCName = null;
                 for (PAData pa: pas) {
                     if (pa.getType() == Krb5.PA_TGS_REQ) {
                         APReq apReq = new APReq(pa.getValue());
                         EncryptedData ed = apReq.authenticator;
                         tkt = apReq.ticket;
                         int te = tkt.encPart.getEType();
-                        tkt.sname.setRealm(tkt.realm);
                         EncryptionKey kkey = keyForUser(tkt.sname, te, true);
                         byte[] bb = tkt.encPart.decrypt(kkey, KeyUsage.KU_TICKET);
                         DerInputStream derIn = new DerInputStream(bb);
                         DerValue der = derIn.getDerValue();
                         etp = new EncTicketPart(der.toByteArray());
+                        // Finally, cname will be overwritten by PA-FOR-USER
+                        // if it exists.
+                        cname = etp.cname;
+                        System.out.println(realm + "> presenting a ticket of "
+                                + etp.cname + " to " + tkt.sname);
+                    } else if (pa.getType() == Krb5.PA_FOR_USER) {
+                        if (options.containsKey(Option.ALLOW_S4U2SELF)) {
+                            PAForUserEnc p4u = new PAForUserEnc(
+                                    new DerValue(pa.getValue()), null);
+                            forUserCName = p4u.name;
+                            System.out.println(realm + "> presenting a PA_FOR_USER "
+                                    + " in the name of " + p4u.name);
+                        }
                     }
+                }
+                if (forUserCName != null) {
+                    List<String> names = (List<String>)options.get(Option.ALLOW_S4U2SELF);
+                    if (!names.contains(cname.toString())) {
+                        // Mimic the normal KDC behavior. When a server is not
+                        // allowed to send S4U2self, do not send an error.
+                        // Instead, send a ticket which is useless later.
+                        allowForwardable = false;
+                    }
+                    cname = forUserCName;
                 }
                 if (tkt == null) {
                     throw new KrbException(Krb5.KDC_ERR_PADATA_TYPE_NOSUPP);
@@ -701,7 +702,8 @@ public class KDC {
             }
 
             boolean[] bFlags = new boolean[Krb5.TKT_OPTS_MAX+1];
-            if (body.kdcOptions.get(KDCOptions.FORWARDABLE)) {
+            if (body.kdcOptions.get(KDCOptions.FORWARDABLE)
+                    && allowForwardable) {
                 bFlags[Krb5.TKT_OPTS_FORWARDABLE] = true;
             }
             if (body.kdcOptions.get(KDCOptions.FORWARDED) ||
@@ -721,8 +723,42 @@ public class KDC {
             if (body.kdcOptions.get(KDCOptions.ALLOW_POSTDATE)) {
                 bFlags[Krb5.TKT_OPTS_MAY_POSTDATE] = true;
             }
+            if (body.kdcOptions.get(KDCOptions.CNAME_IN_ADDL_TKT)) {
+                if (!options.containsKey(Option.ALLOW_S4U2PROXY)) {
+                    // Don't understand CNAME_IN_ADDL_TKT
+                    throw new KrbException(Krb5.KDC_ERR_BADOPTION);
+                } else {
+                    Map<String,List<String>> map = (Map<String,List<String>>)
+                            options.get(Option.ALLOW_S4U2PROXY);
+                    Ticket second = KDCReqBodyDotFirstAdditionalTicket(body);
+                    EncryptionKey key2 = keyForUser(second.sname, second.encPart.getEType(), true);
+                    byte[] bb = second.encPart.decrypt(key2, KeyUsage.KU_TICKET);
+                    DerInputStream derIn = new DerInputStream(bb);
+                    DerValue der = derIn.getDerValue();
+                    EncTicketPart tktEncPart = new EncTicketPart(der.toByteArray());
+                    if (!tktEncPart.flags.get(Krb5.TKT_OPTS_FORWARDABLE)) {
+                        //throw new KrbException(Krb5.KDC_ERR_BADOPTION);
+                    }
+                    PrincipalName client = tktEncPart.cname;
+                    System.out.println(realm + "> and an additional ticket of "
+                            + client + " to " + second.sname);
+                    if (map.containsKey(cname.toString())) {
+                        if (map.get(cname.toString()).contains(service.toString())) {
+                            System.out.println(realm + "> S4U2proxy OK");
+                        } else {
+                            throw new KrbException(Krb5.KDC_ERR_BADOPTION);
+                        }
+                    } else {
+                        throw new KrbException(Krb5.KDC_ERR_BADOPTION);
+                    }
+                    cname = client;
+                }
+            }
 
-            if (configMatch("", service.getNameString(), "ok-as-delegate")) {
+            String okAsDelegate = (String)options.get(Option.OK_AS_DELEGATE);
+            if (okAsDelegate != null && (
+                    okAsDelegate.isEmpty() ||
+                    okAsDelegate.contains(service.getNameString()))) {
                 bFlags[Krb5.TKT_OPTS_DELEGATE] = true;
             }
             bFlags[Krb5.TKT_OPTS_INITIAL] = true;
@@ -731,8 +767,7 @@ public class KDC {
             EncTicketPart enc = new EncTicketPart(
                     tFlags,
                     key,
-                    etp.crealm,
-                    etp.cname,
+                    cname,
                     new TransitedEncoding(1, new byte[0]),  // TODO
                     new KerberosTime(new Date()),
                     body.from,
@@ -747,7 +782,6 @@ public class KDC {
                 throw new KrbException(Krb5.KDC_ERR_SUMTYPE_NOSUPP); // TODO
             }
             Ticket t = new Ticket(
-                    body.crealm,
                     service,
                     new EncryptedData(skey, enc.asn1Encode(), KeyUsage.KU_TICKET)
             );
@@ -763,7 +797,6 @@ public class KDC {
                     new KerberosTime(new Date()),
                     body.from,
                     till, body.rtime,
-                    body.crealm,
                     service,
                     body.addresses != null  // always set caddr
                             ? body.addresses
@@ -772,8 +805,7 @@ public class KDC {
                     );
             EncryptedData edata = new EncryptedData(ckey, enc_part.asn1Encode(), KeyUsage.KU_ENC_TGS_REP_PART_SESSKEY);
             TGSRep tgsRep = new TGSRep(null,
-                    etp.crealm,
-                    etp.cname,
+                    cname,
                     t,
                     edata);
             System.out.println("     Return " + tgsRep.cname
@@ -794,8 +826,8 @@ public class KDC {
                         new KerberosTime(new Date()),
                         0,
                         ke.returnCode(),
-                        body.crealm, body.cname,
-                        new Realm(getRealm()), service,
+                        body.cname,
+                        service,
                         KrbException.errorMessage(ke.returnCode()),
                         null);
             }
@@ -818,7 +850,6 @@ public class KDC {
         if (options.containsKey(KDC.Option.RESP_NT)) {
             service = new PrincipalName(service.getNameStrings(),
                     (int)options.get(KDC.Option.RESP_NT));
-            service.setRealm(service.getRealm());
         }
         try {
             System.out.println(realm + "> " + asReq.reqBody.cname +
@@ -826,7 +857,6 @@ public class KDC {
                     service);
 
             KDCReqBody body = asReq.reqBody;
-            body.cname.setRealm(getRealm());
 
             eTypes = KDCReqBodyDotEType(body);
             int eType = eTypes[0];
@@ -893,29 +923,29 @@ public class KDC {
                         pas2 = new DerValue[] {
                             new DerValue(new ETypeInfo2(1, null, null).asn1Encode()),
                             new DerValue(new ETypeInfo2(1, "", null).asn1Encode()),
-                            new DerValue(new ETypeInfo2(1, OneKDC.REALM, new byte[]{1}).asn1Encode()),
+                            new DerValue(new ETypeInfo2(1, realm, new byte[]{1}).asn1Encode()),
                         };
                         pas = new DerValue[] {
                             new DerValue(new ETypeInfo(1, null).asn1Encode()),
                             new DerValue(new ETypeInfo(1, "").asn1Encode()),
-                            new DerValue(new ETypeInfo(1, OneKDC.REALM).asn1Encode()),
+                            new DerValue(new ETypeInfo(1, realm).asn1Encode()),
                         };
                         break;
                     case 2:     // we still reject non-null s2kparams and prefer E2 over E
                         pas2 = new DerValue[] {
-                            new DerValue(new ETypeInfo2(1, OneKDC.REALM, new byte[]{1}).asn1Encode()),
+                            new DerValue(new ETypeInfo2(1, realm, new byte[]{1}).asn1Encode()),
                             new DerValue(new ETypeInfo2(1, null, null).asn1Encode()),
                             new DerValue(new ETypeInfo2(1, "", null).asn1Encode()),
                         };
                         pas = new DerValue[] {
-                            new DerValue(new ETypeInfo(1, OneKDC.REALM).asn1Encode()),
+                            new DerValue(new ETypeInfo(1, realm).asn1Encode()),
                             new DerValue(new ETypeInfo(1, null).asn1Encode()),
                             new DerValue(new ETypeInfo(1, "").asn1Encode()),
                         };
                         break;
                     case 3:     // but only E is wrong
                         pas = new DerValue[] {
-                            new DerValue(new ETypeInfo(1, OneKDC.REALM).asn1Encode()),
+                            new DerValue(new ETypeInfo(1, realm).asn1Encode()),
                             new DerValue(new ETypeInfo(1, null).asn1Encode()),
                             new DerValue(new ETypeInfo(1, "").asn1Encode()),
                         };
@@ -988,7 +1018,7 @@ public class KDC {
                 outPAs.add(new PAData(Krb5.PA_ETYPE_INFO, eid.toByteArray()));
             }
 
-            PAData[] inPAs = kDCReqDotPAData(asReq);
+            PAData[] inPAs = KDCReqDotPAData(asReq);
             if (inPAs == null || inPAs.length == 0) {
                 Object preauth = options.get(Option.PREAUTH_REQUIRED);
                 if (preauth == null || preauth.equals(Boolean.TRUE)) {
@@ -1009,7 +1039,6 @@ public class KDC {
             EncTicketPart enc = new EncTicketPart(
                     tFlags,
                     key,
-                    body.crealm,
                     body.cname,
                     new TransitedEncoding(1, new byte[0]),
                     new KerberosTime(new Date()),
@@ -1018,7 +1047,6 @@ public class KDC {
                     body.addresses,
                     null);
             Ticket t = new Ticket(
-                    body.crealm,
                     service,
                     new EncryptedData(skey, enc.asn1Encode(), KeyUsage.KU_TICKET)
             );
@@ -1034,14 +1062,12 @@ public class KDC {
                     new KerberosTime(new Date()),
                     body.from,
                     till, body.rtime,
-                    body.crealm,
                     service,
                     body.addresses
                     );
             EncryptedData edata = new EncryptedData(ckey, enc_part.asn1Encode(), KeyUsage.KU_ENC_AS_REP_PART);
             ASRep asRep = new ASRep(
                     outPAs.toArray(new PAData[outPAs.size()]),
-                    body.crealm,
                     body.cname,
                     t,
                     edata);
@@ -1062,7 +1088,6 @@ public class KDC {
                 asRep.encKDCRepPart = enc_part;
                 sun.security.krb5.internal.ccache.Credentials credentials =
                     new sun.security.krb5.internal.ccache.Credentials(asRep);
-                asReq.reqBody.cname.setRealm(getRealm());
                 CredentialsCache cache =
                     CredentialsCache.create(asReq.reqBody.cname, ccache);
                 if (cache == null) {
@@ -1071,7 +1096,6 @@ public class KDC {
                 }
                 cache.update(credentials);
                 cache.save();
-                new File(ccache).deleteOnExit();
             }
 
             return result;
@@ -1098,8 +1122,8 @@ public class KDC {
                         new KerberosTime(new Date()),
                         0,
                         ke.returnCode(),
-                        body.crealm, body.cname,
-                        new Realm(getRealm()), service,
+                        body.cname,
+                        service,
                         KrbException.errorMessage(ke.returnCode()),
                         eData);
             }
@@ -1113,7 +1137,7 @@ public class KDC {
      * @return REALM.NAME = { kdc = host:port }
      */
     private static String realmLineForKDC(KDC kdc) {
-        return String.format("  %s = {\n    kdc = %s:%d\n  }\n",
+        return String.format("%s = {\n    kdc = %s:%d\n}\n",
                 kdc.realm,
                 kdc.kdc,
                 kdc.port);
@@ -1304,6 +1328,7 @@ public class KDC {
     private static final Field getEType;
     private static final Constructor<EncryptedData> ctorEncryptedData;
     private static final Method stringToKey;
+    private static final Field getAddlTkt;
 
     static {
         try {
@@ -1317,6 +1342,8 @@ public class KDC {
                     "stringToKey",
                     char[].class, String.class, byte[].class, Integer.TYPE);
             stringToKey.setAccessible(true);
+            getAddlTkt = KDCReqBody.class.getDeclaredField("additionalTickets");
+            getAddlTkt.setAccessible(true);
         } catch (NoSuchFieldException nsfe) {
             throw new AssertionError(nsfe);
         } catch (NoSuchMethodException nsme) {
@@ -1330,7 +1357,7 @@ public class KDC {
             throw new AssertionError(e);
         }
     }
-    private static PAData[] kDCReqDotPAData(KDCReq req) {
+    private static PAData[] KDCReqDotPAData(KDCReq req) {
         try {
             return (PAData[])getPADataField.get(req);
         } catch (Exception e) {
@@ -1351,6 +1378,13 @@ public class KDC {
                     null, password, salt, s2kparams, keyType);
         } catch (InvocationTargetException ex) {
             throw (KrbCryptoException)ex.getCause();
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+    }
+    private static Ticket KDCReqBodyDotFirstAdditionalTicket(KDCReqBody body) {
+        try {
+            return ((Ticket[])getAddlTkt.get(body))[0];
         } catch (Exception e) {
             throw new AssertionError(e);
         }

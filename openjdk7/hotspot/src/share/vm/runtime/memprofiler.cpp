@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,6 @@
 #include "gc_interface/collectedHeap.inline.hpp"
 #include "interpreter/oopMapCache.hpp"
 #include "memory/generation.hpp"
-#include "memory/permGen.hpp"
 #include "memory/resourceArea.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/jniHandles.hpp"
@@ -36,19 +35,8 @@
 #include "runtime/mutexLocker.hpp"
 #include "runtime/os.hpp"
 #include "runtime/task.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/vmThread.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
 
 #ifndef PRODUCT
 
@@ -129,15 +117,12 @@ void MemProfiler::do_trace() {
   }
 
   // Print trace line in log
-  fprintf(_log_fp, "%6.1f,%5d,%5d," UINTX_FORMAT_W(6) "," UINTX_FORMAT_W(6) ","
-          UINTX_FORMAT_W(6) "," UINTX_FORMAT_W(6) ",",
+  fprintf(_log_fp, "%6.1f,%5d,%5d," UINTX_FORMAT_W(6) "," UINTX_FORMAT_W(6) ",",
           os::elapsedTime(),
           Threads::number_of_threads(),
           SystemDictionary::number_of_classes(),
           Universe::heap()->used() / K,
-          Universe::heap()->capacity() / K,
-          Universe::heap()->permanent_used() / HWperKB,
-          Universe::heap()->permanent_capacity() / HWperKB);
+          Universe::heap()->capacity() / K);
 
   fprintf(_log_fp, UINTX_FORMAT_W(6) ",", CodeCache::capacity() / K);
 

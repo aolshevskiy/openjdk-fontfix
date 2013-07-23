@@ -60,8 +60,7 @@ EXCLUDE_PROPWARN_PKGS = com.sun.java.swing.plaf.windows  \
 # with a new module system (being discussed for JDK 8).
 #
 EXPORTED_PRIVATE_PKGS = com.oracle.net \
-                        com.oracle.nio \
-                        com.oracle.util
+                        com.oracle.nio
 
 # 64-bit solaris has a few special cases. We define the variable
 # SOLARIS64 for use in this Makefile to easily test those cases
@@ -136,7 +135,6 @@ endif
 JDK_MAN_PAGES =            \
 	$(JRE_MAN_PAGES)   \
 	appletviewer.1     \
-        apt.1              \
 	extcheck.1         \
 	idlj.1             \
 	jar.1              \
@@ -170,20 +168,12 @@ ifndef OPENJDK
 endif
 
 ifeq ($(PLATFORM), solaris)
-  ifndef OPENJDK
-    MANBASEDIRS=$(CLOSED_SRC)/solaris/doc $(IMPORTDOCDIR)
-  else
-    MANBASEDIRS=$(JDK_TOPDIR)/src/solaris/doc $(IMPORTDOCDIR)
-  endif
+  MANBASEDIRS=$(JDK_TOPDIR)/src/solaris/doc $(IMPORTDOCDIR)
   MAN1SUBDIR=sun/man/man1
 endif # solaris
 
 ifeq ($(PLATFORM), linux)
-  ifndef OPENJDK
-    MANBASEDIRS=$(CLOSED_SRC)/linux/doc $(IMPORTDOCDIR)
-  else
-    MANBASEDIRS=$(JDK_TOPDIR)/src/linux/doc $(IMPORTDOCDIR)
-  endif
+  MANBASEDIRS=$(JDK_TOPDIR)/src/linux/doc $(IMPORTDOCDIR)
   MAN1SUBDIR=man
   JA_DIRNAME=ja_JP.UTF-8
 endif # linux
@@ -243,8 +233,8 @@ initial-image-jre-sol64 initial-image-jdk-sol64 \
 trim-image-jre trim-image-jdk \
 identify-image-jre identify-image-jdk \
 process-image-jre process-image-jdk \
-compare-image  \
-sec-files sec-files-win jgss-files server-jdk-image ::
+compare-image \
+sec-files sec-files-win jgss-files ::
 	@$(ECHO) ">>>Making "$@" @ `$(DATE)` ..."
 
 # Order is important here, trim jre after jdk image is created
@@ -253,17 +243,16 @@ ifeq ($(PLATFORM), macosx)
 images:: sanity-images post-sanity-images  \
 	 $(INITIAL_IMAGE_JRE) $(EXTRA_JRE_TARGETS) $(INITIAL_IMAGE_JDK) \
 	 trim-image-jre trim-image-jdk \
-	 identify-image-jre identify-image-jdk \
-	 process-image-jre process-image-jdk sec-files sec-files-win \
-	jgss-files $(EXTRA_IMAGE_TARGETS) server-jdk-image 
+     identify-image-jre identify-image-jdk \
+	 process-image-jre process-image-jdk sec-files sec-files-win jgss-files \
+	 $(EXTRA_IMAGE_TARGETS)
 else
 
 images:: sanity-images post-sanity-images  \
 	 $(INITIAL_IMAGE_JRE) $(INITIAL_IMAGE_JDK) \
 	 trim-image-jre trim-image-jdk \
          identify-image-jre identify-image-jdk \
-	 process-image-jre process-image-jdk sec-files sec-files-win \
-	 jgss-files server-jdk-image
+	 process-image-jre process-image-jdk sec-files sec-files-win jgss-files
 endif
 
 # Don't use these
@@ -293,7 +282,6 @@ SOURCES = \
 	com/sun/java/swing		\
 	com/sun/javadoc			\
 	com/sun/jmx			\
-	com/sun/mirror			\
 	com/sun/source			\
 	com/sun/naming			\
 	com/sun/security/auth		\
@@ -319,8 +307,7 @@ SOURCES = \
 	org/ietf			\
 	org/omg				\
 	org/w3c/dom			\
-	org/xml/sax			\
-	sunw
+	org/xml/sax
 #
 # Directories where sources may be found.  If a file with the same path
 # name exists in more than one of these places, the one found last on this
@@ -360,41 +347,41 @@ TOOLS = \
 	sun/tools/serialver	\
 	sun/tools/tree		\
 	sun/tools/util		\
-	sun/security/tools/JarBASE64Encoder.class \
-	sun/security/tools/JarSigner.class \
-	sun/security/tools/JarSignerParameters.class \
-	sun/security/tools/JarSignerResources.class \
-	sun/security/tools/JarSignerResources_ja.class \
-	sun/security/tools/JarSignerResources_zh_CN.class \
-	sun/security/tools/SignatureFile\$$Block.class \
-	sun/security/tools/SignatureFile.class \
-	sun/security/tools/TimestampedSigner.class \
+	sun/security/tools/jarsigner/Main.class \
+	sun/security/tools/jarsigner/JarSignerParameters.class \
+	sun/security/tools/jarsigner/Resources.class \
+	sun/security/tools/jarsigner/Resources_ja.class \
+	sun/security/tools/jarsigner/Resources_zh_CN.class \
+	sun/security/tools/jarsigner/SignatureFile\$$Block.class \
+	sun/security/tools/jarsigner/SignatureFile.class \
+	sun/security/tools/jarsigner/TimestampedSigner.class \
 	sun/rmi/rmic		\
 	sun/applet		\
 	sun/jvmstat		\
 	com/sun/javadoc		\
 	com/sun/jdi		\
 	com/sun/jarsigner	\
-	com/sun/mirror		\
 	com/sun/source          \
 	com/sun/tools/classfile \
 	com/sun/tools/doclets   \
+	com/sun/tools/doclint   \
 	com/sun/tools/example/debug/expr \
 	com/sun/tools/example/debug/tty  \
 	com/sun/tools/extcheck  \
 	com/sun/tools/hat       \
 	com/sun/tools/javac     \
 	com/sun/tools/javadoc   \
-	com/sun/tools/apt       \
 	com/sun/tools/javah     \
 	com/sun/tools/javap     \
+	com/sun/tools/jdeps     \
 	com/sun/tools/corba     \
 	com/sun/tools/internal/xjc       \
 	com/sun/tools/internal/ws       \
-	META-INF/services/com.sun.mirror.apt.AnnotationProcessorFactory \
-	META-INF/services/com.sun.tools.xjc.Plugin \
+	META-INF/services/com.sun.tools.internal.ws.wscompile.Plugin \
+	META-INF/services/com.sun.tools.internal.xjc.Plugin \
 	com/sun/istack/internal/tools       \
-	com/sun/istack/internal/ws       \
+	com/sun/tools/internal/jxc/ap   \
+	com/sun/tools/internal/ws/wscompile/plugin/at_generated \
         com/sun/codemodel       \
         com/sun/tools/internal/jxc             \
         com/sun/xml/internal/rngom       \
@@ -410,29 +397,11 @@ TOOLS = \
 	sun/tools/jinfo         \
 	sun/tools/jmap
 
-JFR_SRCDIRS_EXIST := $(shell \
-  if [ -d $(CLOSED_SHARE_SRC)/classes/com/oracle/jrockit/jfr ] ; then \
-   echo true; \
-  else \
-   echo false; \
-  fi)
-
-BUILD_JFR=
-ifndef OPENJDK
-ifndef JAVASE_EMBEDDED
-ifeq ($(JFR_SRCDIRS_EXIST), true)
-BUILD_JFR=true
-endif
-endif
-endif
-
 # classes that go into jfr.jar
-JFR_CLASSES_DIRS=
-ifdef BUILD_JFR
 JFR_CLASSES_DIRS= \
 	com/oracle/jrockit/jfr \
-	oracle/jrockit/jfr
-endif
+	oracle/jrockit/jfr \
+	jdk/jfr
 
 # classes that go into jsse.jar
 JSSE_CLASSES_DIRS = \
@@ -486,9 +455,9 @@ NOTJRETOOLS = \
 	java-rmi.cgi \
 	javac$(EXE_SUFFIX) \
 	javadoc$(EXE_SUFFIX) \
-	apt$(EXE_SUFFIX) \
 	javah$(EXE_SUFFIX) \
 	javap$(EXE_SUFFIX) \
+	jdeps$(EXE_SUFFIX) \
 	jcmd$(EXE_SUFFIX) \
 	jdb$(EXE_SUFFIX) \
 	jps$(EXE_SUFFIX) \
@@ -548,7 +517,7 @@ $(JDK_IMAGE_DIR)/demo/DEMOS_LICENSE: $(SHARE_JDK_DOC_SRC)/DEMOS_LICENSE
 $(JDK_IMAGE_DIR)/sample/SAMPLES_LICENSE: $(SHARE_JDK_DOC_SRC)/SAMPLES_LICENSE
 	$(process-doc-file)
 
-# JRE files 
+# JRE files
 $(JRE_IMAGE_DIR)/%: $(SHARE_JRE_DOC_SRC)/%
 	$(process-doc-file)
 ifeq ($(PLATFORM), windows)
@@ -573,13 +542,10 @@ $(NOT_RT_JAR_LIST): FRC
 	$(ECHO) "com/sun/javadoc/" >> $@
 	$(ECHO) "com/sun/jdi/" >> $@
 	$(ECHO) "com/sun/jarsigner/" >> $@
-	$(ECHO) "com/sun/mirror/" >> $@
 	$(ECHO) "com/sun/source/" >> $@
 	$(ECHO) "com/sun/istack/internal/tools/" >> $@
-	$(ECHO) "com/sun/istack/internal/ws/" >> $@
 	$(ECHO) "META-INF/services/com.sun.jdi.connect.Connector" >> $@
 	$(ECHO) "META-INF/services/com.sun.jdi.connect.spi.TransportService" >> $@
-	$(ECHO) "META-INF/services/com.sun.mirror.apt.AnnotationProcessorFactory" >> $@
 	$(ECHO) "META-INF/services/com.sun.tools.xjc.Plugin" >> $@
 	$(ECHO) "com/sun/tools/" >> $@
 	$(ECHO) "sun/jvmstat/" >> $@
@@ -599,6 +565,7 @@ $(NOT_RT_JAR_LIST): FRC
 	$(ECHO) "sun/tools/javac/" >> $@
 	$(ECHO) "com/sun/tools/classfile/" >> $@
 	$(ECHO) "com/sun/tools/javap/" >> $@
+	$(ECHO) "com/sun/tools/jdeps/" >> $@
 	$(ECHO) "sun/tools/jcmd/" >> $@
 	$(ECHO) "sun/tools/jconsole/" >> $@
 	$(ECHO) "sun/tools/jps/" >> $@
@@ -608,15 +575,14 @@ $(NOT_RT_JAR_LIST): FRC
 	$(ECHO) "sun/tools/serialver/" >> $@
 	$(ECHO) "sun/tools/tree/" >> $@
 	$(ECHO) "sun/tools/util/" >> $@
-	$(ECHO) "sun/security/tools/JarBASE64Encoder.class" >> $@
-	$(ECHO) "sun/security/tools/JarSigner.class" >> $@
-	$(ECHO) "sun/security/tools/JarSignerParameters.class" >> $@
-	$(ECHO) "sun/security/tools/JarSignerResources.class" >> $@
-	$(ECHO) "sun/security/tools/JarSignerResources_ja.class" >> $@
-	$(ECHO) "sun/security/tools/JarSignerResources_zh_CN.class" >> $@
-	$(ECHO) "sun/security/tools/SignatureFile\$$Block.class" >> $@
-	$(ECHO) "sun/security/tools/SignatureFile.class" >> $@
-	$(ECHO) "sun/security/tools/TimestampedSigner.class" >> $@
+	$(ECHO) "sun/security/tools/jarsigner/Main.class" >> $@
+	$(ECHO) "sun/security/tools/jarsigner/JarSignerParameters.class" >> $@
+	$(ECHO) "sun/security/tools/jarsigner/Resources.class" >> $@
+	$(ECHO) "sun/security/tools/jarsigner/Resources_ja.class" >> $@
+	$(ECHO) "sun/security/tools/jarsigner/Resources_zh_CN.class" >> $@
+	$(ECHO) "sun/security/tools/jarsigner/SignatureFile\$$Block.class" >> $@
+	$(ECHO) "sun/security/tools/jarsigner/SignatureFile.class" >> $@
+	$(ECHO) "sun/security/tools/jarsigner/TimestampedSigner.class" >> $@
 	$(ECHO) "sun/security/provider/Sun.class" >> $@
 	$(ECHO) "sun/security/rsa/SunRsaSign.class" >> $@
 	$(ECHO) "sun/security/ssl/" >> $@
@@ -636,7 +602,8 @@ $(NOT_RT_JAR_LIST): FRC
 	$(ECHO) "sun/tools/jstack/" >> $@
 	$(ECHO) "sun/tools/jinfo/" >> $@
 	$(ECHO) "sun/tools/jmap/" >> $@
-ifdef BUILD_JFR
+ifndef OPENJDK
+ifndef JAVASE_EMBEDDED
 	$(ECHO) "com/oracle/jrockit/jfr/" >> $@
 	$(ECHO) "com/oracle/jrockit/jfr/client/" >> $@
 	$(ECHO) "com/oracle/jrockit/jfr/management/" >> $@
@@ -646,8 +613,9 @@ ifdef BUILD_JFR
 	$(ECHO) "oracle/jrockit/jfr/parser/" >> $@
 	$(ECHO) "oracle/jrockit/jfr/settings/" >> $@
 	$(ECHO) "oracle/jrockit/jfr/tools/" >> $@
+	$(ECHO) "jdk/jfr/" >> $@
 endif
-
+endif
 
 
 # File order list for rt.jar
@@ -674,7 +642,8 @@ $(TOTAL_JAR_FILELIST): $(JARREORDER_JARFILE) $(NOT_RT_JAR_LIST)
 
 # Create jfr.jar
 JFR_JAR=
-ifdef BUILD_JFR
+ifndef OPENJDK
+ifndef JAVASE_EMBEDDED
 JFR_JAR=$(ABS_TEMPDIR)/jfr-orig.jar
 $(JFR_JAR): $(OTHER_JAR_MANIFEST_FILE)
 	$(prep-target)
@@ -682,6 +651,7 @@ $(JFR_JAR): $(OTHER_JAR_MANIFEST_FILE)
 	    $(BOOT_JAR_CMD) $(CREATE_JAR_OPTS) $(OTHER_JAR_MANIFEST_FILE) $@ \
 		$(JFR_CLASSES_DIRS) $(BOOT_JAR_JFLAGS)
 	@$(CD) $(CLASSBINDIR) && $(java-vm-cleanup)
+endif
 endif
 
 # Create the rt.jar file list & non-class files list
@@ -783,10 +753,6 @@ $(RT_JAR): $(RT_JAR_FILELIST) $(RT_JAR_MANIFEST_FILE)
 
 BUILDMETAINDEX_JARFILE = $(ABS_BUILDTOOLJARDIR)/buildmetaindex.jar
 
-# SE-Embedded targets if enabled
-include $(JDK_TOPDIR)/make/common/Release-embedded.gmk
-
-
 ######################################################
 # JRE Image
 ######################################################
@@ -821,11 +787,22 @@ initial-image-jre:: initial-image-jre-setup \
 		    $(RT_JAR) $(RESOURCES_JAR) $(JSSE_JAR) $(JFR_JAR) \
 		    $(BUILDMETAINDEX_JARFILE)
 	@# Copy in bin directory
+ifeq ($(USING_MSYS),true)
+        # No cpio in MinGW/MSYS
+	$(CD) $(OUTPUTDIR) && $(TAR) -cf - bin | ($(CD) $(JRE_IMAGE_DIR) && $(TAR) -xpf -)
+else
 	$(CD) $(OUTPUTDIR) && $(FIND) bin -depth | $(CPIO) -pdum $(JRE_IMAGE_DIR)
+endif
 	@# CTE plugin security change require new empty directory lib/applet
 	$(MKDIR) -p $(JRE_IMAGE_DIR)/lib/applet
 	@# Copy in lib directory
+ifeq ($(USING_MSYS),true)
+        # No cpio in MinGW/MSYS
+	$(CD) $(OUTPUTDIR) && $(TAR) -cf - lib | ($(CD) $(JRE_IMAGE_DIR) && $(TAR) -xpf -)
+else
 	$(CD) $(OUTPUTDIR) && $(FIND) lib -depth | $(CPIO) -pdum $(JRE_IMAGE_DIR)
+endif
+
   ifeq ($(USING_CYGWIN),true)
 	  $(RM) -rf $(JRE_IMAGE_DIR)/[A-Za-z]:
 	  $(RM) -rf $(OUTPUTDIR)/[A-Za-z]:
@@ -861,7 +838,7 @@ endif
 ifeq ($(PLATFORM), macosx)
 	@#install jobjc, apple mac only
 	$(CP) $(OUTPUTDIR)/JObjC.build/JObjC.jar $(JRE_IMAGE_DIR)/lib/JObjC.jar
-endif # macosx
+endif
 ifeq ($(PLATFORM), windows)
 	@# Remove certain *.lib files
 	$(CD) $(JRE_IMAGE_DIR)/lib && \
@@ -939,27 +916,6 @@ endif
 	done
 	$(RM) $(JRE_BIN_LIST)
 
-# Duplicate current j2re-image contents to server-j2re-image 
-# for the server version of jre, before deploy build
-server-jdk-image::
-ifeq ($(PLATFORM), macosx)
-	$(RM) -r $(JDK_SERVER_BUNDLE_DIR)/Home/demo
-	$(RM) -r $(JDK_SERVER_BUNDLE_DIR)/Home/sample
-	$(RM) $(JDK_SERVER_BUNDLE_DIR)/Home/bin/jcontrol
-	$(RM) $(JDK_SERVER_BUNDLE_DIR)/Home/jre/bin/jcontrol
-	$(RM) $(JDK_SERVER_BUNDLE_DIR)/Home/man/ja_JP.UTF-8/man1/javaws.1
-	$(RM) $(JDK_SERVER_BUNDLE_DIR)/Home/man/man1/javaws.1
-else
-	$(RM) -r $(JDK_SERVER_IMAGE_DIR)
-	$(CP) -r $(JDK_IMAGE_DIR) $(JDK_SERVER_IMAGE_DIR)
-	$(RM) -r $(JDK_SERVER_IMAGE_DIR)/demo
-	$(RM) -r $(JDK_SERVER_IMAGE_DIR)/sample
-	$(RM) $(JDK_SERVER_IMAGE_DIR)/bin/jcontrol
-	$(RM) $(JDK_SERVER_IMAGE_DIR)/jre/bin/jcontrol
-	$(RM) $(JDK_SERVER_IMAGE_DIR)/man/ja_JP.UTF-8/man1/javaws.1
-	$(RM) $(JDK_SERVER_IMAGE_DIR)/man/man1/javaws.1
-endif
-
 ######################################################
 # JDK Image
 ######################################################
@@ -977,11 +933,17 @@ endif
 # only places from which we copy everything), but because the presence
 # of this file causes cygwin's find to bomb out, thus breaking the build
 # in "install".
+
 initial-image-jdk-setup:
 	$(RM) -r $(JDK_IMAGE_DIR)
 	$(MKDIR) -p $(JDK_IMAGE_DIR)/jre
+ifeq ($(USING_MSYS),true)
+	($(CD) $(JRE_IMAGE_DIR) && $(TAR) -cf - . \
+	      | ($(CD) $(JDK_IMAGE_DIR)/jre && $(TAR) -xpf -))
+else
 	($(CD) $(JRE_IMAGE_DIR) && $(FIND) . -depth -print \
 	      | $(CPIO) -pdum $(JDK_IMAGE_DIR)/jre )
+endif
   ifeq ($(USING_CYGWIN),true)
 	  $(RM) -rf $(JRE_IMAGE_DIR)/[A-Za-z]:
 	  $(RM) -rf $(JDK_IMAGE_DIR)/jre/[A-Za-z]:
@@ -1009,22 +971,35 @@ else
 
 # Create the list of db *.zip files to bundle with jdk
 ABS_DB_PATH  :=$(call FullPath,$(CLOSED_SHARE_SRC)/db)
-DB_ZIP_LIST = $(shell $(LS) $(ABS_DB_PATH)/*.zip 2>/dev/null)
+DB_BINARY_BUNDLE = $(shell $(LS) $(ABS_DB_PATH)/db-derby-*-bin.zip 2>/dev/null)
 
 # Java DB image. Move the Java DB demo directory into the JDK's demo
 # dir and in the process, rename it to db.  Also remove index.html,
-# since it presumes docs are co-located. Also remove register.html (no
-# longer relevant).
-initial-image-jdk-db: $(DB_ZIP_LIST)
+# since it presumes docs are co-located, javadoc, docs and tests and
+# update the copyright year of the JDK READMEs to that of the release.
+initial-image-jdk-db: $(DB_BINARY_BUNDLE)
 	$(MKDIR) -p $(JDK_IMAGE_DIR)/db
-	for d in $(DB_ZIP_LIST); do \
-          ($(CD) $(JDK_IMAGE_DIR)/db && $(UNZIP) -o $$d); \
-	done
-	$(CP) $(ABS_DB_PATH)/README-JDK.html $(JDK_IMAGE_DIR)/db
-	$(RM) -rf $(DEMODIR)/db
+	$(CD) $(JDK_IMAGE_DIR)/db && $(UNZIP) -o $(DB_BINARY_BUNDLE)
+	$(CD) $(JDK_IMAGE_DIR)/db && $(MV) db-derby-*-bin/* .
+	$(CD) $(JDK_IMAGE_DIR)/db && $(RM) -r db-derby-*-bin
+	$(CAT) $(ABS_DB_PATH)/README-JDK.html  | \
+		$(SED) "s/XXXX/$(shell cat $(JDK_TOPDIR)/src/closed/share/db/COPYRIGHTYEAR)/" > \
+		$(JDK_IMAGE_DIR)/db/README-JDK.html
+	$(CAT) $(ABS_DB_PATH)/3RDPARTY  | \
+		$(SED) "s/XXXX/$(shell cat $(JDK_TOPDIR)/src/closed/share/db/COPYRIGHTYEAR)/" > \
+		$(JDK_IMAGE_DIR)/db/3RDPARTY
+ifndef NO_DEMOS
+	$(RM) -r $(DEMODIR)/db
 	$(MV) $(JDK_IMAGE_DIR)/db/demo $(DEMODIR)/db
-	$(CP) $(ABS_DB_PATH)/README-JDK-DEMOS.html $(DEMODIR)/db/
-	$(RM) $(JDK_IMAGE_DIR)/db/index.html $(JDK_IMAGE_DIR)/db/register.html
+	$(CAT) $(ABS_DB_PATH)/README-JDK-DEMOS.html  | \
+		$(SED) "s/XXXX/$(shell cat $(JDK_TOPDIR)/src/closed/share/db/COPYRIGHTYEAR)/" > \
+		$(DEMODIR)/db/README-JDK-DEMOS.html
+else
+	$(RM) -r $(JDK_IMAGE_DIR)/db/demo
+endif
+	@# remove stuff from original distro we don't want
+	$(RM) $(JDK_IMAGE_DIR)/db/index.html $(JDK_IMAGE_DIR)/db/KEYS
+	$(RM) -r $(JDK_IMAGE_DIR)/db/{docs,javadoc,test}
 endif
 
 # The launcher source files we need for src.zip
@@ -1072,7 +1047,7 @@ initial-image-jdk:: initial-image-jdk-setup \
 	@#
 	@# files that might not exist need to be touched.
 	@#
-	$(TOUCH) $(CLASSBINDIR)/META-INF/services/com.sun.tools.xjc.Plugin
+	$(TOUCH) $(CLASSBINDIR)/META-INF/services/com.sun.tools.internal.xjc.Plugin
 	@#
 	@# lib/tools.jar
 	@#
@@ -1089,6 +1064,7 @@ initial-image-jdk:: initial-image-jdk-setup \
 	    -processor com.sun.tools.javac.sym.CreateSymbols \
 	    -Acom.sun.tools.javac.sym.Jar=$(RT_JAR) \
 	    -Acom.sun.tools.javac.sym.Dest=$(OUTPUTDIR)/symbols/META-INF/sym/rt.jar \
+	    -Acom.sun.tools.javac.sym.Profiles=$(JDK_TOPDIR)/makefiles/profile-rtjar-includes.txt \
 	    $(CORE_PKGS) $(NON_CORE_PKGS) $(EXCLUDE_PROPWARN_PKGS) $(EXPORTED_PRIVATE_PKGS)
 	$(BOOT_JAR_CMD) $(CREATE_JAR_OPTS_NOMANIFEST) $(LIBDIR)/ct.sym \
 	    -C $(OUTPUTDIR)/symbols META-INF $(BOOT_JAR_JFLAGS)
@@ -1162,8 +1138,12 @@ initial-image-jdk:: initial-image-jdk-setup \
 	@#
 	@# demo, include
 	@#
+ifndef NO_DEMOS
 	$(CP) -r -f $(DEMODIR) $(JDK_IMAGE_DIR)
+endif
+ifndef NO_SAMPLES
 	$(CP) -r -f $(SAMPLEDIR) $(JDK_IMAGE_DIR)
+endif
 	$(CP) -r $(INCLUDEDIR) $(JDK_IMAGE_DIR)
 	@#
 	@# Swing BeanInfo generation
@@ -1236,11 +1216,6 @@ define info-file-item # name value
 $(PRINTF) '%s="%s"\n' $1 $2 >> $@
 endef
 
-define echo-java-info
-$(CAT) $1
-endef
--include $(JDK_TOPDIR)/make/closed/common/release.gmk
-
 # Values to emit
 MINIMUM_OS_NAME    := $(REQUIRED_OS_NAME)
 MINIMUM_OS_VERSION := $(REQUIRED_OS_VERSION)
@@ -1257,7 +1232,6 @@ $(JDK_INFO_FILE): FRC
 	$(call info-file-item, "OS_VERSION",   "$(MINIMUM_OS_VERSION)")
 	$(call info-file-item, "OS_ARCH",      "$(MINIMUM_OS_ARCH)")
 	$(call info-file-item, "SOURCE",       "$(ALL_SOURCE_TIPS)")
-	$(call echo-java-info, $@)
 
 # Create release file to identify this image
 identify-image-jdk:: $(JDK_INFO_FILE)
@@ -1269,7 +1243,6 @@ $(JRE_INFO_FILE): FRC
 	$(call info-file-item, "OS_VERSION",   "$(MINIMUM_OS_VERSION)")
 	$(call info-file-item, "OS_ARCH",      "$(MINIMUM_OS_ARCH)")
 	$(call info-file-item, "SOURCE",       "$(ALL_SOURCE_TIPS)")
-	$(call echo-java-info, $@)
 
 # Create release file to identify this image
 identify-image-jre:: $(JRE_INFO_FILE)
@@ -1435,4 +1408,3 @@ images images-clobber::
 
 # Force rule
 FRC:
-

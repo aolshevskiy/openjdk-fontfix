@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -342,26 +342,26 @@ public final class ReflectionNavigator implements Navigator<Type, Class, Field, 
      */
     private static final TypeVisitor<Class, Void> eraser = new TypeVisitor<Class, Void>() {
 
-        public Class onClass(Class c, Void _) {
+        public Class onClass(Class c, Void v) {
             return c;
         }
 
-        public Class onParameterizdType(ParameterizedType p, Void _) {
+        public Class onParameterizdType(ParameterizedType p, Void v) {
             // TODO: why getRawType returns Type? not Class?
             return visit(p.getRawType(), null);
         }
 
-        public Class onGenericArray(GenericArrayType g, Void _) {
+        public Class onGenericArray(GenericArrayType g, Void v) {
             return Array.newInstance(
                     visit(g.getGenericComponentType(), null),
                     0).getClass();
         }
 
-        public Class onVariable(TypeVariable v, Void _) {
-            return visit(v.getBounds()[0], null);
+        public Class onVariable(TypeVariable tv, Void v) {
+            return visit(tv.getBounds()[0], null);
         }
 
-        public Class onWildcard(WildcardType w, Void _) {
+        public Class onWildcard(WildcardType w, Void v) {
             return visit(w.getUpperBounds()[0], null);
         }
     };
@@ -372,7 +372,7 @@ public final class ReflectionNavigator implements Navigator<Type, Class, Field, 
      * This corresponds to the notion of the erasure in JSR-14.
      *
      * <p>
-     * Because of the difference in the way APT and the Java reflection
+     * Because of the difference in the way Annotation Processing and the Java reflection
      * treats primitive type and array type, we can't define this method
      * on {@link Navigator}.
      *
@@ -546,9 +546,9 @@ public final class ReflectionNavigator implements Navigator<Type, Class, Field, 
 
     public Class findClass(String className, Class referencePoint) {
         try {
-            ClassLoader cl = referencePoint.getClassLoader();
+            ClassLoader cl = SecureLoader.getClassClassLoader(referencePoint);
             if (cl == null) {
-                cl = ClassLoader.getSystemClassLoader();
+                cl = SecureLoader.getSystemClassLoader();
             }
             return cl.loadClass(className);
         } catch (ClassNotFoundException e) {
@@ -599,6 +599,11 @@ public final class ReflectionNavigator implements Navigator<Type, Class, Field, 
 
     public boolean isInnerClass(Class clazz) {
         return clazz.getEnclosingClass() != null && !Modifier.isStatic(clazz.getModifiers());
+    }
+
+    @Override
+    public boolean isSameType(Type t1, Type t2) {
+        return t1.equals(t2);
     }
 
     /**

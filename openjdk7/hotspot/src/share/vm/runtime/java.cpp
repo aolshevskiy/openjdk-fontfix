@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,17 +33,15 @@
 #include "memory/genCollectedHeap.hpp"
 #include "memory/oopFactory.hpp"
 #include "memory/universe.hpp"
-#include "oops/constantPoolOop.hpp"
+#include "oops/constantPool.hpp"
 #include "oops/generateOopMap.hpp"
 #include "oops/instanceKlass.hpp"
-#include "oops/instanceKlassKlass.hpp"
 #include "oops/instanceOop.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "oops/objArrayOop.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/symbol.hpp"
 #include "prims/jvmtiExport.hpp"
-#include "runtime/aprofiler.hpp"
 #include "runtime/arguments.hpp"
 #include "runtime/biasedLocking.hpp"
 #include "runtime/compilationPolicy.hpp"
@@ -55,6 +53,7 @@
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/statSampler.hpp"
 #include "runtime/task.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/timer.hpp"
 #include "runtime/vm_operations.hpp"
 #include "services/memReporter.hpp"
@@ -63,6 +62,7 @@
 #include "utilities/dtrace.hpp"
 #include "utilities/globalDefinitions.hpp"
 #include "utilities/histogram.hpp"
+#include "utilities/macros.hpp"
 #include "utilities/vmError.hpp"
 #ifdef TARGET_ARCH_x86
 # include "vm_version_x86.hpp"
@@ -79,23 +79,11 @@
 #ifdef TARGET_ARCH_ppc
 # include "vm_version_ppc.hpp"
 #endif
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/concurrentMarkSweep/concurrentMarkSweepThread.hpp"
 #include "gc_implementation/parallelScavenge/psScavenge.hpp"
 #include "gc_implementation/parallelScavenge/psScavenge.inline.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 #ifdef COMPILER1
 #include "c1/c1_Compiler.hpp"
 #include "c1/c1_Runtime1.hpp"
@@ -116,19 +104,23 @@ HS_DTRACE_PROBE_DECL(hotspot, vm__shutdown);
 
 // Statistics printing (method invocation histogram)
 
-GrowableArray<methodOop>* collected_invoked_methods;
+GrowableArray<Method*>* collected_invoked_methods;
 
-void collect_invoked_methods(methodOop m) {
+void collect_invoked_methods(Method* m) {
   if (m->invocation_count() + m->compiled_invocation_count() >= 1 ) {
     collected_invoked_methods->push(m);
   }
 }
 
 
-GrowableArray<methodOop>* collected_profiled_methods;
+GrowableArray<Method*>* collected_profiled_methods;
 
-void collect_profiled_methods(methodOop m) {
-  methodHandle mh(Thread::current(), m);
+void collect_profiled_methods(Method* m) {
+  Thread* thread = Thread::current();
+  // This HandleMark prevents a huge amount of handles from being added
+  // to the metadata_handles() array on the thread.
+  HandleMark hm(thread);
+  methodHandle mh(thread, m);
   if ((m->method_data() != NULL) &&
       (PrintMethodData || CompilerOracle::should_print(mh))) {
     collected_profiled_methods->push(m);
@@ -136,7 +128,7 @@ void collect_profiled_methods(methodOop m) {
 }
 
 
-int compare_methods(methodOop* a, methodOop* b) {
+int compare_methods(Method** a, Method** b) {
   // %%% there can be 32-bit overflow here
   return ((*b)->invocation_count() + (*b)->compiled_invocation_count())
        - ((*a)->invocation_count() + (*a)->compiled_invocation_count());
@@ -146,7 +138,7 @@ int compare_methods(methodOop* a, methodOop* b) {
 void print_method_invocation_histogram() {
   ResourceMark rm;
   HandleMark hm;
-  collected_invoked_methods = new GrowableArray<methodOop>(1024);
+  collected_invoked_methods = new GrowableArray<Method*>(1024);
   SystemDictionary::methods_do(collect_invoked_methods);
   collected_invoked_methods->sort(&compare_methods);
   //
@@ -157,7 +149,7 @@ void print_method_invocation_histogram() {
   unsigned total = 0, int_total = 0, comp_total = 0, static_total = 0, final_total = 0,
       synch_total = 0, nativ_total = 0, acces_total = 0;
   for (int index = 0; index < collected_invoked_methods->length(); index++) {
-    methodOop m = collected_invoked_methods->at(index);
+    Method* m = collected_invoked_methods->at(index);
     int c = m->invocation_count() + m->compiled_invocation_count();
     if (c >= MethodHistogramCutoff) m->print_invocation_count();
     int_total  += m->invocation_count();
@@ -186,14 +178,14 @@ void print_method_invocation_histogram() {
 void print_method_profiling_data() {
   ResourceMark rm;
   HandleMark hm;
-  collected_profiled_methods = new GrowableArray<methodOop>(1024);
+  collected_profiled_methods = new GrowableArray<Method*>(1024);
   SystemDictionary::methods_do(collect_profiled_methods);
   collected_profiled_methods->sort(&compare_methods);
 
   int count = collected_profiled_methods->length();
   if (count > 0) {
     for (int index = 0; index < count; index++) {
-      methodOop m = collected_profiled_methods->at(index);
+      Method* m = collected_profiled_methods->at(index);
       ttyLocker ttyl;
       tty->print_cr("------------------------------------------------------------------------");
       //m->print_name(tty);
@@ -375,6 +367,12 @@ void print_statistics() {
   if (CITime) {
     CompileBroker::print_times();
   }
+
+  if (PrintCodeCache) {
+    MutexLockerEx mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+    CodeCache::print();
+  }
+
 #ifdef COMPILER2
   if (PrintPreciseBiasedLockingStatistics) {
     OptoRuntime::print_named_counters();
@@ -505,16 +503,9 @@ void before_exit(JavaThread * thread) {
   if (PrintGCDetails) {
     Universe::print();
     AdaptiveSizePolicyOutput(0);
-  }
-
-
-  if (Arguments::has_alloc_profile()) {
-    HandleMark hm;
-    // Do one last collection to enumerate all the objects
-    // allocated since the last one.
-    Universe::heap()->collect(GCCause::_allocation_profiler);
-    AllocationProfiler::disengage();
-    AllocationProfiler::print(0);
+    if (Verbose) {
+      ClassLoaderDataGraph::dump_on(gclog_or_tty);
+    }
   }
 
   if (PrintBytecodeHistogram) {

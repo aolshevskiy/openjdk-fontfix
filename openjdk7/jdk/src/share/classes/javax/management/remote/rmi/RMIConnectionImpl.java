@@ -25,21 +25,10 @@
 
 package javax.management.remote.rmi;
 
-import static com.sun.jmx.mbeanserver.Util.cast;
-import com.sun.jmx.remote.internal.ServerCommunicatorAdmin;
-import com.sun.jmx.remote.internal.ServerNotifForwarder;
-import com.sun.jmx.remote.security.JMXSubjectDomainCombiner;
-import com.sun.jmx.remote.security.SubjectDelegator;
-import com.sun.jmx.remote.util.ClassLoaderWithRepository;
-import com.sun.jmx.remote.util.ClassLogger;
-import com.sun.jmx.remote.util.EnvHelp;
-import com.sun.jmx.remote.util.OrderClassLoaders;
-
 import java.io.IOException;
 import java.rmi.MarshalledObject;
 import java.rmi.UnmarshalException;
 import java.rmi.server.Unreferenced;
-
 import java.security.AccessControlContext;
 import java.security.AccessController;
 import java.security.Permission;
@@ -49,36 +38,27 @@ import java.security.PrivilegedAction;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 import java.security.ProtectionDomain;
-
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 
-import javax.management.Attribute;
-import javax.management.AttributeList;
-import javax.management.AttributeNotFoundException;
-import javax.management.InstanceAlreadyExistsException;
-import javax.management.InstanceNotFoundException;
-import javax.management.IntrospectionException;
-import javax.management.InvalidAttributeValueException;
-import javax.management.ListenerNotFoundException;
-import javax.management.MBeanException;
-import javax.management.MBeanInfo;
-import javax.management.MBeanRegistrationException;
-import javax.management.MBeanPermission;
-import javax.management.MBeanServer;
-import javax.management.NotCompliantMBeanException;
-import javax.management.NotificationFilter;
-import javax.management.ObjectInstance;
-import javax.management.ObjectName;
-import javax.management.QueryExp;
-import javax.management.ReflectionException;
-import javax.management.RuntimeOperationsException;
+import javax.management.*;
 import javax.management.remote.JMXServerErrorException;
 import javax.management.remote.NotificationResult;
 import javax.management.remote.TargetedNotification;
 import javax.security.auth.Subject;
+import sun.reflect.misc.ReflectUtil;
+
+import static com.sun.jmx.mbeanserver.Util.cast;
+import com.sun.jmx.remote.internal.ServerCommunicatorAdmin;
+import com.sun.jmx.remote.internal.ServerNotifForwarder;
+import com.sun.jmx.remote.security.JMXSubjectDomainCombiner;
+import com.sun.jmx.remote.security.SubjectDelegator;
+import com.sun.jmx.remote.util.ClassLoaderWithRepository;
+import com.sun.jmx.remote.util.ClassLogger;
+import com.sun.jmx.remote.util.EnvHelp;
+import com.sun.jmx.remote.util.OrderClassLoaders;
 
 /**
  * <p>Implementation of the {@link RMIConnection} interface.  User
@@ -1813,6 +1793,7 @@ public class RMIConnectionImpl implements RMIConnection, Unreferenced {
         @Override
         protected Class<?> loadClass(String name, boolean resolve)
         throws ClassNotFoundException {
+            ReflectUtil.checkPackageAccess(name);
             try {
                 super.loadClass(name, resolve);
             } catch(Exception e) {

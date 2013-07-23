@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,6 @@ import java.math.BigInteger;
 import java.text.DateFormatSymbols;
 import java.util.*;
 
-import sun.misc.FpUtils;
 import sun.misc.DoubleConsts;
 
 
@@ -1124,6 +1123,15 @@ public class BasicDouble extends Basic {
 
 
 
+
+
+
+
+
+
+
+
+
         //---------------------------------------------------------------------
         // %f - float, double, Double, BigDecimal
         //---------------------------------------------------------------------
@@ -1168,6 +1176,13 @@ public class BasicDouble extends Basic {
         test("%.0g", "1e+05", create(100000.0));
         test("%.3G", "1.00E-05", recip(create(100000.0)));
         test("%.3G", "-1.00E-05", recip(create(-100000.0)));
+
+        test("%.1g", "-0", -0.0);
+        test("%3.0g", " -0", -0.0);
+        test("%.1g", "0", 0.0);
+        test("%3.0g", "  0", 0.0);
+        test("%.1g", "0", +0.0);
+        test("%3.0g", "  0", +0.0);
 
         test("%3.0g", "1e-06", 0.000001);
         test("%3.0g", "1e-05", 0.00001);
@@ -1301,9 +1316,9 @@ public class BasicDouble extends Basic {
         test("%.11a", "0x1.00000000000p-1022", DoubleConsts.MIN_NORMAL);
         test("%.1a", "0x1.0p-1022", DoubleConsts.MIN_NORMAL);
         test("%.11a", "0x1.00000000000p-1022",
-             FpUtils.nextDown(DoubleConsts.MIN_NORMAL));
+             Math.nextDown(DoubleConsts.MIN_NORMAL));
         test("%.1a", "0x1.0p-1022",
-             FpUtils.nextDown(DoubleConsts.MIN_NORMAL));
+             Math.nextDown(DoubleConsts.MIN_NORMAL));
         test("%.11a", "0x1.ffffffffffep-1023",
              Double.parseDouble("0x0.fffffffffffp-1022"));
         test("%.1a", "0x1.0p-1022",

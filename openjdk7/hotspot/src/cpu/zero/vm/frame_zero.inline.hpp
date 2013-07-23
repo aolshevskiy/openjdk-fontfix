@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2007, 2013, Red Hat, Inc.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2007, 2008, 2009, 2010 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,27 +45,36 @@ inline frame::frame(ZeroFrame* zf, intptr_t* sp) {
   case ZeroFrame::ENTRY_FRAME:
     _pc = StubRoutines::call_stub_return_pc();
     _cb = NULL;
+    _deopt_state = not_deoptimized;
     break;
 
   case ZeroFrame::INTERPRETER_FRAME:
     _pc = NULL;
     _cb = NULL;
+    _deopt_state = not_deoptimized;
     break;
 
-  case ZeroFrame::SHARK_FRAME:
+  case ZeroFrame::SHARK_FRAME: {
     _pc = zero_sharkframe()->pc();
     _cb = CodeCache::find_blob_unsafe(pc());
+    address original_pc = nmethod::get_deopt_original_pc(this);
+    if (original_pc != NULL) {
+      _pc = original_pc;
+      _deopt_state = is_deoptimized;
+    } else {
+      _deopt_state = not_deoptimized;
+    }
     break;
-
+  }
   case ZeroFrame::FAKE_STUB_FRAME:
     _pc = NULL;
     _cb = NULL;
+    _deopt_state = not_deoptimized;
     break;
 
   default:
     ShouldNotReachHere();
   }
-  _deopt_state = not_deoptimized;
 }
 
 // Accessors
@@ -95,11 +104,11 @@ inline intptr_t* frame::interpreter_frame_bcx_addr() const {
   return (intptr_t*) &(get_interpreterState()->_bcp);
 }
 
-inline constantPoolCacheOop* frame::interpreter_frame_cache_addr() const {
+inline ConstantPoolCache** frame::interpreter_frame_cache_addr() const {
   return &(get_interpreterState()->_constants);
 }
 
-inline methodOop* frame::interpreter_frame_method_addr() const {
+inline Method** frame::interpreter_frame_method_addr() const {
   return &(get_interpreterState()->_method);
 }
 

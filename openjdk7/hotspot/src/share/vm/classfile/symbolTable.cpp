@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,6 @@
 #include "oops/oop.inline2.hpp"
 #include "runtime/mutexLocker.hpp"
 #include "utilities/hashtable.inline.hpp"
-#include "utilities/numberSeq.hpp"
 
 // --------------------------------------------------------------------------
 
@@ -48,15 +47,18 @@ Symbol* SymbolTable::allocate_symbol(const u1* name, int len, bool c_heap, TRAPS
   assert (len <= Symbol::max_length(), "should be checked by caller");
 
   Symbol* sym;
-  // Allocate symbols in the C heap when dumping shared spaces in case there
-  // are temporary symbols we can remove.
-  if (c_heap || DumpSharedSpaces) {
+
+  if (DumpSharedSpaces) {
+    // Allocate all symbols to CLD shared metaspace
+    sym = new (len, ClassLoaderData::the_null_class_loader_data(), THREAD) Symbol(name, len, -1);
+  } else if (c_heap) {
     // refcount starts as 1
     sym = new (len, THREAD) Symbol(name, len, 1);
+    assert(sym != NULL, "new should call vm_exit_out_of_memory if C_HEAP is exhausted");
   } else {
+    // Allocate to global arena
     sym = new (len, arena(), THREAD) Symbol(name, len, -1);
   }
-  assert(sym != NULL, "new should call vm_exit_out_of_memory if C_HEAP is exhausted");
   return sym;
 }
 
@@ -102,7 +104,7 @@ void SymbolTable::unlink() {
         break;
       }
       Symbol* s = entry->literal();
-      memory_total += s->object_size();
+      memory_total += s->size();
       total++;
       assert(s != NULL, "just checking");
       // If reference count is zero, remove.
@@ -175,7 +177,7 @@ Symbol* SymbolTable::lookup(int index, const char* name,
 unsigned int SymbolTable::hash_symbol(const char* s, int len) {
   return use_alternate_hashcode() ?
            AltHashing::murmur3_32(seed(), (const jbyte*)s, len) :
-           java_lang_String::to_hash(s, len);
+           java_lang_String::hash_code(s, len);
 }
 
 
@@ -302,7 +304,7 @@ Symbol* SymbolTable::lookup_only_unicode(const jchar* name, int utf16_length,
   }
 }
 
-void SymbolTable::add(Handle class_loader, constantPoolHandle cp,
+void SymbolTable::add(ClassLoaderData* loader_data, constantPoolHandle cp,
                       int names_count,
                       const char** names, int* lengths, int* cp_indices,
                       unsigned int* hashValues, TRAPS) {
@@ -310,13 +312,13 @@ void SymbolTable::add(Handle class_loader, constantPoolHandle cp,
   MutexLocker ml(SymbolTable_lock, THREAD);
 
   SymbolTable* table = the_table();
-  bool added = table->basic_add(class_loader, cp, names_count, names, lengths,
+  bool added = table->basic_add(loader_data, cp, names_count, names, lengths,
                                 cp_indices, hashValues, CHECK);
   if (!added) {
     // do it the hard way
     for (int i=0; i<names_count; i++) {
       int index = table->hash_to_index(hashValues[i]);
-      bool c_heap = class_loader() != NULL;
+      bool c_heap = !loader_data->is_the_null_class_loader_data();
       Symbol* sym = table->basic_add(index, (u1*)names[i], lengths[i], hashValues[i], c_heap, CHECK);
       cp->symbol_at_put(cp_indices[i], sym);
     }
@@ -383,7 +385,7 @@ Symbol* SymbolTable::basic_add(int index_arg, u1 *name, int len,
 
 // This version of basic_add adds symbols in batch from the constant pool
 // parsing.
-bool SymbolTable::basic_add(Handle class_loader, constantPoolHandle cp,
+bool SymbolTable::basic_add(ClassLoaderData* loader_data, constantPoolHandle cp,
                             int names_count,
                             const char** names, int* lengths,
                             int* cp_indices, unsigned int* hashValues,
@@ -421,7 +423,7 @@ bool SymbolTable::basic_add(Handle class_loader, constantPoolHandle cp,
     } else {
       // Create a new symbol.  The null class loader is never unloaded so these
       // are allocated specially in a permanent arena.
-      bool c_heap = class_loader() != NULL;
+      bool c_heap = !loader_data->is_the_null_class_loader_data();
       Symbol* sym = allocate_symbol((const u1*)names[i], lengths[i], c_heap, CHECK_(false));
       assert(sym->equals(names[i], lengths[i]), "symbol must be properly initialized");  // why wouldn't it be???
       HashtableEntry<Symbol*, mtSymbol>* entry = new_entry(hashValue, sym);
@@ -448,21 +450,7 @@ void SymbolTable::verify() {
 }
 
 void SymbolTable::dump(outputStream* st) {
-  NumberSeq summary;
-  for (int i = 0; i < the_table()->table_size(); ++i) {
-    int count = 0;
-    for (HashtableEntry<Symbol*, mtSymbol>* e = the_table()->bucket(i);
-       e != NULL; e = e->next()) {
-      count++;
-    }
-    summary.add((double)count);
-  }
-  st->print_cr("SymbolTable statistics:");
-  st->print_cr("Number of buckets       : %7d", summary.num());
-  st->print_cr("Average bucket size     : %7.0f", summary.avg());
-  st->print_cr("Variance of bucket size : %7.0f", summary.variance());
-  st->print_cr("Std. dev. of bucket size: %7.0f", summary.sd());
-  st->print_cr("Maximum bucket size     : %7.0f", summary.maximum());
+  the_table()->dump_table(st, "SymbolTable");
 }
 
 
@@ -490,7 +478,7 @@ void SymbolTable::print_histogram() {
   for (i = 0; i < the_table()->table_size(); i++) {
     HashtableEntry<Symbol*, mtSymbol>* p = the_table()->bucket(i);
     for ( ; p != NULL; p = p->next()) {
-      memory_total += p->literal()->object_size();
+      memory_total += p->literal()->size();
       count++;
       int counter = p->literal()->utf8_length();
       total += counter;
@@ -610,10 +598,12 @@ StringTable* StringTable::_the_table = NULL;
 
 bool StringTable::_needs_rehashing = false;
 
+volatile int StringTable::_parallel_claimed_idx = 0;
+
 // Pick hashing algorithm
 unsigned int StringTable::hash_string(const jchar* s, int len) {
   return use_alternate_hashcode() ? AltHashing::murmur3_32(seed(), s, len) :
-                                    java_lang_String::to_hash(s, len);
+                                    java_lang_String::hash_code(s, len);
 }
 
 oop StringTable::lookup(int index, jchar* name,
@@ -674,9 +664,14 @@ oop StringTable::lookup(Symbol* symbol) {
   ResourceMark rm;
   int length;
   jchar* chars = symbol->as_unicode(length);
-  unsigned int hashValue = hash_string(chars, length);
-  int index = the_table()->hash_to_index(hashValue);
-  return the_table()->lookup(index, chars, length, hashValue);
+  return lookup(chars, length);
+}
+
+
+oop StringTable::lookup(jchar* name, int len) {
+  unsigned int hash = hash_string(name, len);
+  int index = the_table()->hash_to_index(hash);
+  return the_table()->lookup(index, name, len, hash);
 }
 
 
@@ -695,10 +690,10 @@ oop StringTable::intern(Handle string_or_null, jchar* name,
 
   Handle string;
   // try to reuse the string if possible
-  if (!string_or_null.is_null() && (!JavaObjectsInPerm || string_or_null()->is_perm())) {
+  if (!string_or_null.is_null()) {
     string = string_or_null;
   } else {
-    string = java_lang_String::create_tenured_from_unicode(name, len, CHECK_NULL);
+    string = java_lang_String::create_from_unicode(name, len, CHECK_NULL);
   }
 
   // Grab the StringTable_lock before getting the_table() because it could
@@ -727,7 +722,7 @@ oop StringTable::intern(oop string, TRAPS)
   ResourceMark rm(THREAD);
   int length;
   Handle h_string (THREAD, string);
-  jchar* chars = java_lang_String::as_unicode_string(string, length);
+  jchar* chars = java_lang_String::as_unicode_string(string, length, CHECK_NULL);
   oop result = intern(h_string, chars, length, CHECK_NULL);
   return result;
 }
@@ -744,7 +739,7 @@ oop StringTable::intern(const char* utf8_string, TRAPS) {
   return result;
 }
 
-void StringTable::unlink(BoolObjectClosure* is_alive) {
+void StringTable::unlink_or_oops_do(BoolObjectClosure* is_alive, OopClosure* f) {
   // Readers of the table are unlocked, so we should only be removing
   // entries at a safepoint.
   assert(SafepointSynchronize::is_at_safepoint(), "must be at safepoint");
@@ -752,42 +747,63 @@ void StringTable::unlink(BoolObjectClosure* is_alive) {
     HashtableEntry<oop, mtSymbol>** p = the_table()->bucket_addr(i);
     HashtableEntry<oop, mtSymbol>* entry = the_table()->bucket(i);
     while (entry != NULL) {
-      // Shared entries are normally at the end of the bucket and if we run into
-      // a shared entry, then there is nothing more to remove. However, if we
-      // have rehashed the table, then the shared entries are no longer at the
-      // end of the bucket.
-      if (entry->is_shared() && !use_alternate_hashcode()) {
-        break;
-      }
-      assert(entry->literal() != NULL, "just checking");
-      if (entry->is_shared() || is_alive->do_object_b(entry->literal())) {
+      assert(!entry->is_shared(), "CDS not used for the StringTable");
+
+      if (is_alive->do_object_b(entry->literal())) {
+        if (f != NULL) {
+          f->do_oop((oop*)entry->literal_addr());
+        }
         p = entry->next_addr();
       } else {
         *p = entry->next();
         the_table()->free_entry(entry);
       }
-      entry = (HashtableEntry<oop, mtSymbol>*)HashtableEntry<oop, mtSymbol>::make_ptr(*p);
+      entry = *p;
+    }
+  }
+}
+
+void StringTable::buckets_do(OopClosure* f, int start_idx, int end_idx) {
+  const int limit = the_table()->table_size();
+
+  assert(0 <= start_idx && start_idx <= limit,
+         err_msg("start_idx (" INT32_FORMAT ") oob?", start_idx));
+  assert(0 <= end_idx && end_idx <= limit,
+         err_msg("end_idx (" INT32_FORMAT ") oob?", end_idx));
+  assert(start_idx <= end_idx,
+         err_msg("Ordering: start_idx=" INT32_FORMAT", end_idx=" INT32_FORMAT,
+                 start_idx, end_idx));
+
+  for (int i = start_idx; i < end_idx; i += 1) {
+    HashtableEntry<oop, mtSymbol>* entry = the_table()->bucket(i);
+    while (entry != NULL) {
+      assert(!entry->is_shared(), "CDS not used for the StringTable");
+
+      f->do_oop((oop*)entry->literal_addr());
+
+      entry = entry->next();
     }
   }
 }
 
 void StringTable::oops_do(OopClosure* f) {
-  for (int i = 0; i < the_table()->table_size(); ++i) {
-    HashtableEntry<oop, mtSymbol>** p = the_table()->bucket_addr(i);
-    HashtableEntry<oop, mtSymbol>* entry = the_table()->bucket(i);
-    while (entry != NULL) {
-      f->do_oop((oop*)entry->literal_addr());
+  buckets_do(f, 0, the_table()->table_size());
+}
 
-      // Did the closure remove the literal from the table?
-      if (entry->literal() == NULL) {
-        assert(!entry->is_shared(), "immutable hashtable entry?");
-        *p = entry->next();
-        the_table()->free_entry(entry);
-      } else {
-        p = entry->next_addr();
-      }
-      entry = (HashtableEntry<oop, mtSymbol>*)HashtableEntry<oop, mtSymbol>::make_ptr(*p);
+void StringTable::possibly_parallel_oops_do(OopClosure* f) {
+  const int ClaimChunkSize = 32;
+  const int limit = the_table()->table_size();
+
+  for (;;) {
+    // Grab next set of buckets to scan
+    int start_idx = Atomic::add(ClaimChunkSize, &_parallel_claimed_idx) - ClaimChunkSize;
+    if (start_idx >= limit) {
+      // End of table
+      break;
     }
+
+    int end_idx = MIN2(limit, start_idx + ClaimChunkSize);
+    buckets_do(f, start_idx, end_idx);
   }
 }
 
@@ -797,7 +813,6 @@ void StringTable::verify() {
     for ( ; p != NULL; p = p->next()) {
       oop s = p->literal();
       guarantee(s != NULL, "interned string is NULL");
-      guarantee(s->is_perm() || !JavaObjectsInPerm, "interned string not in permspace");
       unsigned int h = java_lang_String::hash_string(s);
       guarantee(p->hash() == h, "broken hash in string table entry");
       guarantee(the_table()->hash_to_index(h) == i,
@@ -807,21 +822,7 @@ void StringTable::verify() {
 }
 
 void StringTable::dump(outputStream* st) {
-  NumberSeq summary;
-  for (int i = 0; i < the_table()->table_size(); ++i) {
-    HashtableEntry<oop, mtSymbol>* p = the_table()->bucket(i);
-    int count = 0;
-    for ( ; p != NULL; p = p->next()) {
-      count++;
-    }
-    summary.add((double)count);
-  }
-  st->print_cr("StringTable statistics:");
-  st->print_cr("Number of buckets       : %7d", summary.num());
-  st->print_cr("Average bucket size     : %7.0f", summary.avg());
-  st->print_cr("Variance of bucket size : %7.0f", summary.variance());
-  st->print_cr("Std. dev. of bucket size: %7.0f", summary.sd());
-  st->print_cr("Maximum bucket size     : %7.0f", summary.maximum());
+  the_table()->dump_table(st, "StringTable");
 }
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import sun.invoke.WrapperInstance;
 import java.util.ArrayList;
+import sun.reflect.CallerSensitive;
 import sun.reflect.Reflection;
 import sun.reflect.misc.ReflectUtil;
 
@@ -107,8 +108,9 @@ public class MethodHandleProxies {
      * Future versions of this API may also equip wrapper instances
      * with one or more additional public "marker" interfaces.
      *
+     * @param <T> the desired type of the wrapper, a single-method interface
+     * @param intfc a class object representing {@code T}
      * @param target the method handle to invoke from the wrapper
-     * @param intfc the desired type of the wrapper, a single-method interface
      * @return a correctly-typed wrapper for the given target
      * @throws NullPointerException if either argument is null
      * @throws IllegalArgumentException if the {@code intfc} is not a
@@ -137,17 +139,17 @@ public class MethodHandleProxies {
     // entry points, must be covered by hand-written or automatically
     // generated adapter classes.
     //
+    @CallerSensitive
     public static
     <T> T asInterfaceInstance(final Class<T> intfc, final MethodHandle target) {
         if (!intfc.isInterface() || !Modifier.isPublic(intfc.getModifiers()))
             throw new IllegalArgumentException("not a public interface: "+intfc.getName());
         final MethodHandle mh;
         if (System.getSecurityManager() != null) {
-            final int CALLER_FRAME = 2; // 0: Reflection, 1: asInterfaceInstance, 2: caller
-            final Class<?> caller = Reflection.getCallerClass(CALLER_FRAME);
-            final ClassLoader ccl = (caller != null) ? caller.getClassLoader() : null;
+            final Class<?> caller = Reflection.getCallerClass();
+            final ClassLoader ccl = caller != null ? caller.getClassLoader() : null;
             ReflectUtil.checkProxyPackageAccess(ccl, intfc);
-            mh = maybeBindCaller(target, caller);
+            mh = ccl != null ? bindCaller(target, caller) : target;
         } else {
             mh = target;
         }
@@ -207,10 +209,7 @@ public class MethodHandleProxies {
         return intfc.cast(proxy);
     }
 
-    private static MethodHandle maybeBindCaller(MethodHandle target, Class<?> hostClass) {
-        if (hostClass == null || hostClass.getClassLoader() == null)
-            return target;
-
+    private static MethodHandle bindCaller(MethodHandle target, Class<?> hostClass) {
         MethodHandle cbmh = MethodHandleImpl.bindCaller(target, hostClass);
         if (target.isVarargsCollector()) {
             MethodType type = cbmh.type();

@@ -23,13 +23,12 @@
  */
 
 #include "precompiled.hpp"
-#include "asm/assembler.hpp"
-#include "assembler_sparc.inline.hpp"
+#include "asm/macroAssembler.inline.hpp"
 #include "code/debugInfoRec.hpp"
 #include "code/icBuffer.hpp"
 #include "code/vtableStubs.hpp"
 #include "interpreter/interpreter.hpp"
-#include "oops/compiledICHolderOop.hpp"
+#include "oops/compiledICHolder.hpp"
 #include "prims/jvmtiRedefineClassesTrace.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/vframeArray.hpp"
@@ -526,7 +525,7 @@ class AdapterGenerator {
 // Patch the callers callsite with entry to compiled code if it exists.
 void AdapterGenerator::patch_callers_callsite() {
   Label L;
-  __ ld_ptr(G5_method, in_bytes(methodOopDesc::code_offset()), G3_scratch);
+  __ ld_ptr(G5_method, in_bytes(Method::code_offset()), G3_scratch);
   __ br_null(G3_scratch, false, Assembler::pt, L);
   __ delayed()->nop();
   // Call into the VM to patch the caller, then jump to compiled callee
@@ -537,7 +536,7 @@ void AdapterGenerator::patch_callers_callsite() {
   // G2: global allocated to TLS
   // G3: used in inline cache check (scratch)
   // G4: 2nd Long arg (32bit build);
-  // G5: used in inline cache check (methodOop)
+  // G5: used in inline cache check (Method*)
 
   // The longs must go to the stack by hand since in the 32 bit build they can be trashed by window ops.
 
@@ -730,7 +729,7 @@ void AdapterGenerator::gen_c2i_adapter(
   }
 
   // Load the interpreter entry point.
-  __ ld_ptr(G5_method, in_bytes(methodOopDesc::interpreter_entry_offset()), G3_scratch);
+  __ ld_ptr(G5_method, in_bytes(Method::interpreter_entry_offset()), G3_scratch);
 
   // Pass O5_savedSP as an argument to the interpreter.
   // The interpreter will restore SP to this value before returning.
@@ -990,7 +989,7 @@ void AdapterGenerator::gen_i2c_adapter(
   }
 
   // Jump to the compiled code just as if compiled code was doing it.
-  __ ld_ptr(G5_method, in_bytes(methodOopDesc::from_compiled_offset()), G3);
+  __ ld_ptr(G5_method, in_bytes(Method::from_compiled_offset()), G3);
 
   // 6243940 We might end up in handle_wrong_method if
   // the callee is deoptimized as we race thru here. If that
@@ -1035,7 +1034,7 @@ AdapterHandlerEntry* SharedRuntime::generate_i2c2i_adapters(MacroAssembler *masm
 
 
   // -------------------------------------------------------------------------
-  // Generate a C2I adapter.  On entry we know G5 holds the methodOop.  The
+  // Generate a C2I adapter.  On entry we know G5 holds the Method*.  The
   // args start out packed in the compiled layout.  They need to be unpacked
   // into the interpreter layout.  This will almost always require some stack
   // space.  We grow the current (compiled) stack, then repack the args.  We
@@ -1051,17 +1050,14 @@ AdapterHandlerEntry* SharedRuntime::generate_i2c2i_adapters(MacroAssembler *masm
     AddressLiteral ic_miss(SharedRuntime::get_ic_miss_stub());
 
     __ verify_oop(O0);
-    __ verify_oop(G5_method);
     __ load_klass(O0, G3_scratch);
-    __ verify_oop(G3_scratch);
 
-    __ ld_ptr(G5_method, compiledICHolderOopDesc::holder_klass_offset(), R_temp);
-    __ verify_oop(R_temp);
+    __ ld_ptr(G5_method, CompiledICHolder::holder_klass_offset(), R_temp);
     __ cmp(G3_scratch, R_temp);
 
     Label ok, ok2;
     __ brx(Assembler::equal, false, Assembler::pt, ok);
-    __ delayed()->ld_ptr(G5_method, compiledICHolderOopDesc::holder_method_offset(), G5_method);
+    __ delayed()->ld_ptr(G5_method, CompiledICHolder::holder_method_offset(), G5_method);
     __ jump_to(ic_miss, G3_scratch);
     __ delayed()->nop();
 
@@ -1069,7 +1065,7 @@ AdapterHandlerEntry* SharedRuntime::generate_i2c2i_adapters(MacroAssembler *masm
     // Method might have been compiled since the call site was patched to
     // interpreted if that is the case treat it as a miss so we can get
     // the call site corrected.
-    __ ld_ptr(G5_method, in_bytes(methodOopDesc::code_offset()), G3_scratch);
+    __ ld_ptr(G5_method, in_bytes(Method::code_offset()), G3_scratch);
     __ bind(ok2);
     __ br_null(G3_scratch, false, Assembler::pt, L_skip_fixup);
     __ delayed()->nop();
@@ -1155,6 +1151,7 @@ int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
       case T_ADDRESS: // raw pointers, like current thread, for VM calls
       case T_ARRAY:
       case T_OBJECT:
+      case T_METADATA:
         regs[i].set2( int_stk_helper( j ) );
         break;
       case T_FLOAT:
@@ -1203,6 +1200,7 @@ int SharedRuntime::c_calling_convention(const BasicType *sig_bt,
       case T_FLOAT:
       case T_INT:
       case T_OBJECT:
+      case T_METADATA:
       case T_SHORT:
         regs[i].set1( int_stk_helper( i ) );
         break;
@@ -2323,7 +2321,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
   // Pre-load a static method's oop into O1.  Used both by locking code and
   // the normal JNI call code.
   if (method->is_static() && !is_critical_native) {
-    __ set_oop_constant(JNIHandles::make_local(Klass::cast(method->method_holder())->java_mirror()), O1);
+    __ set_oop_constant(JNIHandles::make_local(method->method_holder()->java_mirror()), O1);
 
     // Now handlize the static class mirror in O1.  It's known not-null.
     __ st_ptr(O1, SP, klass_offset + STACK_BIAS);
@@ -2376,7 +2374,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
     // create inner frame
     __ save_frame(0);
     __ mov(G2_thread, L7_thread_cache);
-    __ set_oop_constant(JNIHandles::make_local(method()), O1);
+    __ set_metadata_constant(method(), O1);
     __ call_VM_leaf(L7_thread_cache,
          CAST_FROM_FN_PTR(address, SharedRuntime::dtrace_method_entry),
          G2_thread, O1);
@@ -2388,7 +2386,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
     // create inner frame
     __ save_frame(0);
     __ mov(G2_thread, L7_thread_cache);
-    __ set_oop_constant(JNIHandles::make_local(method()), O1);
+    __ set_metadata_constant(method(), O1);
     __ call_VM_leaf(L7_thread_cache,
          CAST_FROM_FN_PTR(address, SharedRuntime::rc_trace_method_entry),
          G2_thread, O1);
@@ -2461,7 +2459,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
 
   // Finally just about ready to make the JNI call
 
-  __ flush_windows();
+  __ flushw();
   if (inner_frame_created) {
     __ restore();
   } else {
@@ -2674,7 +2672,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
     SkipIfEqual skip_if(
       masm, G3_scratch, &DTraceMethodProbes, Assembler::zero);
     save_native_result(masm, ret_type, stack_slots);
-    __ set_oop_constant(JNIHandles::make_local(method()), O1);
+    __ set_metadata_constant(method(), O1);
     __ call_VM_leaf(L7_thread_cache,
        CAST_FROM_FN_PTR(address, SharedRuntime::dtrace_method_exit),
        G2_thread, O1);
@@ -3887,9 +3885,9 @@ RuntimeStub* SharedRuntime::generate_resolve_blob(address destination, const cha
   __ ld_ptr(G2_thread, in_bytes(Thread::pending_exception_offset()), O1);
   __ br_notnull_short(O1, Assembler::pn, pending);
 
-  // get the returned methodOop
+  // get the returned Method*
 
-  __ get_vm_result(G5_method);
+  __ get_vm_result_2(G5_method);
   __ stx(G5_method, SP, RegisterSaver::G5_offset()+STACK_BIAS);
 
   // O0 is where we want to jump, overwrite G3 which is saved and scratch

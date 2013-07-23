@@ -31,14 +31,16 @@ import java.util.*;
 import java.security.NoSuchAlgorithmException;
 import java.security.InvalidKeyException;
 import java.security.SecureRandom;
+import java.security.KeyManagementException;
 
+import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-import sun.security.ssl.CipherSuite.*;
 import static sun.security.ssl.CipherSuite.KeyExchange.*;
 import static sun.security.ssl.CipherSuite.PRF.*;
+import static sun.security.ssl.CipherSuite.CipherType.*;
 import static sun.security.ssl.JsseJce.*;
 
 /**
@@ -65,7 +67,7 @@ import static sun.security.ssl.JsseJce.*;
  *    unavailable or disabled at compile time
  *
  */
-final class CipherSuite implements Comparable {
+final class CipherSuite implements Comparable<CipherSuite> {
 
     // minimum priority for supported CipherSuites
     final static int SUPPORTED_SUITES_PRIORITY = 1;
@@ -135,7 +137,9 @@ final class CipherSuite implements Comparable {
         this.keyExchange = keyExchange;
         this.cipher = cipher;
         this.exportable = cipher.exportable;
-        if (name.endsWith("_MD5")) {
+        if (cipher.cipherType == CipherType.AEAD_CIPHER) {
+            macAlg = M_NULL;
+        } else if (name.endsWith("_MD5")) {
             macAlg = M_MD5;
         } else if (name.endsWith("_SHA")) {
             macAlg = M_SHA;
@@ -202,13 +206,15 @@ final class CipherSuite implements Comparable {
      * Note that for unsupported CipherSuites parsed from a handshake
      * message we violate the equals() contract.
      */
-    public int compareTo(Object o) {
-        return ((CipherSuite)o).priority - priority;
+    @Override
+    public int compareTo(CipherSuite o) {
+        return o.priority - priority;
     }
 
     /**
      * Returns this.name.
      */
+    @Override
     public String toString() {
         return name;
     }
@@ -377,9 +383,16 @@ final class CipherSuite implements Comparable {
             }
         }
 
+        @Override
         public String toString() {
             return name;
         }
+    }
+
+    static enum CipherType {
+        STREAM_CIPHER,         // null or stream cipher
+        BLOCK_CIPHER,          // block cipher in CBC mode
+        AEAD_CIPHER            // AEAD cipher
     }
 
     /**
@@ -414,41 +427,66 @@ final class CipherSuite implements Comparable {
         // for non-exportable ciphers, this is the same as keySize
         final int expandedKeySize;
 
-        // size of the IV (also block size)
+        // size of the IV
         final int ivSize;
+
+        // size of fixed IV
+        //
+        // record_iv_length = ivSize - fixedIvSize
+        final int fixedIvSize;
 
         // exportable under 512/40 bit rules
         final boolean exportable;
 
         // Is the cipher algorithm of Cipher Block Chaining (CBC) mode?
-        final boolean isCBCMode;
+        final CipherType cipherType;
 
-        BulkCipher(String transformation, int keySize,
-                int expandedKeySize, int ivSize, boolean allowed) {
+        // size of the authentication tag, only applicable to cipher suites in
+        // Galois Counter Mode (GCM)
+        //
+        // As far as we know, all supported GCM cipher suites use 128-bits
+        // authentication tags.
+        final int tagSize = 16;
+
+        // The secure random used to detect the cipher availability.
+        private final static SecureRandom secureRandom;
+
+        static {
+            try {
+                secureRandom = JsseJce.getSecureRandom();
+            } catch (KeyManagementException kme) {
+                throw new RuntimeException(kme);
+            }
+        }
+
+        BulkCipher(String transformation, CipherType cipherType, int keySize,
+                int expandedKeySize, int ivSize,
+                int fixedIvSize, boolean allowed) {
+
             this.transformation = transformation;
             String[] splits = transformation.split("/");
             this.algorithm = splits[0];
-            this.isCBCMode =
-                splits.length <= 1 ? false : "CBC".equalsIgnoreCase(splits[1]);
+            this.cipherType = cipherType;
             this.description = this.algorithm + "/" + (keySize << 3);
             this.keySize = keySize;
             this.ivSize = ivSize;
+            this.fixedIvSize = fixedIvSize;
             this.allowed = allowed;
 
             this.expandedKeySize = expandedKeySize;
             this.exportable = true;
         }
 
-        BulkCipher(String transformation, int keySize,
-                int ivSize, boolean allowed) {
+        BulkCipher(String transformation, CipherType cipherType, int keySize,
+                int ivSize, int fixedIvSize, boolean allowed) {
             this.transformation = transformation;
             String[] splits = transformation.split("/");
             this.algorithm = splits[0];
-            this.isCBCMode =
-                splits.length <= 1 ? false : "CBC".equalsIgnoreCase(splits[1]);
+            this.cipherType = cipherType;
             this.description = this.algorithm + "/" + (keySize << 3);
             this.keySize = keySize;
             this.ivSize = ivSize;
+            this.fixedIvSize = fixedIvSize;
             this.allowed = allowed;
 
             this.expandedKeySize = keySize;
@@ -472,16 +510,20 @@ final class CipherSuite implements Comparable {
          * Test if this bulk cipher is available. For use by CipherSuite.
          *
          * Currently all supported ciphers except AES are always available
-         * via the JSSE internal implementations. We also assume AES/128
-         * is always available since it is shipped with the SunJCE provider.
-         * However, AES/256 is unavailable when the default JCE policy
-         * jurisdiction files are installed because of key length restrictions.
+         * via the JSSE internal implementations. We also assume AES/128 of
+         * CBC mode is always available since it is shipped with the SunJCE
+         * provider.  However, AES/256 is unavailable when the default JCE
+         * policy jurisdiction files are installed because of key length
+         * restrictions, and AEAD is unavailable when the underlying providers
+         * do not support AEAD/GCM mode.
          */
         boolean isAvailable() {
             if (allowed == false) {
                 return false;
             }
-            if (this == B_AES_256) {
+
+            if ((this == B_AES_256) ||
+                    (this.cipherType == CipherType.AEAD_CIPHER)) {
                 return isAvailable(this);
             }
 
@@ -499,22 +541,54 @@ final class CipherSuite implements Comparable {
         private static synchronized boolean isAvailable(BulkCipher cipher) {
             Boolean b = availableCache.get(cipher);
             if (b == null) {
-                try {
-                    SecretKey key = new SecretKeySpec
-                        (new byte[cipher.expandedKeySize], cipher.algorithm);
-                    IvParameterSpec iv =
-                        new IvParameterSpec(new byte[cipher.ivSize]);
-                    cipher.newCipher(ProtocolVersion.DEFAULT,
-                                                key, iv, null, true);
-                    b = Boolean.TRUE;
-                } catch (NoSuchAlgorithmException e) {
-                    b = Boolean.FALSE;
+                int keySizeInBits = cipher.keySize * 8;
+                if (keySizeInBits > 128) {    // need the JCE unlimited
+                                               // strength jurisdiction policy
+                    try {
+                        if (Cipher.getMaxAllowedKeyLength(
+                                cipher.transformation) < keySizeInBits) {
+                            b = Boolean.FALSE;
+                        }
+                    } catch (Exception e) {
+                        b = Boolean.FALSE;
+                    }
                 }
+
+                if (b == null) {
+                    b = Boolean.FALSE;          // may be reset to TRUE if
+                                                // the cipher is available
+                    CipherBox temporary = null;
+                    try {
+                        SecretKey key = new SecretKeySpec(
+                                            new byte[cipher.expandedKeySize],
+                                            cipher.algorithm);
+                        IvParameterSpec iv;
+                        if (cipher.cipherType == CipherType.AEAD_CIPHER) {
+                            iv = new IvParameterSpec(
+                                            new byte[cipher.fixedIvSize]);
+                        } else {
+                            iv = new IvParameterSpec(new byte[cipher.ivSize]);
+                        }
+                        temporary = cipher.newCipher(
+                                            ProtocolVersion.DEFAULT,
+                                            key, iv, secureRandom, true);
+                        b = temporary.isAvailable();
+                    } catch (NoSuchAlgorithmException e) {
+                        // not available
+                    } finally {
+                        if (temporary != null) {
+                            temporary.dispose();
+                        }
+                    }
+                }
+
                 availableCache.put(cipher, b);
             }
+
             return b.booleanValue();
         }
 
+        @Override
         public String toString() {
             return description;
         }
@@ -559,6 +633,7 @@ final class CipherSuite implements Comparable {
             return new MAC(this, protocolVersion, secret);
         }
 
+        @Override
         public String toString() {
             return name;
         }
@@ -566,27 +641,31 @@ final class CipherSuite implements Comparable {
 
     // export strength ciphers
     final static BulkCipher B_NULL    =
-                        new BulkCipher("NULL",         0,  0, 0, true);
+        new BulkCipher("NULL",          STREAM_CIPHER,    0,  0,  0, 0, true);
     final static BulkCipher B_RC4_40  =
-                        new BulkCipher(CIPHER_RC4,     5, 16, 0, true);
+        new BulkCipher(CIPHER_RC4,      STREAM_CIPHER,    5, 16,  0, 0, true);
     final static BulkCipher B_RC2_40  =
-                        new BulkCipher("RC2",          5, 16, 8, false);
+        new BulkCipher("RC2",           BLOCK_CIPHER,     5, 16,  8, 0, false);
     final static BulkCipher B_DES_40  =
-                        new BulkCipher(CIPHER_DES,     5,  8, 8, true);
+        new BulkCipher(CIPHER_DES,      BLOCK_CIPHER,     5,  8,  8, 0, true);
 
     // domestic strength ciphers
     final static BulkCipher B_RC4_128 =
-                        new BulkCipher(CIPHER_RC4,     16,  0, true);
+        new BulkCipher(CIPHER_RC4,      STREAM_CIPHER,   16,  0,  0, true);
     final static BulkCipher B_DES     =
-                        new BulkCipher(CIPHER_DES,      8,  8, true);
+        new BulkCipher(CIPHER_DES,      BLOCK_CIPHER,     8,  8,  0, true);
     final static BulkCipher B_3DES    =
-                        new BulkCipher(CIPHER_3DES,    24,  8, true);
+        new BulkCipher(CIPHER_3DES,     BLOCK_CIPHER,    24,  8,  0, true);
     final static BulkCipher B_IDEA    =
-                        new BulkCipher("IDEA",         16,  8, false);
+        new BulkCipher("IDEA",          BLOCK_CIPHER,    16,  8,  0, false);
     final static BulkCipher B_AES_128 =
-                        new BulkCipher(CIPHER_AES,     16, 16, true);
+        new BulkCipher(CIPHER_AES,      BLOCK_CIPHER,    16, 16,  0, true);
     final static BulkCipher B_AES_256 =
-                        new BulkCipher(CIPHER_AES,     32, 16, true);
+        new BulkCipher(CIPHER_AES,      BLOCK_CIPHER,    32, 16,  0, true);
+    final static BulkCipher B_AES_128_GCM =
+        new BulkCipher(CIPHER_AES_GCM,  AEAD_CIPHER,     16, 12,  4, true);
+    final static BulkCipher B_AES_256_GCM =
+        new BulkCipher(CIPHER_AES_GCM,  AEAD_CIPHER,     32, 12,  4, true);
 
     // MACs
     final static MacAlg M_NULL    = new MacAlg("NULL",     0,   0,   0);
@@ -886,11 +965,13 @@ final class CipherSuite implements Comparable {
          * Definition of the CipherSuites that are enabled by default.
          * They are listed in preference order, most preferred first, using
          * the following criteria:
-         * 1. Prefer the stronger buld cipher, in the order of AES_256,
-         *    AES_128, RC-4, 3DES-EDE.
-         * 2. Prefer the stronger MAC algorithm, in the order of SHA384,
+         * 1. Prefer Suite B compliant cipher suites, see RFC6460 (To be
+         *    changed later, see below).
+         * 2. Prefer the stronger bulk cipher, in the order of AES_256(GCM),
+         *    AES_128(GCM), AES_256, AES_128, RC-4, 3DES-EDE.
+         * 3. Prefer the stronger MAC algorithm, in the order of SHA384,
          *    SHA256, SHA, MD5.
-         * 3. Prefer the better performance of key exchange and digital
+         * 4. Prefer the better performance of key exchange and digital
          *    signature algorithm, in the order of ECDHE-ECDSA, ECDHE-RSA,
          *    RSA, ECDH-ECDSA, ECDH-RSA, DHE-RSA, DHE-DSS.
          */
@@ -903,6 +984,16 @@ final class CipherSuite implements Comparable {
 
         //  ID           Key Exchange   Cipher     A  obs  suprt  PRF
         //  ======       ============   =========  =  ===  =====  ========
+
+
+        // Placeholder for cipher suites in GCM mode.
+        //
+        // For better compatibility and interoperability, we decrease the
+        // priority of cipher suites in GCM mode for a while as GCM
+        // technologies mature in the industry.  Eventually we'll move
+        // the GCM suites here.
+
+        // AES_256(CBC)
         add("TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384",
             0xc024, --p, K_ECDHE_ECDSA, B_AES_256, T, max, tls12, P_SHA384);
         add("TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384",
@@ -933,6 +1024,7 @@ final class CipherSuite implements Comparable {
         add("TLS_DHE_DSS_WITH_AES_256_CBC_SHA",
             0x0038, --p, K_DHE_DSS,     B_AES_256, T);
 
+        // AES_128(CBC)
         add("TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256",
             0xc023, --p, K_ECDHE_ECDSA, B_AES_128, T, max, tls12, P_SHA256);
         add("TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
@@ -963,6 +1055,7 @@ final class CipherSuite implements Comparable {
         add("TLS_DHE_DSS_WITH_AES_128_CBC_SHA",
             0x0032, --p, K_DHE_DSS,     B_AES_128, T);
 
+        // RC-4
         add("TLS_ECDHE_ECDSA_WITH_RC4_128_SHA",
             0xC007, --p, K_ECDHE_ECDSA, B_RC4_128, N);
         add("TLS_ECDHE_RSA_WITH_RC4_128_SHA",
@@ -974,6 +1067,51 @@ final class CipherSuite implements Comparable {
         add("TLS_ECDH_RSA_WITH_RC4_128_SHA",
             0xC00C, --p, K_ECDH_RSA,    B_RC4_128, N);
 
+        // Cipher suites in GCM mode, see RFC 5288/5289.
+        //
+        // We may increase the priority of cipher suites in GCM mode when
+        // GCM technologies become mature in the industry.
+
+        // Suite B compliant cipher suites, see RFC 6460.
+        //
+        // Note that, at present this provider is not Suite B compliant. The
+        // preference order of the GCM cipher suites does not follow the spec
+        // of RFC 6460.
+        add("TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+            0xc02c, --p, K_ECDHE_ECDSA, B_AES_256_GCM, T, max, tls12, P_SHA384);
+        add("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+            0xc02b, --p, K_ECDHE_ECDSA, B_AES_128_GCM, T, max, tls12, P_SHA256);
+
+        // AES_256(GCM)
+        add("TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            0xc030, --p, K_ECDHE_RSA,   B_AES_256_GCM, T, max, tls12, P_SHA384);
+        add("TLS_RSA_WITH_AES_256_GCM_SHA384",
+            0x009d, --p, K_RSA,         B_AES_256_GCM, T, max, tls12, P_SHA384);
+        add("TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384",
+            0xc02e, --p, K_ECDH_ECDSA,  B_AES_256_GCM, T, max, tls12, P_SHA384);
+        add("TLS_ECDH_RSA_WITH_AES_256_GCM_SHA384",
+            0xc032, --p, K_ECDH_RSA,    B_AES_256_GCM, T, max, tls12, P_SHA384);
+        add("TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
+            0x009f, --p, K_DHE_RSA,     B_AES_256_GCM, T, max, tls12, P_SHA384);
+        add("TLS_DHE_DSS_WITH_AES_256_GCM_SHA384",
+            0x00a3, --p, K_DHE_DSS,     B_AES_256_GCM, T, max, tls12, P_SHA384);
+
+        // AES_128(GCM)
+        add("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            0xc02f, --p, K_ECDHE_RSA,   B_AES_128_GCM, T, max, tls12, P_SHA256);
+        add("TLS_RSA_WITH_AES_128_GCM_SHA256",
+            0x009c, --p, K_RSA,         B_AES_128_GCM, T, max, tls12, P_SHA256);
+        add("TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256",
+            0xc02d, --p, K_ECDH_ECDSA,  B_AES_128_GCM, T, max, tls12, P_SHA256);
+        add("TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256",
+            0xc031, --p, K_ECDH_RSA,    B_AES_128_GCM, T, max, tls12, P_SHA256);
+        add("TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
+            0x009e, --p, K_DHE_RSA,     B_AES_128_GCM, T, max, tls12, P_SHA256);
+        add("TLS_DHE_DSS_WITH_AES_128_GCM_SHA256",
+            0x00a2, --p, K_DHE_DSS,     B_AES_128_GCM, T, max, tls12, P_SHA256);
+        // End of cipher suites in GCM mode.
+
+        // 3DES_EDE
         add("TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA",
             0xC008, --p, K_ECDHE_ECDSA, B_3DES,    T);
         add("TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
@@ -1017,17 +1155,22 @@ final class CipherSuite implements Comparable {
          */
         p = DEFAULT_SUITES_PRIORITY;
 
+        add("TLS_DH_anon_WITH_AES_256_GCM_SHA384",
+            0x00a7, --p, K_DH_ANON,     B_AES_256_GCM, N, max, tls12, P_SHA384);
+        add("TLS_DH_anon_WITH_AES_128_GCM_SHA256",
+            0x00a6, --p, K_DH_ANON,     B_AES_128_GCM, N, max, tls12, P_SHA256);
+
         add("TLS_DH_anon_WITH_AES_256_CBC_SHA256",
             0x006d, --p, K_DH_ANON,     B_AES_256, N, max, tls12, P_SHA256);
         add("TLS_ECDH_anon_WITH_AES_256_CBC_SHA",
-            0xC019, --p, K_ECDH_ANON,   B_AES_256, T);
+            0xC019, --p, K_ECDH_ANON,   B_AES_256, N);
         add("TLS_DH_anon_WITH_AES_256_CBC_SHA",
             0x003a, --p, K_DH_ANON,     B_AES_256, N);
 
         add("TLS_DH_anon_WITH_AES_128_CBC_SHA256",
             0x006c, --p, K_DH_ANON,     B_AES_128, N, max, tls12, P_SHA256);
         add("TLS_ECDH_anon_WITH_AES_128_CBC_SHA",
-            0xC018, --p, K_ECDH_ANON,   B_AES_128, T);
+            0xC018, --p, K_ECDH_ANON,   B_AES_128, N);
         add("TLS_DH_anon_WITH_AES_128_CBC_SHA",
             0x0034, --p, K_DH_ANON,     B_AES_128, N);
 
@@ -1037,7 +1180,7 @@ final class CipherSuite implements Comparable {
             0x0018, --p, K_DH_ANON,     B_RC4_128, N);
 
         add("TLS_ECDH_anon_WITH_3DES_EDE_CBC_SHA",
-            0xC017, --p, K_ECDH_ANON,   B_3DES,    T);
+            0xC017, --p, K_ECDH_ANON,   B_3DES,    N);
         add("SSL_DH_anon_WITH_3DES_EDE_CBC_SHA",
             0x001b, --p, K_DH_ANON,     B_3DES,    N);
 
@@ -1192,18 +1335,10 @@ final class CipherSuite implements Comparable {
         add("TLS_DH_RSA_WITH_AES_256_CBC_SHA256",          0x0069);
 
         // Unsupported cipher suites from RFC 5288
-        add("TLS_RSA_WITH_AES_128_GCM_SHA256",             0x009c);
-        add("TLS_RSA_WITH_AES_256_GCM_SHA384",             0x009d);
-        add("TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",         0x009e);
-        add("TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",         0x009f);
         add("TLS_DH_RSA_WITH_AES_128_GCM_SHA256",          0x00a0);
         add("TLS_DH_RSA_WITH_AES_256_GCM_SHA384",          0x00a1);
-        add("TLS_DHE_DSS_WITH_AES_128_GCM_SHA256",         0x00a2);
-        add("TLS_DHE_DSS_WITH_AES_256_GCM_SHA384",         0x00a3);
         add("TLS_DH_DSS_WITH_AES_128_GCM_SHA256",          0x00a4);
         add("TLS_DH_DSS_WITH_AES_256_GCM_SHA384",          0x00a5);
-        add("TLS_DH_anon_WITH_AES_128_GCM_SHA256",         0x00a6);
-        add("TLS_DH_anon_WITH_AES_256_GCM_SHA384",         0x00a7);
 
         // Unsupported cipher suites from RFC 5487
         add("TLS_PSK_WITH_AES_128_GCM_SHA256",             0x00a8);
@@ -1261,16 +1396,6 @@ final class CipherSuite implements Comparable {
         add("TLS_SRP_SHA_WITH_AES_256_CBC_SHA",            0xc020);
         add("TLS_SRP_SHA_RSA_WITH_AES_256_CBC_SHA",        0xc021);
         add("TLS_SRP_SHA_DSS_WITH_AES_256_CBC_SHA",        0xc022);
-
-        // Unsupported cipher suites from RFC 5289
-        add("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",     0xc02b);
-        add("TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",     0xc02c);
-        add("TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256",      0xc02d);
-        add("TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384",      0xc02e);
-        add("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",       0xc02f);
-        add("TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",       0xc030);
-        add("TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256",        0xc031);
-        add("TLS_ECDH_RSA_WITH_AES_256_GCM_SHA384",        0xc032);
 
         // Unsupported cipher suites from RFC 5489
         add("TLS_ECDHE_PSK_WITH_RC4_128_SHA",              0xc033);

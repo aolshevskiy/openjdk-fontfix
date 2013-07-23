@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@ package java.lang;
  * @author Josh Bloch
  * @since 1.7
  */
+@FunctionalInterface
 public interface AutoCloseable {
     /**
      * Closes this resource, relinquishing any underlying resources.
@@ -42,6 +43,15 @@ public interface AutoCloseable {
      * declare concrete implementations of the {@code close} method to
      * throw more specific exceptions, or to throw no exception at all
      * if the close operation cannot fail.
+     *
+     * <p> Cases where the close operation may fail require careful
+     * attention by implementers. It is strongly advised to relinquish
+     * the underlying resources and to internally <em>mark</em> the
+     * resource as closed, prior to throwing the exception. The {@code
+     * close} method is unlikely to be invoked more than once and so
+     * this ensures that the resources are released in a timely manner.
+     * Furthermore it reduces problems that could arise when the resource
+     * wraps, or is wrapped, by another resource.
      *
      * <p><em>Implementers of this interface are also strongly advised
      * to not have the {@code close} method throw {@link

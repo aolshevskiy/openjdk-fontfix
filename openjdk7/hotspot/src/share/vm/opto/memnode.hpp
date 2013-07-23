@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -75,8 +75,8 @@ public:
                                       PhaseTransform* phase);
   static bool adr_phi_is_loop_invariant(Node* adr_phi, Node* cast);
 
-  static Node *optimize_simple_memory_chain(Node *mchain, const TypePtr *t_adr, PhaseGVN *phase);
-  static Node *optimize_memory_chain(Node *mchain, const TypePtr *t_adr, PhaseGVN *phase);
+  static Node *optimize_simple_memory_chain(Node *mchain, const TypeOopPtr *t_oop, Node *load, PhaseGVN *phase);
+  static Node *optimize_memory_chain(Node *mchain, const TypePtr *t_adr, Node *load, PhaseGVN *phase);
   // This one should probably be a phase-specific function:
   static bool all_controls_dominate(Node* dom, Node* sub);
 
@@ -425,12 +425,12 @@ public:
 // Load a narrow Klass from an object.
 class LoadNKlassNode : public LoadNNode {
 public:
-  LoadNKlassNode( Node *c, Node *mem, Node *adr, const TypePtr *at, const TypeNarrowOop *tk )
+  LoadNKlassNode( Node *c, Node *mem, Node *adr, const TypePtr *at, const TypeNarrowKlass *tk )
     : LoadNNode(c,mem,adr,at,tk) {}
   virtual int Opcode() const;
   virtual uint ideal_reg() const { return Op_RegN; }
-  virtual int store_Opcode() const { return Op_StoreN; }
-  virtual BasicType memory_type() const { return T_NARROWOOP; }
+  virtual int store_Opcode() const { return Op_StoreNKlass; }
+  virtual BasicType memory_type() const { return T_NARROWKLASS; }
 
   virtual const Type *Value( PhaseTransform *phase ) const;
   virtual Node *Identity( PhaseTransform *phase );
@@ -579,6 +579,15 @@ public:
   StoreNNode( Node *c, Node *mem, Node *adr, const TypePtr* at, Node *val ) : StoreNode(c,mem,adr,at,val) {}
   virtual int Opcode() const;
   virtual BasicType memory_type() const { return T_NARROWOOP; }
+};
+
+//------------------------------StoreNKlassNode--------------------------------------
+// Store narrow klass to memory
+class StoreNKlassNode : public StoreNNode {
+public:
+  StoreNKlassNode( Node *c, Node *mem, Node *adr, const TypePtr* at, Node *val ) : StoreNNode(c,mem,adr,at,val) {}
+  virtual int Opcode() const;
+  virtual BasicType memory_type() const { return T_NARROWKLASS; }
 };
 
 //------------------------------StoreCMNode-----------------------------------
@@ -879,6 +888,22 @@ public:
   virtual const Type* bottom_type() const { return TypeInt::BOOL; }
 };
 
+
+//------------------------------EncodeISOArray--------------------------------
+// encode char[] to byte[] in ISO_8859_1
+class EncodeISOArrayNode: public Node {
+public:
+  EncodeISOArrayNode(Node *control, Node* arymem, Node* s1, Node* s2, Node* c): Node(control, arymem, s1, s2, c) {};
+  virtual int Opcode() const;
+  virtual bool depends_only_on_test() const { return false; }
+  virtual const Type* bottom_type() const { return TypeInt::INT; }
+  virtual const TypePtr* adr_type() const { return TypePtr::BOTTOM; }
+  virtual uint match_edge(uint idx) const;
+  virtual uint ideal_reg() const { return Op_RegI; }
+  virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
+  virtual const Type *Value(PhaseTransform *phase) const;
+};
+
 //------------------------------MemBar-----------------------------------------
 // There are different flavors of Memory Barriers to match the Java Memory
 // Model.  Monitor-enter and volatile-load act as Aquires: no following ref
@@ -1074,7 +1099,7 @@ public:
 
   Node* make_raw_address(intptr_t offset, PhaseTransform* phase);
 
-  bool detect_init_independence(Node* n, bool st_is_pinned, int& count);
+  bool detect_init_independence(Node* n, int& count);
 
   void coalesce_subword_stores(intptr_t header_size, Node* size_in_bytes,
                                PhaseGVN* phase);

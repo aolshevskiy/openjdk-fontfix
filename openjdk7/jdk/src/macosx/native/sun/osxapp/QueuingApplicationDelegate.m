@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -110,8 +110,14 @@
 
 - (void)_handleOpenURLEvent:(NSAppleEventDescriptor *)openURLEvent withReplyEvent:(NSAppleEventDescriptor *)replyEvent
 {
+    // Make an explicit copy of the passed events as they may be invalidated by the time they're processed
+    NSAppleEventDescriptor *openURLEventCopy = [openURLEvent copy];
+    NSAppleEventDescriptor *replyEventCopy = [replyEvent copy];
+
     [self.queue addObject:[^(){
-        [self.realDelegate _handleOpenURLEvent:openURLEvent withReplyEvent:replyEvent];
+        [self.realDelegate _handleOpenURLEvent:openURLEventCopy withReplyEvent:replyEventCopy];
+        [openURLEventCopy release];
+        [replyEventCopy release];
     } copy]];
 }
 

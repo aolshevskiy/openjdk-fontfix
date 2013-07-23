@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2007, 2008, 2009, 2010 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -49,8 +49,8 @@
 #include "runtime/osThread.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/timer.hpp"
-#include "thread_linux.inline.hpp"
 #include "utilities/events.hpp"
 #include "utilities/vmError.hpp"
 
@@ -313,7 +313,7 @@ static void current_stack_region(address *bottom, size_t *size) {
   int res = pthread_getattr_np(pthread_self(), &attr);
   if (res != 0) {
     if (res == ENOMEM) {
-      vm_exit_out_of_memory(0, "pthread_getattr_np");
+      vm_exit_out_of_memory(0, OOM_MMAP_ERROR, "pthread_getattr_np");
     }
     else {
       fatal(err_msg("pthread_getattr_np failed with errno = %d", res));

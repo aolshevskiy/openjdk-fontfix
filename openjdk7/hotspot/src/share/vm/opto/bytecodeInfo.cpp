@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,6 +23,7 @@
  */
 
 #include "precompiled.hpp"
+#include "ci/ciReplay.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "compiler/compileBroker.hpp"
@@ -84,16 +85,35 @@ InlineTree::InlineTree(Compile* c, ciMethod* callee_method, JVMState* caller_jvm
   assert(!UseOldInlining, "do not use for old stuff");
 }
 
+/**
+ *  Return true when EA is ON and a java constructor is called or
+ *  a super constructor is called from an inlined java constructor.
+ *  Also return true for boxing methods.
+ */
 static bool is_init_with_ea(ciMethod* callee_method,
                             ciMethod* caller_method, Compile* C) {
-  // True when EA is ON and a java constructor is called or
-  // a super constructor is called from an inlined java constructor.
-  return C->do_escape_analysis() && EliminateAllocations &&
-         ( callee_method->is_initializer() ||
-           (caller_method->is_initializer() &&
-            caller_method != C->method() &&
-            caller_method->holder()->is_subclass_of(callee_method->holder()))
-         );
+  if (!C->do_escape_analysis() || !EliminateAllocations) {
+    return false; // EA is off
+  }
+  if (callee_method->is_initializer()) {
+    return true; // constuctor
+  }
+  if (caller_method->is_initializer() &&
+      caller_method != C->method() &&
+      caller_method->holder()->is_subclass_of(callee_method->holder())) {
+    return true; // super constructor is called from inlined constructor
+  }
+  if (C->eliminate_boxing() && callee_method->is_boxing_method()) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ *  Force inlining unboxing accessor.
+ */
+static bool is_unboxing_method(ciMethod* callee_method, Compile* C) {
+  return C->eliminate_boxing() && callee_method->is_unboxing_method();
 }
 
 // positive filter: should callee be inlined?
@@ -143,6 +163,7 @@ bool InlineTree::should_inline(ciMethod* callee_method, ciMethod* caller_method,
   // bump the max size if the call is frequent
   if ((freq >= InlineFrequencyRatio) ||
       (call_site_count >= InlineFrequencyCount) ||
+      is_unboxing_method(callee_method, C) ||
       is_init_with_ea(callee_method, caller_method, C)) {
 
     max_inline_size = C->freq_inline_size();
@@ -156,7 +177,7 @@ bool InlineTree::should_inline(ciMethod* callee_method, ciMethod* caller_method,
   } else {
     // Not hot.  Check for medium-sized pre-existing nmethod at cold sites.
     if (callee_method->has_compiled_code() &&
-        callee_method->instructions_size(CompLevel_full_optimization) > inline_small_code_size) {
+        callee_method->instructions_size() > inline_small_code_size) {
       set_msg("already compiled into a medium method");
       return false;
     }
@@ -212,7 +233,7 @@ bool InlineTree::should_not_inline(ciMethod *callee_method,
     }
 
     if (callee_method->has_compiled_code() &&
-        callee_method->instructions_size(CompLevel_full_optimization) > InlineSmallCode) {
+        callee_method->instructions_size() > InlineSmallCode) {
       wci_result->set_profit(wci_result->profit() * 0.1);
       // %%% adjust wci_result->size()?
     }
@@ -236,11 +257,28 @@ bool InlineTree::should_not_inline(ciMethod *callee_method,
     return false;
   }
 
+  if (callee_method->should_not_inline()) {
+    set_msg("disallowed by CompilerOracle");
+    return true;
+  }
+
+#ifndef PRODUCT
+  if (ciReplay::should_not_inline(callee_method)) {
+    set_msg("disallowed by ciReplay");
+    return true;
+  }
+#endif
+
   // Now perform checks which are heuristic
+
+  if (is_unboxing_method(callee_method, C)) {
+    // Inline unboxing methods.
+    return false;
+  }
 
   if (!callee_method->force_inline()) {
     if (callee_method->has_compiled_code() &&
-        callee_method->instructions_size(CompLevel_full_optimization) > InlineSmallCode) {
+        callee_method->instructions_size() > InlineSmallCode) {
       set_msg("already compiled into a big method");
       return true;
     }
@@ -257,11 +295,6 @@ bool InlineTree::should_not_inline(ciMethod *callee_method,
       set_msg("exception method");
       return true;
     }
-  }
-
-  if (callee_method->should_not_inline()) {
-    set_msg("disallowed by CompilerOracle");
-    return true;
   }
 
   if (UseStringCache) {
@@ -288,9 +321,8 @@ bool InlineTree::should_not_inline(ciMethod *callee_method,
     }
 
     if (is_init_with_ea(callee_method, caller_method, C)) {
-
       // Escape Analysis: inline all executed constructors
-
+      return false;
     } else if (!callee_method->was_executed_more_than(MIN2(MinInliningThreshold,
                                                            CompileThreshold >> 1))) {
       set_msg("executed < MinInliningThreshold times");

@@ -26,7 +26,7 @@
  * @bug 7067922
  * @author sogoel
  * @summary Test negative scenarios for main class attribute
- * @compile -XDignore.symbol.file MainClassAttributeTest.java
+ * @build MainClassAttributeTest
  * @run main MainClassAttributeTest
  */
 
@@ -37,15 +37,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 /*
- * This class tests negative scenarios for Main class entry in jar file
- * An error should be thrown for each of the test cases when such a jar
- * is executed. These tests can only run on non-localized locales, thus
- * only English is seleced and will pass vacuosly for other locales.
- *
+ * This tests negative scenarios for Main class entry in a jar file.
+ * An error should be thrown for each of the test cases when such a
+ * jar is executed.
  */
 
 public class MainClassAttributeTest extends TestHelper {
 
+    /*
+     * These tests compare messages which could be localized, therefore
+     * these tests compare messages only with English locales, and
+     * for all other locales,  the exit values are checked.
+     */
     static void runTest(File jarFile, String expectedErrorMessage) {
         TestResult tr = doExec(TestHelper.javaCmd,
                 "-jar", jarFile.getAbsolutePath());
@@ -60,42 +63,38 @@ public class MainClassAttributeTest extends TestHelper {
     }
 
     // Missing manifest entry
-    static void test1() throws Exception {
+    static void test1() throws IOException {
         File jarFile = new File("missingmainentry.jar");
         createJar("cvf", jarFile.getName(), ".");
         runTest(jarFile, "no main manifest attribute");
     }
 
     // Entry point in manifest file has .class extension
-    static void test2() throws FileNotFoundException {
+    static void test2() throws IOException {
         File jarFile = new File("extensionmainentry.jar");
         createJar("Foo.class", jarFile, new File("Foo"), (String[])null);
         runTest(jarFile, "Error: Could not find or load main class");
     }
 
     // Entry point in manifest file is misspelled
-    static void test3() throws FileNotFoundException {
+    static void test3() throws IOException {
         File jarFile = new File("misspelledmainentry.jar");
         createJar("FooMIS", jarFile, new File("Foo"), (String[])null);
         runTest(jarFile, "Error: Could not find or load main class");
     }
 
     // Main-Class attribute is misspelled in manifest file
-    static void test4() throws Exception {
+    static void test4() throws IOException {
         File jarFile = new File("misspelledMainAttribute.jar");
         File manifestFile = new File("manifest.txt");
-        try {
-            List<String> contents = new ArrayList<>();
-            contents.add("MainClassName: Foo");
-            createFile(manifestFile, contents);
-        } catch (IOException e) {
-            throw new Exception("Creation of manifest file for test3 failed");
-        }
+        List<String> contents = new ArrayList<>();
+        contents.add("MainClassName: Foo");
+        createFile(manifestFile, contents);
         createJar("-cmf", manifestFile.getName(), jarFile.getName());
         runTest(jarFile, "no main manifest attribute");
     }
 
-    public static void main(String[] args) throws Throwable {
+    public static void main(String[] args) throws IOException {
         test1();
         test2();
         test3();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 package sun.jvm.hotspot.tools;
 
 import java.io.*;
+import sun.jvm.hotspot.debugger.JVMDebugger;
 import sun.jvm.hotspot.utilities.*;
 
 public class JMap extends Tool {
@@ -36,6 +37,10 @@ public class JMap extends Tool {
         this(MODE_PMAP);
     }
 
+    public JMap(JVMDebugger d) {
+        super(d);
+    }
+
     protected boolean needsJavaPrefix() {
         return false;
     }
@@ -45,7 +50,7 @@ public class JMap extends Tool {
     }
 
     protected String getCommandFlags() {
-        return "-heap|-heap:format=b|-histo|-permstat|-finalizerinfo";
+        return "-heap|-heap:format=b|-histo|-clstats|-finalizerinfo";
     }
 
     protected void printFlagsUsage() {
@@ -53,14 +58,14 @@ public class JMap extends Tool {
         System.out.println("    -heap\tto print java heap summary");
         System.out.println("    -heap:format=b\tto dump java heap in hprof binary format");
         System.out.println("    -histo\tto print histogram of java object heap");
-        System.out.println("    -permstat\tto print permanent generation statistics");
+        System.out.println("    -clstats\tto print class loader statistics");
         System.out.println("    -finalizerinfo\tto print information on objects awaiting finalization");
         super.printFlagsUsage();
     }
 
     public static final int MODE_HEAP_SUMMARY = 0;
     public static final int MODE_HISTOGRAM = 1;
-    public static final int MODE_PERMSTAT = 2;
+    public static final int MODE_CLSTATS = 2;
     public static final int MODE_PMAP = 3;
     public static final int MODE_HEAP_GRAPH_HPROF_BIN = 4;
     public static final int MODE_HEAP_GRAPH_GXL = 5;
@@ -78,8 +83,8 @@ public class JMap extends Tool {
             tool = new ObjectHistogram();
             break;
 
-        case MODE_PERMSTAT:
-            tool = new PermStat();
+        case MODE_CLSTATS:
+            tool = new ClassLoaderStats();
             break;
 
         case MODE_PMAP:
@@ -117,8 +122,8 @@ public class JMap extends Tool {
                 mode = MODE_HEAP_SUMMARY;
             } else if (modeFlag.equals("-histo")) {
                 mode = MODE_HISTOGRAM;
-            } else if (modeFlag.equals("-permstat")) {
-                mode = MODE_PERMSTAT;
+            } else if (modeFlag.equals("-clstats")) {
+                mode = MODE_CLSTATS;
             } else if (modeFlag.equals("-finalizerinfo")) {
                 mode = MODE_FINALIZERINFO;
             } else {

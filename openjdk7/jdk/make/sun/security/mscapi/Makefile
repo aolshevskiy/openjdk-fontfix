@@ -149,7 +149,6 @@ OTHER_INCLUDES += \
 # Rules
 #
 CLASSDESTDIR = $(TEMPDIR)/classes
-
 JAVAHFLAGS = -bootclasspath \
   "$(CLASSDESTDIR)$(CLASSPATH_SEPARATOR)$(CLASSBINDIR)$(JCE_PATH)"
 
@@ -161,7 +160,7 @@ include $(BUILDDIR)/common/Library.gmk
 # Libraries to link
 #
 ifeq ($(PLATFORM), windows)
-  OTHER_LDLIBS += $(JVMLIB) Crypt32.Lib
+  OTHER_LDLIBS += Crypt32.Lib
 endif
 
 #

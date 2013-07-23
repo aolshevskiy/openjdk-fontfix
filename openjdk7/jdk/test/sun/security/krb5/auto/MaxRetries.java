@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,11 +24,13 @@
 /*
  * @test
  * @bug 6844193
+ * @compile -XDignore.symbol.file MaxRetries.java
  * @run main/othervm/timeout=300 MaxRetries
  * @summary support max_retries in krb5.conf
  */
 
 import java.io.*;
+import java.net.DatagramSocket;
 import java.security.Security;
 
 public class MaxRetries {
@@ -37,6 +39,10 @@ public class MaxRetries {
 
         System.setProperty("sun.security.krb5.debug", "true");
         new OneKDC(null).writeJAASConf();
+
+        // An idle UDP socket to revent PortUnreachableException
+        DatagramSocket ds = new DatagramSocket(33333);
+
         System.setProperty("java.security.krb5.conf", "alternative-krb5.conf");
 
         // For tryLast
@@ -78,6 +84,8 @@ public class MaxRetries {
 
         rewriteUdpPrefLimit(10000, 10); // realm rules
         test2("TCP");
+
+        ds.close();
     }
 
     /**
@@ -100,7 +108,7 @@ public class MaxRetries {
             if (line.startsWith(">>> KDCCommunication")) {
                 System.out.println(line);
                 if (line.indexOf(timeoutTag) < 0) {
-                    throw new Exception("Wrong timeout value");
+                    throw new Exception("Wrong timeout value" + timeoutTag);
                 }
                 count--;
             }

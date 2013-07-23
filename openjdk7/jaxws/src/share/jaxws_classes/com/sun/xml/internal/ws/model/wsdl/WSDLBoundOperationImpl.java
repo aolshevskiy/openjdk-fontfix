@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,7 @@ import com.sun.istack.internal.Nullable;
 import com.sun.istack.internal.NotNull;
 import com.sun.xml.internal.ws.api.model.ParameterBinding;
 import com.sun.xml.internal.ws.api.model.wsdl.*;
+import com.sun.xml.internal.ws.model.RuntimeModeler;
 
 import javax.jws.WebParam.Mode;
 import javax.jws.soap.SOAPBinding.Style;
@@ -62,7 +63,6 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
 
     private final Map<String, WSDLPartImpl> inParts;
     private final Map<String, WSDLPartImpl> outParts;
-    private final Map<String, WSDLPartImpl> fltParts;
     private final List<WSDLBoundFaultImpl> wsdlBoundFaults;
     private WSDLOperationImpl operation;
     private String soapAction;
@@ -85,15 +85,16 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
         faultMimeTypes = new HashMap<String, String>();
         inParts = new HashMap<String, WSDLPartImpl>();
         outParts = new HashMap<String, WSDLPartImpl>();
-        fltParts = new HashMap<String, WSDLPartImpl>();
         wsdlBoundFaults = new ArrayList<WSDLBoundFaultImpl>();
         this.owner = owner;
     }
 
+    @Override
     public QName getName(){
         return name;
     }
 
+    @Override
     public String getSOAPAction() {
         return soapAction;
     }
@@ -102,6 +103,7 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
         this.soapAction = soapAction!=null?soapAction:"";
     }
 
+    @Override
     public WSDLPartImpl getPart(String partName, Mode mode) {
         if(mode==Mode.IN){
             return inParts.get(partName);
@@ -146,15 +148,18 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
     }
 
     // TODO: what's the difference between this and inputParts/outputParts?
+    @Override
     public Map<String,WSDLPart> getInParts() {
         return Collections.<String,WSDLPart>unmodifiableMap(inParts);
     }
 
+    @Override
     public Map<String,WSDLPart> getOutParts() {
         return Collections.<String,WSDLPart>unmodifiableMap(outParts);
     }
 
     @NotNull
+    @Override
     public List<WSDLBoundFaultImpl> getFaults() {
         return wsdlBoundFaults;
     }
@@ -290,11 +295,13 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
         return faultMimeTypes.get(part);
     }
 
+    @Override
     public WSDLOperationImpl getOperation() {
         return operation;
     }
 
 
+    @Override
     public WSDLBoundPortType getBoundPortType() {
         return owner;
     }
@@ -316,6 +323,7 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
         this.style = style;
     }
 
+    @Override
     public @Nullable QName getReqPayloadName() {
         if (emptyRequestPayload)
             return null;
@@ -345,6 +353,7 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
         return null;
     }
 
+    @Override
     public @Nullable QName getResPayloadName() {
         if (emptyResponsePayload)
             return null;
@@ -382,8 +391,9 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
      * For rpclit gives namespace value on soapbinding:body@namespace
      *
      * @return   non-null for rpclit and null for doclit
-     * @see com.sun.xml.internal.ws.model.RuntimeModeler#processRpcMethod(com.sun.xml.internal.ws.model.JavaMethodImpl, String, javax.jws.WebMethod, String, java.lang.reflect.Method, javax.jws.WebService)
+     * @see RuntimeModeler#processRpcMethod(JavaMethodImpl, String, String, Method)
      */
+    @Override
     public String getRequestNamespace(){
         return (reqNamespace != null)?reqNamespace:name.getNamespaceURI();
     }
@@ -397,8 +407,9 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
      * For rpclit gives namespace value on soapbinding:body@namespace
      *
      * @return   non-null for rpclit and null for doclit
-     *      * @see com.sun.xml.internal.ws.modeler.RuntimeModeler#processRpcMethod(com.sun.xml.internal.ws.model.JavaMethod, String, javax.jws.WebMethod, String, java.lang.reflect.Method, javax.jws.WebService)
+     * @see RuntimeModeler#processRpcMethod(JavaMethodImpl, String, String, Method)
      */
+    @Override
     public String getResponseNamespace(){
         return (respNamespace!=null)?respNamespace:name.getNamespaceURI();
     }
@@ -432,6 +443,7 @@ public final class WSDLBoundOperationImpl extends AbstractExtensibleImpl impleme
     /**
      * @inheritDoc
      */
+    @Override
     public ANONYMOUS getAnonymous() {
         return anonymous;
     }

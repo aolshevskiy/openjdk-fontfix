@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,7 +67,7 @@ StubQueue::StubQueue(StubInterface* stub_interface, int buffer_size,
   intptr_t size = round_to(buffer_size, 2*BytesPerWord);
   BufferBlob* blob = BufferBlob::create(name, size);
   if( blob == NULL) {
-    vm_exit_out_of_memory(size, err_msg("CodeCache: no room for %s", name));
+    vm_exit_out_of_memory(size, OOM_MALLOC_ERROR, err_msg("CodeCache: no room for %s", name));
   }
   _stub_interface  = stub_interface;
   _buffer_size     = blob->content_size();

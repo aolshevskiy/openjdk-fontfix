@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,7 +52,7 @@ class ConstantPool {
      *  Also used to back up more complex constant pool entries, like Class.
      */
     public static synchronized Utf8Entry getUtf8Entry(String value) {
-        Map<String, Utf8Entry> utf8Entries  = Utils.getUtf8Entries();
+        Map<String, Utf8Entry> utf8Entries  = Utils.getTLGlobals().getUtf8Entries();
         Utf8Entry e = utf8Entries.get(value);
         if (e == null) {
             e = new Utf8Entry(value);
@@ -61,8 +61,8 @@ class ConstantPool {
         return e;
     }
     /** Factory for Class constants. */
-    public static synchronized ClassEntry getClassEntry(String name) {
-        Map<String, ClassEntry> classEntries = Utils.getClassEntries();
+    public static ClassEntry getClassEntry(String name) {
+        Map<String, ClassEntry> classEntries = Utils.getTLGlobals().getClassEntries();
         ClassEntry e = classEntries.get(name);
         if (e == null) {
             e = new ClassEntry(getUtf8Entry(name));
@@ -72,8 +72,8 @@ class ConstantPool {
         return e;
     }
     /** Factory for literal constants (String, Integer, etc.). */
-    public static synchronized LiteralEntry getLiteralEntry(Comparable value) {
-        Map<Object, LiteralEntry> literalEntries = Utils.getLiteralEntries();
+    public static LiteralEntry getLiteralEntry(Comparable<?> value) {
+        Map<Object, LiteralEntry> literalEntries = Utils.getTLGlobals().getLiteralEntries();
         LiteralEntry e = literalEntries.get(value);
         if (e == null) {
             if (value instanceof String)
@@ -85,13 +85,13 @@ class ConstantPool {
         return e;
     }
     /** Factory for literal constants (String, Integer, etc.). */
-    public static synchronized StringEntry getStringEntry(String value) {
+    public static StringEntry getStringEntry(String value) {
         return (StringEntry) getLiteralEntry(value);
     }
 
     /** Factory for signature (type) constants. */
-    public static synchronized SignatureEntry getSignatureEntry(String type) {
-        Map<String, SignatureEntry> signatureEntries = Utils.getSignatureEntries();
+    public static SignatureEntry getSignatureEntry(String type) {
+        Map<String, SignatureEntry> signatureEntries = Utils.getTLGlobals().getSignatureEntries();
         SignatureEntry e = signatureEntries.get(type);
         if (e == null) {
             e = new SignatureEntry(type);
@@ -106,8 +106,8 @@ class ConstantPool {
     }
 
     /** Factory for descriptor (name-and-type) constants. */
-    public static synchronized DescriptorEntry getDescriptorEntry(Utf8Entry nameRef, SignatureEntry typeRef) {
-        Map<String, DescriptorEntry> descriptorEntries = Utils.getDescriptorEntries();
+    public static DescriptorEntry getDescriptorEntry(Utf8Entry nameRef, SignatureEntry typeRef) {
+        Map<String, DescriptorEntry> descriptorEntries = Utils.getTLGlobals().getDescriptorEntries();
         String key = DescriptorEntry.stringValueOf(nameRef, typeRef);
         DescriptorEntry e = descriptorEntries.get(key);
         if (e == null) {
@@ -124,8 +124,8 @@ class ConstantPool {
     }
 
     /** Factory for member reference constants. */
-    public static synchronized MemberEntry getMemberEntry(byte tag, ClassEntry classRef, DescriptorEntry descRef) {
-        Map<String, MemberEntry> memberEntries = Utils.getMemberEntries();
+    public static MemberEntry getMemberEntry(byte tag, ClassEntry classRef, DescriptorEntry descRef) {
+        Map<String, MemberEntry> memberEntries = Utils.getTLGlobals().getMemberEntries();
         String key = MemberEntry.stringValueOf(tag, classRef, descRef);
         MemberEntry e = memberEntries.get(key);
         if (e == null) {
@@ -137,10 +137,65 @@ class ConstantPool {
         return e;
     }
 
+    /** Factory for MethodHandle constants. */
+    public static MethodHandleEntry getMethodHandleEntry(byte refKind, MemberEntry memRef) {
+        Map<String, MethodHandleEntry> methodHandleEntries = Utils.getTLGlobals().getMethodHandleEntries();
+        String key = MethodHandleEntry.stringValueOf(refKind, memRef);
+        MethodHandleEntry e = methodHandleEntries.get(key);
+        if (e == null) {
+            e = new MethodHandleEntry(refKind, memRef);
+            assert(e.stringValue().equals(key));
+            methodHandleEntries.put(key, e);
+        }
+        return e;
+    }
+
+    /** Factory for MethodType constants. */
+    public static MethodTypeEntry getMethodTypeEntry(SignatureEntry sigRef) {
+        Map<String, MethodTypeEntry> methodTypeEntries = Utils.getTLGlobals().getMethodTypeEntries();
+        String key = sigRef.stringValue();
+        MethodTypeEntry e = methodTypeEntries.get(key);
+        if (e == null) {
+            e = new MethodTypeEntry(sigRef);
+            assert(e.stringValue().equals(key));
+            methodTypeEntries.put(key, e);
+        }
+        return e;
+    }
+    public static MethodTypeEntry getMethodTypeEntry(Utf8Entry typeRef) {
+        return getMethodTypeEntry(getSignatureEntry(typeRef.stringValue()));
+    }
+
+    /** Factory for InvokeDynamic constants. */
+    public static InvokeDynamicEntry getInvokeDynamicEntry(BootstrapMethodEntry bssRef, DescriptorEntry descRef) {
+        Map<String, InvokeDynamicEntry> invokeDynamicEntries = Utils.getTLGlobals().getInvokeDynamicEntries();
+        String key = InvokeDynamicEntry.stringValueOf(bssRef, descRef);
+        InvokeDynamicEntry e = invokeDynamicEntries.get(key);
+        if (e == null) {
+            e = new InvokeDynamicEntry(bssRef, descRef);
+            assert(e.stringValue().equals(key));
+            invokeDynamicEntries.put(key, e);
+        }
+        return e;
+    }
+
+    /** Factory for BootstrapMethod pseudo-constants. */
+    public static BootstrapMethodEntry getBootstrapMethodEntry(MethodHandleEntry bsmRef, Entry[] argRefs) {
+        Map<String, BootstrapMethodEntry> bootstrapMethodEntries = Utils.getTLGlobals().getBootstrapMethodEntries();
+        String key = BootstrapMethodEntry.stringValueOf(bsmRef, argRefs);
+        BootstrapMethodEntry e = bootstrapMethodEntries.get(key);
+        if (e == null) {
+            e = new BootstrapMethodEntry(bsmRef, argRefs);
+            assert(e.stringValue().equals(key));
+            bootstrapMethodEntries.put(key, e);
+        }
+        return e;
+    }
+
 
     /** Entries in the constant pool. */
     public static abstract
-    class Entry implements Comparable {
+    class Entry implements Comparable<Object> {
         protected final byte tag;       // a CONSTANT_foo code
         protected int valueHash;        // cached hashCode
 
@@ -150,6 +205,10 @@ class ConstantPool {
 
         public final byte getTag() {
             return tag;
+        }
+
+        public final boolean tagEquals(int tag) {
+            return getTag() == tag;
         }
 
         public Entry getRef(int i) {
@@ -188,8 +247,32 @@ class ConstantPool {
             return tag == CONSTANT_Double || tag == CONSTANT_Long;
         }
 
-        public final boolean tagMatches(int tag) {
-            return (this.tag == tag);
+        public final boolean tagMatches(int matchTag) {
+            if (tag == matchTag)
+                return true;
+            byte[] allowedTags;
+            switch (matchTag) {
+                case CONSTANT_All:
+                    return true;
+                case CONSTANT_Signature:
+                    return tag == CONSTANT_Utf8;  // format check also?
+                case CONSTANT_LoadableValue:
+                    allowedTags = LOADABLE_VALUE_TAGS;
+                    break;
+                case CONSTANT_AnyMember:
+                    allowedTags = ANY_MEMBER_TAGS;
+                    break;
+                case CONSTANT_FieldSpecific:
+                    allowedTags = FIELD_SPECIFIC_TAGS;
+                    break;
+                default:
+                    return false;
+            }
+            for (byte b : allowedTags) {
+                if (b == tag)
+                    return true;
+            }
+            return false;
         }
 
         public String toString() {
@@ -251,13 +334,17 @@ class ConstantPool {
         throw new RuntimeException("bad literal value "+value);
     }
 
+    static boolean isRefKind(byte refKind) {
+        return (REF_getField <= refKind && refKind <= REF_invokeInterface);
+    }
+
     public static abstract
     class LiteralEntry extends Entry {
         protected LiteralEntry(byte tag) {
             super(tag);
         }
 
-        public abstract Comparable literalValue();
+        public abstract Comparable<?> literalValue();
     }
 
     public static
@@ -280,15 +367,17 @@ class ConstantPool {
         public int compareTo(Object o) {
             int x = superCompareTo(o);
             if (x == 0) {
-                x = ((Comparable)value).compareTo(((NumberEntry)o).value);
+                @SuppressWarnings("unchecked")
+                Comparable<Number> compValue = (Comparable<Number>)value;
+                x = compValue.compareTo(((NumberEntry)o).value);
             }
             return x;
         }
         public Number numberValue() {
             return value;
         }
-        public Comparable literalValue() {
-            return (Comparable) value;
+        public Comparable<?> literalValue() {
+            return (Comparable<?>) value;
         }
         public String stringValue() {
             return value.toString();
@@ -319,7 +408,7 @@ class ConstantPool {
             }
             return x;
         }
-        public Comparable literalValue() {
+        public Comparable<?> literalValue() {
             return ref.stringValue();
         }
         public String stringValue() {
@@ -402,7 +491,7 @@ class ConstantPool {
         }
         static
         String stringValueOf(Entry nameRef, Entry typeRef) {
-            return typeRef.stringValue()+","+nameRef.stringValue();
+            return qualifiedStringValue(typeRef, nameRef);
         }
 
         public String prettyString() {
@@ -416,6 +505,15 @@ class ConstantPool {
         public byte getLiteralTag() {
             return typeRef.getLiteralTag();
         }
+    }
+
+    static String qualifiedStringValue(Entry e1, Entry e2) {
+        return qualifiedStringValue(e1.stringValue(), e2.stringValue());
+    }
+    static String qualifiedStringValue(String s1, String s234) {
+        // Qualification by dot must decompose uniquely.  Second string might already be qualified.
+        assert(s1.indexOf(".") < 0);
+        return s1+"."+s234;
     }
 
     public static
@@ -451,8 +549,12 @@ class ConstantPool {
             int x = superCompareTo(o);
             if (x == 0) {
                 MemberEntry that = (MemberEntry)o;
+                if (Utils.SORT_MEMBERS_DESCR_MAJOR)
+                    // descRef is transmitted as UDELTA5; sort it first?
+                    x = this.descRef.compareTo(that.descRef);
                 // Primary key is classRef.
-                x = this.classRef.compareTo(that.classRef);
+                if (x == 0)
+                    x = this.classRef.compareTo(that.classRef);
                 if (x == 0)
                     x = this.descRef.compareTo(that.descRef);
             }
@@ -471,7 +573,7 @@ class ConstantPool {
             case CONSTANT_InterfaceMethodref:  pfx = "IMethod:"; break;
             default:                           pfx = tag+"???";  break;
             }
-            return pfx+classRef.stringValue()+","+descRef.stringValue();
+            return pfx+qualifiedStringValue(classRef, descRef);
         }
 
         public boolean isMethod() {
@@ -579,13 +681,26 @@ class ConstantPool {
         }
         public byte getLiteralTag() {
             switch (formRef.stringValue().charAt(0)) {
-            case 'L': return CONSTANT_String;
             case 'I': return CONSTANT_Integer;
             case 'J': return CONSTANT_Long;
             case 'F': return CONSTANT_Float;
             case 'D': return CONSTANT_Double;
             case 'B': case 'S': case 'C': case 'Z':
                 return CONSTANT_Integer;
+            case 'L':
+                /*
+                switch (classRefs[0].stringValue()) {
+                case "java/lang/String":
+                    return CONSTANT_String;
+                case "java/lang/invoke/MethodHandle":
+                    return CONSTANT_MethodHandle;
+                case "java/lang/invoke/MethodType":
+                    return CONSTANT_MethodType;
+                default:  // java/lang/Object, etc.
+                    return CONSTANT_LoadableValue;
+                }
+                */
+                return CONSTANT_String;  // JDK 7 ConstantValue limited to String
             }
             assert(false);
             return CONSTANT_None;
@@ -670,56 +785,270 @@ class ConstantPool {
         return new String(sig);
     }
 
-    static private int skipClassNameChars(String sig, int i) {
-        int len = sig.length();
-        for (; i < len; i++) {
-            char ch = sig.charAt(i);
-            if (ch <= ' ')  break;
-            if (ch >= ';' && ch <= '@')  break;
-        }
-        return i;
+    static private int skipTo(char semi, String sig, int i) {
+        i = sig.indexOf(semi, i);
+        return (i >= 0) ? i : sig.length();
     }
 
     static String[] structureSignature(String sig) {
-        sig = sig.intern();
-
-        int formLen = 0;
-        int nparts = 1;
-        for (int i = 0; i < sig.length(); i++) {
-            char ch = sig.charAt(i);
-            formLen++;
-            if (ch == 'L') {
-                nparts++;
-                int i2 = skipClassNameChars(sig, i+1);
-                i = i2-1;  // keep the semicolon in the form
-                int i3 = sig.indexOf('<', i+1);
-                if (i3 > 0 && i3 < i2)
-                    i = i3-1;
-            }
-        }
-        char[] form = new char[formLen];
-        if (nparts == 1) {
+        int firstl = sig.indexOf('L');
+        if (firstl < 0) {
             String[] parts = { sig };
             return parts;
         }
-        String[] parts = new String[nparts];
-        int j = 0;
-        int k = 1;
-        for (int i = 0; i < sig.length(); i++) {
-            char ch = sig.charAt(i);
-            form[j++] = ch;
-            if (ch == 'L') {
-                int i2 = skipClassNameChars(sig, i+1);
-                parts[k++] = sig.substring(i+1, i2);
-                i = i2;
-                --i;  // keep the semicolon in the form
+        // Segment the string like sig.split("L\\([^;<]*\\)").
+        // N.B.: Previous version of this code did a more complex match,
+        // to next ch < ' ' or ch in [';'..'@'].  The only important
+        // characters are ';' and '<', since they are part of the
+        // signature syntax.
+        // Examples:
+        //   "(Ljava/lang/Object;IJLLoo;)V" => {"(L;IJL;)V", "java/lang/Object", "Loo"}
+        //   "Ljava/util/List<Ljava/lang/String;>;" => {"L<L;>;", "java/util/List", "java/lang/String"}
+        char[] form = null;
+        String[] parts = null;
+        for (int pass = 0; pass <= 1; pass++) {
+            // pass 0 is a sizing pass, pass 1 packs the arrays
+            int formPtr = 0;
+            int partPtr = 1;
+            int nextsemi = 0, nextangl = 0;  // next ';' or '<', or zero, or sigLen
+            int lastj = 0;
+            for (int i = firstl + 1, j; i > 0; i = sig.indexOf('L', j) + 1) {
+                // sig[i-1] is 'L', while sig[j] will be the first ';' or '<' after it
+                // each part is in sig[i .. j-1]
+                if (nextsemi < i)  nextsemi = skipTo(';', sig, i);
+                if (nextangl < i)  nextangl = skipTo('<', sig, i);
+                j = (nextsemi < nextangl ? nextsemi : nextangl);
+                if (pass != 0) {
+                    sig.getChars(lastj, i, form, formPtr);
+                    parts[partPtr] = sig.substring(i, j);
+                }
+                formPtr += (i - lastj);
+                partPtr += 1;
+                lastj = j;
             }
+            if (pass != 0) {
+                sig.getChars(lastj, sig.length(), form, formPtr);
+                break;
+            }
+            formPtr += (sig.length() - lastj);
+            form = new char[formPtr];
+            parts = new String[partPtr];
         }
-        assert(j == formLen);
-        assert(k == parts.length);
         parts[0] = new String(form);
         //assert(flattenSignature(parts).equals(sig));
         return parts;
+    }
+
+    /** @since JDK 7, JSR 292 */
+    public static
+    class MethodHandleEntry extends Entry {
+        final int refKind;
+        final MemberEntry memRef;
+        public Entry getRef(int i) { return i == 0 ? memRef : null; }
+
+        protected int computeValueHash() {
+            int hc2 = refKind;
+            return (memRef.hashCode() + (hc2 << 8)) ^ hc2;
+        }
+
+        MethodHandleEntry(byte refKind, MemberEntry memRef) {
+            super(CONSTANT_MethodHandle);
+            assert(isRefKind(refKind));
+            this.refKind = refKind;
+            this.memRef  = memRef;
+            hashCode();  // force computation of valueHash
+        }
+        public boolean equals(Object o) {
+            if (o == null || o.getClass() != MethodHandleEntry.class) {
+                return false;
+            }
+            MethodHandleEntry that = (MethodHandleEntry)o;
+            return this.refKind == that.refKind
+                && this.memRef.eq(that.memRef);
+        }
+        public int compareTo(Object o) {
+            int x = superCompareTo(o);
+            if (x == 0) {
+                MethodHandleEntry that = (MethodHandleEntry)o;
+                if (Utils.SORT_HANDLES_KIND_MAJOR)
+                    // Primary key could be refKind.
+                    x = this.refKind - that.refKind;
+                // Primary key is memRef, which is transmitted as UDELTA5.
+                if (x == 0)
+                    x = this.memRef.compareTo(that.memRef);
+                if (x == 0)
+                    x = this.refKind - that.refKind;
+            }
+            return x;
+        }
+        public static String stringValueOf(int refKind, MemberEntry memRef) {
+            return refKindName(refKind)+":"+memRef.stringValue();
+        }
+        public String stringValue() {
+            return stringValueOf(refKind, memRef);
+        }
+    }
+
+    /** @since JDK 7, JSR 292 */
+    public static
+    class MethodTypeEntry extends Entry {
+        final SignatureEntry typeRef;
+        public Entry getRef(int i) { return i == 0 ? typeRef : null; }
+
+        protected int computeValueHash() {
+            return typeRef.hashCode() + tag;
+        }
+
+        MethodTypeEntry(SignatureEntry typeRef) {
+            super(CONSTANT_MethodType);
+            this.typeRef  = typeRef;
+            hashCode();  // force computation of valueHash
+        }
+        public boolean equals(Object o) {
+            if (o == null || o.getClass() != MethodTypeEntry.class) {
+                return false;
+            }
+            MethodTypeEntry that = (MethodTypeEntry)o;
+            return this.typeRef.eq(that.typeRef);
+        }
+        public int compareTo(Object o) {
+            int x = superCompareTo(o);
+            if (x == 0) {
+                MethodTypeEntry that = (MethodTypeEntry)o;
+                x = this.typeRef.compareTo(that.typeRef);
+            }
+            return x;
+        }
+        public String stringValue() {
+            return typeRef.stringValue();
+        }
+    }
+
+    /** @since JDK 7, JSR 292 */
+    public static
+    class InvokeDynamicEntry extends Entry {
+        final BootstrapMethodEntry bssRef;
+        final DescriptorEntry descRef;
+        public Entry getRef(int i) {
+            if (i == 0)  return bssRef;
+            if (i == 1)  return descRef;
+            return null;
+        }
+        protected int computeValueHash() {
+            int hc2 = descRef.hashCode();
+            return (bssRef.hashCode() + (hc2 << 8)) ^ hc2;
+        }
+
+        InvokeDynamicEntry(BootstrapMethodEntry bssRef, DescriptorEntry descRef) {
+            super(CONSTANT_InvokeDynamic);
+            this.bssRef  = bssRef;
+            this.descRef = descRef;
+            hashCode();  // force computation of valueHash
+        }
+        public boolean equals(Object o) {
+            if (o == null || o.getClass() != InvokeDynamicEntry.class) {
+                return false;
+            }
+            InvokeDynamicEntry that = (InvokeDynamicEntry)o;
+            return this.bssRef.eq(that.bssRef)
+                && this.descRef.eq(that.descRef);
+        }
+        public int compareTo(Object o) {
+            int x = superCompareTo(o);
+            if (x == 0) {
+                InvokeDynamicEntry that = (InvokeDynamicEntry)o;
+                if (Utils.SORT_INDY_BSS_MAJOR)
+                    // Primary key could be bsmRef.
+                    x = this.bssRef.compareTo(that.bssRef);
+                // Primary key is descriptor, which is transmitted as UDELTA5.
+                if (x == 0)
+                    x = this.descRef.compareTo(that.descRef);
+                if (x == 0)
+                    x = this.bssRef.compareTo(that.bssRef);
+            }
+            return x;
+        }
+        public String stringValue() {
+            return stringValueOf(bssRef, descRef);
+        }
+        static
+        String stringValueOf(BootstrapMethodEntry bssRef, DescriptorEntry descRef) {
+            return "Indy:"+bssRef.stringValue()+"."+descRef.stringValue();
+        }
+    }
+
+    /** @since JDK 7, JSR 292 */
+    public static
+    class BootstrapMethodEntry extends Entry {
+        final MethodHandleEntry bsmRef;
+        final Entry[] argRefs;
+        public Entry getRef(int i) {
+            if (i == 0)  return bsmRef;
+            if (i-1 < argRefs.length)  return argRefs[i-1];
+            return null;
+        }
+        protected int computeValueHash() {
+            int hc2 = bsmRef.hashCode();
+            return (Arrays.hashCode(argRefs) + (hc2 << 8)) ^ hc2;
+        }
+
+        BootstrapMethodEntry(MethodHandleEntry bsmRef, Entry[] argRefs) {
+            super(CONSTANT_BootstrapMethod);
+            this.bsmRef  = bsmRef;
+            this.argRefs = argRefs.clone();
+            hashCode();  // force computation of valueHash
+        }
+        public boolean equals(Object o) {
+            if (o == null || o.getClass() != BootstrapMethodEntry.class) {
+                return false;
+            }
+            BootstrapMethodEntry that = (BootstrapMethodEntry)o;
+            return this.bsmRef.eq(that.bsmRef)
+                && Arrays.equals(this.argRefs, that.argRefs);
+        }
+        public int compareTo(Object o) {
+            int x = superCompareTo(o);
+            if (x == 0) {
+                BootstrapMethodEntry that = (BootstrapMethodEntry)o;
+                if (Utils.SORT_BSS_BSM_MAJOR)
+                    // Primary key is bsmRef.
+                    x = this.bsmRef.compareTo(that.bsmRef);
+                // Primary key is args array length, which is transmitted as UDELTA5.
+                if (x == 0)
+                    x = compareArgArrays(this.argRefs, that.argRefs);
+                if (x == 0)
+                    x = this.bsmRef.compareTo(that.bsmRef);
+            }
+            return x;
+        }
+        public String stringValue() {
+            return stringValueOf(bsmRef, argRefs);
+        }
+        static
+        String stringValueOf(MethodHandleEntry bsmRef, Entry[] argRefs) {
+            StringBuffer sb = new StringBuffer(bsmRef.stringValue());
+            // Arguments are formatted as "<foo;bar;baz>" instead of "[foo,bar,baz]".
+            // This ensures there will be no confusion if "[,]" appear inside of names.
+            char nextSep = '<';
+            boolean didOne = false;
+            for (Entry argRef : argRefs) {
+                sb.append(nextSep).append(argRef.stringValue());
+                nextSep = ';';
+            }
+            if (nextSep == '<')  sb.append(nextSep);
+            sb.append('>');
+            return sb.toString();
+        }
+        static
+        int compareArgArrays(Entry[] a1, Entry[] a2) {
+            int x = a1.length - a2.length;
+            if (x != 0)  return x;
+            for (int i = 0; i < a1.length; i++) {
+                x = a1[i].compareTo(a2[i]);
+                if (x != 0)  break;
+            }
+            return x;
+        }
     }
 
     // Handy constants:
@@ -728,7 +1057,7 @@ class ConstantPool {
 
     /** An Index is a mapping between CP entries and small integers. */
     public static final
-    class Index extends AbstractList {
+    class Index extends AbstractList<Entry> {
         protected String debugName;
         protected Entry[] cpMap;
         protected boolean flattenSigs;
@@ -758,7 +1087,7 @@ class ConstantPool {
         public int size() {
             return cpMap.length;
         }
-        public Object get(int i) {
+        public Entry get(int i) {
             return cpMap[i];
         }
         public Entry getEntry(int i) {
@@ -803,13 +1132,7 @@ class ConstantPool {
             assert(index >= 0);
             return index;
         }
-        public boolean contains(Object e) {
-            return findIndexOf((Entry)e) >= 0;
-        }
-        public int indexOf(Object e) {
-            return findIndexOf((Entry)e);
-        }
-        public int lastIndexOf(Object e) {
+        public int lastIndexOf(Entry e) {
             return indexOf(e);
         }
 
@@ -862,14 +1185,14 @@ class ConstantPool {
                 indexValue[probe] = i;
             }
         }
-        public Object[] toArray(Object[] a) {
+        public Entry[] toArray(Entry[] a) {
             int sz = size();
             if (a.length < sz)  return super.toArray(a);
             System.arraycopy(cpMap, 0, a, 0, sz);
             if (a.length > sz)  a[sz] = null;
             return a;
         }
-        public Object[] toArray() {
+        public Entry[] toArray() {
             return toArray(new Entry[size()]);
         }
         public Object clone() {
@@ -968,35 +1291,51 @@ class ConstantPool {
     /** Coherent group of constant pool indexes. */
     public static
     class IndexGroup {
-        private Index indexUntyped;
         private Index[] indexByTag = new Index[CONSTANT_Limit];
+        private Index[] indexByTagGroup;
         private int[]   untypedFirstIndexByTag;
-        private int     totalSize;
+        private int     totalSizeQQ;
         private Index[][] indexByTagAndClass;
 
         /** Index of all CP entries of all types, in definition order. */
-        public Index getUntypedIndex() {
-            if (indexUntyped == null) {
+        private Index makeTagGroupIndex(byte tagGroupTag, byte[] tagsInGroup) {
+            if (indexByTagGroup == null)
+                indexByTagGroup = new Index[CONSTANT_GroupLimit - CONSTANT_GroupFirst];
+            int which = tagGroupTag - CONSTANT_GroupFirst;
+            assert(indexByTagGroup[which] == null);
+            int fillp = 0;
+            Entry[] cpMap = null;
+            for (int pass = 1; pass <= 2; pass++) {
                 untypedIndexOf(null);  // warm up untypedFirstIndexByTag
-                Entry[] cpMap = new Entry[totalSize];
-                for (int tag = 0; tag < indexByTag.length; tag++) {
+                for (byte tag : tagsInGroup) {
                     Index ix = indexByTag[tag];
                     if (ix == null)  continue;
                     int ixLen = ix.cpMap.length;
                     if (ixLen == 0)  continue;
-                    int fillp = untypedFirstIndexByTag[tag];
-                    assert(cpMap[fillp] == null);
-                    assert(cpMap[fillp+ixLen-1] == null);
-                    System.arraycopy(ix.cpMap, 0, cpMap, fillp, ixLen);
+                    assert(tagGroupTag == CONSTANT_All
+                            ? fillp == untypedFirstIndexByTag[tag]
+                            : fillp  < untypedFirstIndexByTag[tag]);
+                    if (cpMap != null) {
+                        assert(cpMap[fillp] == null);
+                        assert(cpMap[fillp+ixLen-1] == null);
+                        System.arraycopy(ix.cpMap, 0, cpMap, fillp, ixLen);
+                    }
+                    fillp += ixLen;
                 }
-                indexUntyped = new Index("untyped", cpMap);
+                if (cpMap == null) {
+                    assert(pass == 1);
+                    // get ready for pass 2
+                    cpMap = new Entry[fillp];
+                    fillp = 0;
+                }
             }
-            return indexUntyped;
+            indexByTagGroup[which] = new Index(tagName(tagGroupTag), cpMap);
+            return indexByTagGroup[which];
         }
 
         public int untypedIndexOf(Entry e) {
             if (untypedFirstIndexByTag == null) {
-                untypedFirstIndexByTag = new int[CONSTANT_Limit];
+                untypedFirstIndexByTag = new int[CONSTANT_Limit+1];
                 int fillp = 0;
                 for (int i = 0; i < TAGS_IN_ORDER.length; i++) {
                     byte tag = TAGS_IN_ORDER[i];
@@ -1006,7 +1345,7 @@ class ConstantPool {
                     untypedFirstIndexByTag[tag] = fillp;
                     fillp += ixLen;
                 }
-                totalSize = fillp;
+                untypedFirstIndexByTag[CONSTANT_Limit] = fillp;
             }
             if (e == null)  return -1;
             int tag = e.tag;
@@ -1032,16 +1371,15 @@ class ConstantPool {
             indexByTag[tag] = ix;
             // decache indexes derived from this one:
             untypedFirstIndexByTag = null;
-            indexUntyped = null;
+            indexByTagGroup = null;
             if (indexByTagAndClass != null)
                 indexByTagAndClass[tag] = null;
         }
 
         /** Index of all CP entries of a given tag. */
         public Index getIndexByTag(byte tag) {
-            if (tag == CONSTANT_All) {
-                return getUntypedIndex();
-            }
+            if (tag >= CONSTANT_GroupFirst)
+                return getIndexByTagGroup(tag);
             Index ix = indexByTag[tag];
             if (ix == null) {
                 // Make an empty one by default.
@@ -1049,6 +1387,26 @@ class ConstantPool {
                 indexByTag[tag] = ix;
             }
             return ix;
+        }
+
+        private Index getIndexByTagGroup(byte tag) {
+            // pool groups:
+            if (indexByTagGroup != null) {
+                Index ix = indexByTagGroup[tag - CONSTANT_GroupFirst];
+                if (ix != null)  return ix;
+            }
+            switch (tag) {
+            case CONSTANT_All:
+                return makeTagGroupIndex(CONSTANT_All, TAGS_IN_ORDER);
+            case CONSTANT_LoadableValue:
+                    return makeTagGroupIndex(CONSTANT_LoadableValue, LOADABLE_VALUE_TAGS);
+            case CONSTANT_AnyMember:
+                return makeTagGroupIndex(CONSTANT_AnyMember, ANY_MEMBER_TAGS);
+            case CONSTANT_FieldSpecific:
+                // This one does not have any fixed index, since it is context-specific.
+                return null;
+            }
+            throw new AssertionError("bad tag group "+tag);
         }
 
         /** Index of all CP entries of a given tag and class. */
@@ -1113,16 +1471,14 @@ class ConstantPool {
         }
 
         public boolean haveNumbers() {
-            for (byte tag = CONSTANT_Integer; tag <= CONSTANT_Double; tag++) {
-                switch (tag) {
-                case CONSTANT_Integer:
-                case CONSTANT_Float:
-                case CONSTANT_Long:
-                case CONSTANT_Double:
-                    break;
-                default:
-                    assert(false);
-                }
+            for (byte tag : NUMBER_TAGS) {
+                if (getIndexByTag(tag).size() > 0)  return true;
+            }
+            return false;
+        }
+
+        public boolean haveExtraTags() {
+            for (byte tag : EXTRA_TAGS) {
                 if (getIndexByTag(tag).size() > 0)  return true;
             }
             return false;
@@ -1135,8 +1491,13 @@ class ConstantPool {
      *  by their equivalent Utf8s.
      *  Also, discard null from cpRefs.
      */
+    public static void completeReferencesIn(Set<Entry> cpRefs, boolean flattenSigs) {
+         completeReferencesIn(cpRefs, flattenSigs, null);
+    }
+
     public static
-    void completeReferencesIn(Set<Entry> cpRefs, boolean flattenSigs) {
+    void completeReferencesIn(Set<Entry> cpRefs, boolean flattenSigs,
+                              List<BootstrapMethodEntry>bsms) {
         cpRefs.remove(null);
         for (ListIterator<Entry> work =
                  new ArrayList<>(cpRefs).listIterator(cpRefs.size());
@@ -1151,6 +1512,14 @@ class ConstantPool {
                 cpRefs.remove(se);
                 cpRefs.add(ue);
                 e = ue;   // do not descend into the sig
+            }
+            if (bsms != null && e.tag == CONSTANT_BootstrapMethod) {
+                BootstrapMethodEntry bsm = (BootstrapMethodEntry)e;
+                cpRefs.remove(bsm);
+                // move it away to the side table where it belongs
+                if (!bsms.contains(bsm))
+                    bsms.add(bsm);
+                // fall through to recursively add refs for this entry
             }
             // Recursively add the refs of e to cpRefs:
             for (int i = 0; ; i++) {
@@ -1180,13 +1549,35 @@ class ConstantPool {
             case CONSTANT_Methodref:            return "Methodref";
             case CONSTANT_InterfaceMethodref:   return "InterfaceMethodref";
             case CONSTANT_NameandType:          return "NameandType";
+            case CONSTANT_MethodHandle:         return "MethodHandle";
+            case CONSTANT_MethodType:           return "MethodType";
+            case CONSTANT_InvokeDynamic:        return "InvokeDynamic";
 
                 // pseudo-tags:
-            case CONSTANT_All:                  return "*All";
-            case CONSTANT_None:                 return "*None";
+            case CONSTANT_All:                  return "**All";
+            case CONSTANT_None:                 return "**None";
+            case CONSTANT_LoadableValue:        return "**LoadableValue";
+            case CONSTANT_AnyMember:            return "**AnyMember";
+            case CONSTANT_FieldSpecific:        return "*FieldSpecific";
             case CONSTANT_Signature:            return "*Signature";
+            case CONSTANT_BootstrapMethod:      return "*BootstrapMethod";
         }
         return "tag#"+tag;
+    }
+
+    public static String refKindName(int refKind) {
+        switch (refKind) {
+            case REF_getField:                  return "getField";
+            case REF_getStatic:                 return "getStatic";
+            case REF_putField:                  return "putField";
+            case REF_putStatic:                 return "putStatic";
+            case REF_invokeVirtual:             return "invokeVirtual";
+            case REF_invokeStatic:              return "invokeStatic";
+            case REF_invokeSpecial:             return "invokeSpecial";
+            case REF_newInvokeSpecial:          return "newInvokeSpecial";
+            case REF_invokeInterface:           return "invokeInterface";
+        }
+        return "refKind#"+refKind;
     }
 
     // archive constant pool definition order
@@ -1196,13 +1587,19 @@ class ConstantPool {
         CONSTANT_Float,
         CONSTANT_Long,
         CONSTANT_Double,
-        CONSTANT_String,
+        CONSTANT_String,            // note that String=8 precedes Class=7
         CONSTANT_Class,
         CONSTANT_Signature,
         CONSTANT_NameandType,       // cp_Descr
         CONSTANT_Fieldref,          // cp_Field
         CONSTANT_Methodref,         // cp_Method
-        CONSTANT_InterfaceMethodref // cp_Imethod
+        CONSTANT_InterfaceMethodref, // cp_Imethod
+
+        // Constants defined in JDK 7 and later:
+        CONSTANT_MethodHandle,
+        CONSTANT_MethodType,
+        CONSTANT_BootstrapMethod,  // pseudo-tag, really stored in a class attribute
+        CONSTANT_InvokeDynamic
     };
     static final byte TAG_ORDER[];
     static {
@@ -1216,5 +1613,46 @@ class ConstantPool {
             System.out.println("  "+TAG_ORDER[i]+",");
         System.out.println("};");
         */
+    }
+    static final byte[] NUMBER_TAGS = {
+        CONSTANT_Integer, CONSTANT_Float, CONSTANT_Long, CONSTANT_Double
+    };
+    static final byte[] EXTRA_TAGS = {
+        CONSTANT_MethodHandle, CONSTANT_MethodType,
+        CONSTANT_BootstrapMethod, // pseudo-tag
+        CONSTANT_InvokeDynamic
+    };
+    static final byte[] LOADABLE_VALUE_TAGS = { // for CONSTANT_LoadableValue
+        CONSTANT_Integer, CONSTANT_Float, CONSTANT_Long, CONSTANT_Double,
+        CONSTANT_String, CONSTANT_Class,
+        CONSTANT_MethodHandle, CONSTANT_MethodType
+    };
+    static final byte[] ANY_MEMBER_TAGS = { // for CONSTANT_AnyMember
+        CONSTANT_Fieldref, CONSTANT_Methodref, CONSTANT_InterfaceMethodref
+    };
+    static final byte[] FIELD_SPECIFIC_TAGS = { // for CONSTANT_FieldSpecific
+        CONSTANT_Integer, CONSTANT_Float, CONSTANT_Long, CONSTANT_Double,
+        CONSTANT_String
+    };
+    static {
+        assert(
+            verifyTagOrder(TAGS_IN_ORDER) &&
+            verifyTagOrder(NUMBER_TAGS) &&
+            verifyTagOrder(EXTRA_TAGS) &&
+            verifyTagOrder(LOADABLE_VALUE_TAGS) &&
+            verifyTagOrder(ANY_MEMBER_TAGS) &&
+            verifyTagOrder(FIELD_SPECIFIC_TAGS)
+        );
+    }
+    private static boolean verifyTagOrder(byte[] tags) {
+        int prev = -1;
+        for (byte tag : tags) {
+            int next = TAG_ORDER[tag];
+            assert(next > 0) : "tag not found: "+tag;
+            assert(TAGS_IN_ORDER[next-1] == tag) : "tag repeated: "+tag+" => "+next+" => "+TAGS_IN_ORDER[next-1];
+            assert(prev < next) : "tags not in order: "+Arrays.toString(tags)+" at "+tag;
+            prev = next;
+        }
+        return true;
     }
 }

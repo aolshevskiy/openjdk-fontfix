@@ -258,7 +258,9 @@ public class XTextFieldPeer extends XComponentPeer implements TextFieldPeer {
     }
 
     public void setBackground(Color c) {
-        if (log.isLoggable(PlatformLogger.FINE)) log.fine("target="+ target + ", old=" + background + ", new=" + c);
+        if (log.isLoggable(PlatformLogger.Level.FINE)) {
+            log.fine("target="+ target + ", old=" + background + ", new=" + c);
+        }
         background = c;
         if (xtext != null) {
             xtext.setBackground(c);
@@ -370,11 +372,10 @@ public class XTextFieldPeer extends XComponentPeer implements TextFieldPeer {
     public void repaint() {
         if (xtext  != null) xtext.repaint();
     }
-
-    public void paint(Graphics g) {
+    @Override
+    void paintPeer(final Graphics g) {
         if (xtext  != null) xtext.paint(g);
     }
-
 
     public void print(Graphics g) {
         if (xtext != null) {

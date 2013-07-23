@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -71,7 +71,7 @@ public class Attributes implements Map<Object,Object>, Cloneable {
      * @param size the initial number of attributes
      */
     public Attributes(int size) {
-        map = new HashMap(size);
+        map = new HashMap<>(size);
     }
 
     /**
@@ -81,7 +81,7 @@ public class Attributes implements Map<Object,Object>, Cloneable {
      * @param attr the specified Attributes
      */
     public Attributes(Attributes attr) {
-        map = new HashMap(attr);
+        map = new HashMap<>(attr);
     }
 
 
@@ -296,9 +296,9 @@ public class Attributes implements Map<Object,Object>, Cloneable {
      * XXX Need to handle UTF8 values and break up lines longer than 72 bytes
      */
      void write(DataOutputStream os) throws IOException {
-        Iterator it = entrySet().iterator();
+        Iterator<Map.Entry<Object, Object>> it = entrySet().iterator();
         while (it.hasNext()) {
-            Map.Entry e = (Map.Entry)it.next();
+            Map.Entry<Object, Object> e = it.next();
             StringBuffer buffer = new StringBuffer(
                                         ((Name)e.getKey()).toString());
             buffer.append(": ");
@@ -340,9 +340,9 @@ public class Attributes implements Map<Object,Object>, Cloneable {
 
         // write out all attributes except for the version
         // we wrote out earlier
-        Iterator it = entrySet().iterator();
+        Iterator<Map.Entry<Object, Object>> it = entrySet().iterator();
         while (it.hasNext()) {
-            Map.Entry e = (Map.Entry)it.next();
+            Map.Entry<Object, Object> e = it.next();
             String name = ((Name)e.getKey()).toString();
             if ((version != null) && ! (name.equalsIgnoreCase(vername))) {
 
@@ -499,7 +499,7 @@ public class Attributes implements Map<Object,Object>, Cloneable {
          */
         public boolean equals(Object o) {
             if (o instanceof Name) {
-                Comparator c = ASCIICaseInsensitiveComparator.CASE_INSENSITIVE_ORDER;
+                Comparator<String> c = ASCIICaseInsensitiveComparator.CASE_INSENSITIVE_ORDER;
                 return c.compare(name, ((Name)o).name) == 0;
             } else {
                 return false;
@@ -563,6 +563,15 @@ public class Attributes implements Map<Object,Object>, Cloneable {
          * <tt>java</tt> application launcher.
          */
         public static final Name MAIN_CLASS = new Name("Main-Class");
+
+        /**
+         * {@code Name} object for {@code Profile} manifest attribute used by
+         * applications or libraries packaged as JAR files to indicate the
+         * minimum profile required to execute the application.
+         * @since 1.8
+         * @see UnsupportedProfileException
+         */
+        public static final Name PROFILE = new Name("Profile");
 
         /**
          * <code>Name</code> object for <code>Sealed</code> manifest attribute
@@ -629,7 +638,7 @@ public class Attributes implements Map<Object,Object>, Cloneable {
         public static final Name IMPLEMENTATION_VENDOR_ID = new Name("Implementation-Vendor-Id");
 
        /**
-         * <code>Name</code> object for <code>Implementation-Vendor-URL</code>
+         * <code>Name</code> object for <code>Implementation-URL</code>
          * manifest attribute used for package versioning.
          * @see <a href="../../../../technotes/guides/versioning/spec/versioning2.html#wp90779">
          *      Java Product Versioning Specification</a>

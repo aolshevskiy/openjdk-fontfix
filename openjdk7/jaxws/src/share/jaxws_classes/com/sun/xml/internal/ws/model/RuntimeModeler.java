@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,37 +26,41 @@
 package com.sun.xml.internal.ws.model;
 
 import com.sun.istack.internal.NotNull;
-import com.sun.xml.internal.bind.api.CompositeStructure;
-import com.sun.xml.internal.bind.api.TypeReference;
-import com.sun.xml.internal.bind.v2.model.nav.Navigator;
+import com.sun.istack.internal.localization.Localizable;
 import com.sun.xml.internal.ws.api.BindingID;
 import com.sun.xml.internal.ws.api.SOAPVersion;
+import com.sun.xml.internal.ws.api.WSBinding;
+import com.sun.xml.internal.ws.api.databinding.DatabindingConfig;
+import com.sun.xml.internal.ws.api.databinding.MetadataReader;
 import com.sun.xml.internal.ws.api.model.ExceptionType;
 import com.sun.xml.internal.ws.api.model.MEP;
 import com.sun.xml.internal.ws.api.model.Parameter;
 import com.sun.xml.internal.ws.api.model.ParameterBinding;
+import com.sun.xml.internal.ws.api.model.wsdl.WSDLBoundOperation;
+import com.sun.xml.internal.ws.api.model.wsdl.WSDLInput;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLPart;
+import com.sun.xml.internal.ws.api.model.wsdl.WSDLPort;
+import com.sun.xml.internal.ws.binding.WebServiceFeatureList;
 import com.sun.xml.internal.ws.model.soap.SOAPBindingImpl;
-import com.sun.xml.internal.ws.model.wsdl.WSDLBoundOperationImpl;
-import com.sun.xml.internal.ws.model.wsdl.WSDLInputImpl;
-import com.sun.xml.internal.ws.model.wsdl.WSDLPortImpl;
 import com.sun.xml.internal.ws.resources.ModelerMessages;
 import com.sun.xml.internal.ws.resources.ServerMessages;
-import com.sun.xml.internal.ws.util.localization.Localizable;
+import com.sun.xml.internal.ws.spi.db.BindingContext;
+import com.sun.xml.internal.ws.spi.db.BindingHelper;
+import com.sun.xml.internal.ws.spi.db.TypeInfo;
+import com.sun.xml.internal.ws.spi.db.WrapperComposite;
 
-import javax.jws.Oneway;
-import javax.jws.WebMethod;
-import javax.jws.WebParam;
+import static com.sun.xml.internal.ws.binding.WebServiceFeatureList.getSoapVersion;
+
+import javax.jws.*;
 import javax.jws.WebParam.Mode;
-import javax.jws.WebResult;
-import javax.jws.WebService;
 import javax.jws.soap.SOAPBinding;
-import static javax.jws.soap.SOAPBinding.ParameterStyle.WRAPPED;
 import javax.jws.soap.SOAPBinding.Style;
-import javax.xml.bind.annotation.XmlSeeAlso;
 import javax.xml.bind.annotation.XmlElement;
+import javax.xml.bind.annotation.XmlSeeAlso;
 import javax.xml.namespace.QName;
 import javax.xml.ws.*;
+import javax.xml.ws.soap.MTOM;
+import javax.xml.ws.soap.MTOMFeature;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -64,12 +68,15 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.rmi.RemoteException;
 import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
 import java.util.concurrent.Future;
 import java.util.logging.Logger;
+
+import static javax.jws.soap.SOAPBinding.ParameterStyle.WRAPPED;
 
 /**
  * Creates a runtime model of a SEI (portClass).
@@ -77,8 +84,9 @@ import java.util.logging.Logger;
  * @author WS Developement Team
  */
 public class RuntimeModeler {
-    private final WebServiceFeature[] features;
-    private final BindingID bindingId;
+    private final WebServiceFeatureList features;
+    private BindingID bindingId;
+    private WSBinding wsBinding;
     private final Class portClass;
     private AbstractSEIModelImpl model;
     private SOAPBindingImpl defaultBinding;
@@ -87,10 +95,12 @@ public class RuntimeModeler {
     private String targetNamespace;
     private boolean isWrapped = true;
     private ClassLoader classLoader;
-    private final WSDLPortImpl binding;
+    private final WSDLPort binding;
     private QName serviceName;
     private QName portName;
-
+    private Set<Class> classUsesWebMethod;
+    private DatabindingConfig config;
+    private MetadataReader metadataReader;
     /**
      *
      */
@@ -108,10 +118,13 @@ public class RuntimeModeler {
     public static final Class<RemoteException> REMOTE_EXCEPTION_CLASS = RemoteException.class;
     public static final Class<RuntimeException> RUNTIME_EXCEPTION_CLASS = RuntimeException.class;
     public static final Class<Exception> EXCEPTION_CLASS = Exception.class;
+    public static final String DecapitalizeExceptionBeanProperties = "com.sun.xml.internal.ws.api.model.DecapitalizeExceptionBeanProperties";
+    public static final String SuppressDocLitWrapperGeneration = "com.sun.xml.internal.ws.api.model.SuppressDocLitWrapperGeneration";
+    public static final String DocWrappeeNamespapceQualified = "com.sun.xml.internal.ws.api.model.DocWrappeeNamespapceQualified";
 
-    public RuntimeModeler(@NotNull Class portClass, @NotNull QName serviceName, @NotNull BindingID bindingId, @NotNull WebServiceFeature... features) {
+  /*public RuntimeModeler(@NotNull Class portClass, @NotNull QName serviceName, @NotNull BindingID bindingId, @NotNull WebServiceFeature... features) {
         this(portClass, serviceName, null, bindingId, features);
-    }
+    }*/
 
     /**
      *
@@ -121,19 +134,64 @@ public class RuntimeModeler {
      * @param wsdlPort {@link com.sun.xml.internal.ws.api.model.wsdl.WSDLPort}
      * @param features web service features
      */
-    public RuntimeModeler(@NotNull Class portClass, @NotNull QName serviceName, @NotNull WSDLPortImpl wsdlPort, @NotNull WebServiceFeature... features){
+  /*public RuntimeModeler(@NotNull Class portClass, @NotNull QName serviceName, @NotNull WSDLPortImpl wsdlPort, @NotNull WebServiceFeature... features){
         this(portClass, serviceName, wsdlPort, wsdlPort.getBinding().getBindingId(), features);
-    }
+    }*/
 
-    private RuntimeModeler(@NotNull Class portClass, @NotNull QName serviceName, WSDLPortImpl binding, BindingID bindingId, @NotNull WebServiceFeature... features) {
+  /*private RuntimeModeler(@NotNull Class portClass, @NotNull QName serviceName, WSDLPortImpl binding, BindingID bindingId, @NotNull WebServiceFeature... features) {
         this.portClass = portClass;
         this.serviceName = serviceName;
         this.binding = binding;
         this.bindingId = bindingId;
         this.features = features;
+    }*/
+
+    public RuntimeModeler(@NotNull DatabindingConfig config){
+        this.portClass = (config.getEndpointClass() != null)? config.getEndpointClass() : config.getContractClass();
+        this.serviceName = config.getMappingInfo().getServiceName();
+        this.binding = config.getWsdlPort();
+        this.classLoader = config.getClassLoader();
+        this.portName = config.getMappingInfo().getPortName();
+        this.config = config;
+        this.wsBinding = config.getWSBinding();
+        metadataReader = config.getMetadataReader();
+        targetNamespace = config.getMappingInfo().getTargetNamespace();
+        if (metadataReader == null) metadataReader = new ReflectAnnotationReader();
+        if (wsBinding != null) {
+            this.bindingId = wsBinding.getBindingId();
+                if (config.getFeatures() != null) wsBinding.getFeatures().mergeFeatures(config.getFeatures(), false);
+                if (binding != null) wsBinding.getFeatures().mergeFeatures(binding.getFeatures(), false);
+                this.features = WebServiceFeatureList.toList(wsBinding.getFeatures());
+        } else {
+            this.bindingId = config.getMappingInfo().getBindingID();
+            this.features = WebServiceFeatureList.toList(config.getFeatures());
+            if (binding != null) bindingId = binding.getBinding().getBindingId();
+            if (bindingId == null) bindingId = getDefaultBindingID();
+            if (!features.contains(MTOMFeature.class)) {
+                MTOM mtomAn = getAnnotation(portClass, MTOM.class);
+                if (mtomAn != null) features.add(WebServiceFeatureList.getFeature(mtomAn));
+            }
+            if (!features.contains(com.oracle.webservices.internal.api.EnvelopeStyleFeature.class)) {
+                com.oracle.webservices.internal.api.EnvelopeStyle es = getAnnotation(portClass, com.oracle.webservices.internal.api.EnvelopeStyle.class);
+                if (es != null) features.add(WebServiceFeatureList.getFeature(es));
+            }
+            this.wsBinding = bindingId.createBinding(features);
+        }
     }
 
-    /**
+    private BindingID getDefaultBindingID() {
+        BindingType bt = getAnnotation(portClass, BindingType.class);
+        if (bt != null) return BindingID.parse(bt.value());
+        SOAPVersion ver = getSoapVersion(features);
+        boolean mtomEnabled = features.isEnabled(MTOMFeature.class);
+        if (SOAPVersion.SOAP_12.equals(ver)) {
+            return (mtomEnabled) ? BindingID.SOAP12_HTTP_MTOM : BindingID.SOAP12_HTTP;
+        } else {
+            return (mtomEnabled) ? BindingID.SOAP11_HTTP_MTOM : BindingID.SOAP11_HTTP;
+        }
+        }
+
+        /**
      * sets the classloader to be used when loading classes by the <code>RuntimeModeler</code>.
      * @param classLoader ClassLoader used to load classes
      */
@@ -150,28 +208,23 @@ public class RuntimeModeler {
         this.portName = portName;
     }
 
-    private static <T extends Annotation> T getPrivClassAnnotation(final Class<?> clazz, final Class<T> T) {
-        return AccessController.doPrivileged(new PrivilegedAction<T>() {
-           public T run() {
-               return clazz.getAnnotation(T);
-           }
-        });
+    private <T extends Annotation> T getAnnotation(final Class<?> clazz, final Class<T> T) {
+        return metadataReader.getAnnotation(T, clazz);
     }
 
-    private static <T extends Annotation> T getPrivMethodAnnotation(final Method method, final Class<T> T) {
-        return AccessController.doPrivileged(new PrivilegedAction<T>() {
-           public T run() {
-               return method.getAnnotation(T);
-           }
-        });
+    private <T extends Annotation> T getAnnotation(final Method method, final Class<T> T) {
+        return metadataReader.getAnnotation(T, method);
     }
 
-    private static Annotation[][] getPrivParameterAnnotations(final Method method) {
-        return AccessController.doPrivileged(new PrivilegedAction<Annotation[][]>() {
-           public Annotation[][] run() {
-               return method.getParameterAnnotations();
-           }
-        });
+    private Annotation[] getAnnotations(final Method method) {
+        return metadataReader.getAnnotations(method);
+    }
+
+    private Annotation[] getAnnotations(final Class<?> c) {
+        return metadataReader.getAnnotations(c);
+    }
+    private Annotation[][] getParamAnnotations(final Method method) {
+        return metadataReader.getParameterAnnotations(method);
     }
 
     private static final Logger logger =
@@ -186,64 +239,96 @@ public class RuntimeModeler {
      */
     public AbstractSEIModelImpl buildRuntimeModel() {
         model = new SOAPSEIModel(features);
-        Class clazz = portClass;
-        WebService webService = getPrivClassAnnotation(portClass, WebService.class);
+        model.contractClass = config.getContractClass();
+        model.endpointClass = config.getEndpointClass();
+        model.classLoader = this.classLoader;
+        model.wsBinding = wsBinding;
+        model.databindingInfo.setWsdlURL(config.getWsdlURL());
+        model.databindingInfo.properties().putAll(config.properties());
+        if (model.contractClass == null) model.contractClass = portClass;
+        if (model.endpointClass == null && !portClass.isInterface()) model.endpointClass = portClass;
+        Class<?> seiClass = portClass;
+        metadataReader.getProperties(model.databindingInfo.properties(), portClass);
+        WebService webService = getAnnotation(portClass, WebService.class);
         if (webService == null) {
             throw new RuntimeModelerException("runtime.modeler.no.webservice.annotation",
                 portClass.getCanonicalName());
         }
-        if (webService.endpointInterface().length() > 0) {
-            clazz = getClass(webService.endpointInterface(), ModelerMessages.localizableRUNTIME_MODELER_CLASS_NOT_FOUND(webService.endpointInterface()));
-            WebService seiService = getPrivClassAnnotation(clazz, WebService.class);
+        Class<?> seiFromConfig = configEndpointInterface();
+        if (webService.endpointInterface().length() > 0 || seiFromConfig != null) {
+                if (seiFromConfig != null) {
+                        seiClass = seiFromConfig;
+                } else {
+                        seiClass = getClass(webService.endpointInterface(), ModelerMessages.localizableRUNTIME_MODELER_CLASS_NOT_FOUND(webService.endpointInterface()));
+                }
+            model.contractClass = seiClass;
+                model.endpointClass = portClass;
+            WebService seiService = getAnnotation(seiClass, WebService.class);
             if (seiService == null) {
                 throw new RuntimeModelerException("runtime.modeler.endpoint.interface.no.webservice",
                     webService.endpointInterface());
             }
 
             //check if @SOAPBinding is defined on the impl class
-            SOAPBinding sbPortClass = getPrivClassAnnotation(portClass, SOAPBinding.class);
-            SOAPBinding sbSei = getPrivClassAnnotation(clazz, SOAPBinding.class);
+            SOAPBinding sbPortClass = getAnnotation(portClass, SOAPBinding.class);
+            SOAPBinding sbSei = getAnnotation(seiClass, SOAPBinding.class);
             if(sbPortClass != null){
                 if(sbSei == null || sbSei.style() != sbPortClass.style()|| sbSei.use() != sbPortClass.use()){
-                    logger.warning(ServerMessages.RUNTIMEMODELER_INVALIDANNOTATION_ON_IMPL("@SOAPBinding", portClass.getName(), clazz.getName()));
+                    logger.warning(ServerMessages.RUNTIMEMODELER_INVALIDANNOTATION_ON_IMPL("@SOAPBinding", portClass.getName(), seiClass.getName()));
                 }
             }
         }
         if (serviceName == null)
-            serviceName = getServiceName(portClass);
+            serviceName = getServiceName(portClass, metadataReader);
         model.setServiceQName(serviceName);
 
-        String portLocalName  = portClass.getSimpleName()+PORT;
-        if (webService.portName().length() >0) {
-            portLocalName = webService.portName();
-        } else if (webService.name().length() >0) {
-            portLocalName = webService.name()+PORT;
-        }
+//        String portLocalName  = portClass.getSimpleName()+PORT;
+//        if (webService.portName().length() >0) {
+//            portLocalName = webService.portName();
+//        } else if (webService.name().length() >0) {
+//            portLocalName = webService.name()+PORT;
+//        }
+//
+//        if (portName == null)
+//            portName = new QName(serviceName.getNamespaceURI(), portLocalName);
+//        if (!portName.getNamespaceURI().equals(serviceName.getNamespaceURI())) {
+//            throw new RuntimeModelerException("runtime.modeler.portname.servicename.namespace.mismatch",
+//                serviceName, portName);
+//        }
 
-        if (portName == null)
-            portName = new QName(serviceName.getNamespaceURI(), portLocalName);
-        if (!portName.getNamespaceURI().equals(serviceName.getNamespaceURI())) {
-            throw new RuntimeModelerException("runtime.modeler.portname.servicename.namespace.mismatch",
-                serviceName, portName);
-        }
+        if (portName == null) portName = getPortName(portClass, metadataReader, serviceName.getNamespaceURI());
         model.setPortName(portName);
 
-        processClass(clazz);
+        // Check if databinding is overridden in annotation.
+        com.oracle.webservices.internal.api.databinding.DatabindingMode dbm2 = getAnnotation(portClass, com.oracle.webservices.internal.api.databinding.DatabindingMode.class);
+        if (dbm2 != null) model.databindingInfo.setDatabindingMode(dbm2.value());
+
+        processClass(seiClass);
         if (model.getJavaMethods().size() == 0)
             throw new RuntimeModelerException("runtime.modeler.no.operations",
                     portClass.getName());
         model.postProcess();
 
+        // Make the configured databinding mode available to the
+        // DatabindingConfig.
+        config.properties().put(BindingContext.class.getName(),
+                model.bindingContext);
+
         // TODO: this needs to be fixed properly --
         // when we are building RuntimeModel first before building WSDLModel,
-        // we still need to do this correctyl
+        // we still need to do this correctly
         if(binding!=null)
             model.freeze(binding);
-
         return model;
     }
 
-    /**
+    private Class configEndpointInterface() {
+                if (config.getEndpointClass() == null ||
+                    config.getEndpointClass().isInterface()     ) return null; //client proxy Interface
+                return config.getContractClass();
+        }
+
+        /**
      * utility method to load classes
      * @param className the name of the class to load
      * @param errorMessage
@@ -261,11 +346,17 @@ public class RuntimeModeler {
         }
     }
 
+    private boolean noWrapperGen() {
+        Object o = config.properties().get(SuppressDocLitWrapperGeneration);
+        return (o!= null && o instanceof Boolean) ? ((Boolean) o) : false;
+    }
+
     private Class getRequestWrapperClass(String className, Method method, QName reqElemName) {
         ClassLoader loader =  (classLoader == null) ? Thread.currentThread().getContextClassLoader() : classLoader;
         try {
             return loader.loadClass(className);
         } catch (ClassNotFoundException e) {
+            if (noWrapperGen()) return WrapperComposite.class;
             logger.fine("Dynamically creating request wrapper Class " + className);
             return WrapperBeanGenerator.createRequestWrapperBean(className, method, reqElemName, loader);
         }
@@ -276,6 +367,7 @@ public class RuntimeModeler {
         try {
             return loader.loadClass(className);
         } catch (ClassNotFoundException e) {
+            if (noWrapperGen()) return WrapperComposite.class;
             logger.fine("Dynamically creating response wrapper bean Class " + className);
             return WrapperBeanGenerator.createResponseWrapperBean(className, method, resElemName, loader);
         }
@@ -283,35 +375,63 @@ public class RuntimeModeler {
 
 
     private Class getExceptionBeanClass(String className, Class exception, String name, String namespace) {
+        boolean decapitalizeExceptionBeanProperties = true;
+        Object o = config.properties().get(DecapitalizeExceptionBeanProperties);
+        if (o!= null && o instanceof Boolean) decapitalizeExceptionBeanProperties = (Boolean) o;
         ClassLoader loader =  (classLoader == null) ? Thread.currentThread().getContextClassLoader() : classLoader;
         try {
             return loader.loadClass(className);
         } catch (ClassNotFoundException e) {
             logger.fine("Dynamically creating exception bean Class " + className);
-            return WrapperBeanGenerator.createExceptionBean(className, exception, targetNamespace, name, namespace, loader);
+            return WrapperBeanGenerator.createExceptionBean(className, exception, targetNamespace, name, namespace, loader, decapitalizeExceptionBeanProperties);
         }
     }
 
+    protected void determineWebMethodUse(Class clazz) {
+        if (clazz == null)
+            return;
+        if (!clazz.isInterface()) {
+            if (clazz == Object.class)
+                return;
+            WebMethod webMethod;
+            for (Method method : clazz.getMethods()) {
+                if (method.getDeclaringClass()!=clazz)
+                    continue;
+                webMethod = getAnnotation(method, WebMethod.class);
+                if (webMethod != null && !webMethod.exclude()) {
+                    classUsesWebMethod.add(clazz);
+                    break;
+                }
+            }
+        }
+        determineWebMethodUse(clazz.getSuperclass());
+    }
+
     void processClass(Class clazz) {
-        WebService webService = getPrivClassAnnotation(clazz, WebService.class);
-        String portTypeLocalName  = clazz.getSimpleName();
-        if (webService.name().length() >0)
-            portTypeLocalName = webService.name();
-
-
-        targetNamespace = webService.targetNamespace();
+        classUsesWebMethod = new HashSet<Class>();
+        determineWebMethodUse(clazz);
+        WebService webService = getAnnotation(clazz, WebService.class);
+        QName portTypeName = getPortTypeName(clazz, targetNamespace, metadataReader);
+//        String portTypeLocalName  = clazz.getSimpleName();
+//        if (webService.name().length() >0)
+//            portTypeLocalName = webService.name();
+//
+//        targetNamespace = webService.targetNamespace();
         packageName = "";
         if (clazz.getPackage() != null)
             packageName = clazz.getPackage().getName();
-        if (targetNamespace.length() == 0) {
-            targetNamespace = getNamespace(packageName);
-        }
-        model.setTargetNamespace(targetNamespace);
-        QName portTypeName = new QName(targetNamespace, portTypeLocalName);
+//        if (targetNamespace.length() == 0) {
+//            targetNamespace = getNamespace(packageName);
+//        }
+//        model.setTargetNamespace(targetNamespace);
+//        QName portTypeName = new QName(targetNamespace, portTypeLocalName);
+        targetNamespace = portTypeName.getNamespaceURI();
         model.setPortTypeName(portTypeName);
+        model.setTargetNamespace(targetNamespace);
+        model.defaultSchemaNamespaceSuffix = config.getMappingInfo().getDefaultSchemaNamespaceSuffix();
         model.setWSDLLocation(webService.wsdlLocation());
 
-        SOAPBinding soapBinding = getPrivClassAnnotation(clazz, SOAPBinding.class);
+        SOAPBinding soapBinding = getAnnotation(clazz, SOAPBinding.class);
         if (soapBinding != null) {
             if (soapBinding.style() == SOAPBinding.Style.RPC && soapBinding.parameterStyle() == SOAPBinding.ParameterStyle.BARE) {
                 throw new RuntimeModelerException("runtime.modeler.invalid.soapbinding.parameterstyle",
@@ -342,8 +462,13 @@ public class RuntimeModeler {
 
         for (Method method : clazz.getMethods()) {
             if (!clazz.isInterface()) {     // if clazz is SEI, then all methods are web methods
-                if (!isWebMethodBySpec(method, clazz)) {
-                    continue;
+                if (method.getDeclaringClass() == Object.class) continue;
+                if (!getBooleanSystemProperty("com.sun.xml.internal.ws.legacyWebMethod")) {  // legacy webMethod computation behaviour to be used
+                    if (!isWebMethodBySpec(method, clazz))
+                        continue;
+                } else {
+                    if (!isWebMethod(method))
+                        continue;
                 }
             }
             // TODO: binding can be null. We need to figure out how to post-process
@@ -351,7 +476,7 @@ public class RuntimeModeler {
             processMethod(method);
         }
         //Add additional jaxb classes referenced by {@link XmlSeeAlso}
-        XmlSeeAlso xmlSeeAlso = getPrivClassAnnotation(clazz, XmlSeeAlso.class);
+        XmlSeeAlso xmlSeeAlso = getAnnotation(clazz, XmlSeeAlso.class);
         if(xmlSeeAlso != null)
             model.addAdditionalClasses(xmlSeeAlso.value());
     }
@@ -375,7 +500,7 @@ public class RuntimeModeler {
         assert Modifier.isPublic(modifiers);
         assert !clazz.isInterface();
 
-        WebMethod webMethod = getPrivMethodAnnotation(method, WebMethod.class);
+        WebMethod webMethod = getAnnotation(method, WebMethod.class);
         if (webMethod != null) {
             if (webMethod.exclude()) {
                 return false;       // @WebMethod(exclude="true")
@@ -391,7 +516,20 @@ public class RuntimeModeler {
         }
 
         Class declClass = method.getDeclaringClass();
-        return getPrivClassAnnotation(declClass, WebService.class) != null;
+        return getAnnotation(declClass, WebService.class) != null;
+    }
+
+    private boolean isWebMethod(Method method) {
+        int modifiers = method.getModifiers();
+        if (Modifier.isStatic(modifiers) || Modifier.isFinal(modifiers))
+            return false;
+
+        Class clazz = method.getDeclaringClass();
+        boolean declHasWebService = getAnnotation(clazz, WebService.class) != null;
+        WebMethod webMethod = getAnnotation(method, WebMethod.class);
+        if (webMethod != null && !webMethod.exclude() && declHasWebService)
+            return true;
+        return declHasWebService && !classUsesWebMethod.contains(clazz);
     }
 
     /**
@@ -404,6 +542,7 @@ public class RuntimeModeler {
         Style style = soapBinding!=null ? soapBinding.style() : Style.DOCUMENT;
         rtSOAPBinding.setStyle(style);
         assert bindingId != null;
+        model.bindingId = bindingId;
         SOAPVersion soapVersion = bindingId.getSOAPVersion();
         rtSOAPBinding.setSOAPVersion(soapVersion);
         return rtSOAPBinding;
@@ -453,10 +592,15 @@ public class RuntimeModeler {
      * creates the runtime model for a method on the <code>portClass</code>
      * @param method the method to model
      */
-    protected void processMethod(Method method) {
-        int mods = method.getModifiers();
+    private void processMethod(Method method) {
+//        int mods = method.getModifiers();
+        WebMethod webMethod = getAnnotation(method, WebMethod.class);
+        if (webMethod != null && webMethod.exclude()) return;
+/*
+        validations are already done
+
         if (!Modifier.isPublic(mods) || Modifier.isStatic(mods)) {
-            if(method.getAnnotation(WebMethod.class)!=null) {
+            if(webMethod != null) {
                 // if the user put @WebMethod on these non-qualifying method,
                 // it's an error
                 if(Modifier.isStatic(mods))
@@ -467,12 +611,12 @@ public class RuntimeModeler {
             return;
         }
 
-        WebMethod webMethod = getPrivMethodAnnotation(method, WebMethod.class);
         if (webMethod != null && webMethod.exclude())
             return;
+*/
 
         String methodName = method.getName();
-        boolean isOneway = method.isAnnotationPresent(Oneway.class);
+        boolean isOneway = (getAnnotation(method, Oneway.class) != null);
 
         //Check that oneway methods don't thorw any checked exceptions
         if (isOneway) {
@@ -487,12 +631,12 @@ public class RuntimeModeler {
         JavaMethodImpl javaMethod;
         //Class implementorClass = portClass;
         if (method.getDeclaringClass()==portClass) {
-            javaMethod = new JavaMethodImpl(model,method,method);
+            javaMethod = new JavaMethodImpl(model,method,method,metadataReader);
         } else {
             try {
                 Method tmpMethod = portClass.getMethod(method.getName(),
                     method.getParameterTypes());
-                javaMethod = new JavaMethodImpl(model,tmpMethod,method);
+                javaMethod = new JavaMethodImpl(model,tmpMethod,method,metadataReader);
             } catch (NoSuchMethodException e) {
                 throw new RuntimeModelerException("runtime.modeler.method.not.found",
                     method.getName(), portClass.getName());
@@ -518,9 +662,9 @@ public class RuntimeModeler {
 
         //override the @WebMethod.action value by the one from the WSDL
         if(binding != null){
-            WSDLBoundOperationImpl bo = binding.getBinding().get(new QName(targetNamespace, operationName));
+            WSDLBoundOperation bo = binding.getBinding().get(new QName(targetNamespace, operationName));
             if(bo != null){
-                WSDLInputImpl wsdlInput = bo.getOperation().getInput();
+                WSDLInput wsdlInput = bo.getOperation().getInput();
                 String wsaAction = wsdlInput.getAction();
                 if(wsaAction != null && !wsdlInput.isDefaultAction())
                     action = wsaAction;
@@ -529,13 +673,12 @@ public class RuntimeModeler {
             }
         }
 
-        javaMethod.setOperationName(operationName);
-        SOAPBinding methodBinding =
-            method.getAnnotation(SOAPBinding.class);
+        javaMethod.setOperationQName(new QName(targetNamespace,operationName));
+        SOAPBinding methodBinding = getAnnotation(method, SOAPBinding.class);
         if(methodBinding != null && methodBinding.style() == SOAPBinding.Style.RPC) {
             logger.warning(ModelerMessages.RUNTIMEMODELER_INVALID_SOAPBINDING_ON_METHOD(methodBinding, method.getName(), method.getDeclaringClass().getName()));
         } else if (methodBinding == null && !method.getDeclaringClass().equals(portClass)) {
-            methodBinding = method.getDeclaringClass().getAnnotation(SOAPBinding.class);
+            methodBinding = getAnnotation(method.getDeclaringClass(), SOAPBinding.class);
             if (methodBinding != null && methodBinding.style() == SOAPBinding.Style.RPC && methodBinding.parameterStyle() == SOAPBinding.ParameterStyle.BARE) {
                 throw new RuntimeModelerException("runtime.modeler.invalid.soapbinding.parameterstyle",
                         methodBinding, method.getDeclaringClass());
@@ -550,7 +693,7 @@ public class RuntimeModeler {
         boolean methodIsWrapped = isWrapped;
         Style style = defaultBinding.getStyle();
         if (methodBinding != null) {
-            com.sun.xml.internal.ws.model.soap.SOAPBindingImpl mySOAPBinding = createBinding(methodBinding);
+            SOAPBindingImpl mySOAPBinding = createBinding(methodBinding);
             style = mySOAPBinding.getStyle();
             if (action != null)
                 mySOAPBinding.setSOAPAction(action);
@@ -558,11 +701,13 @@ public class RuntimeModeler {
                 WRAPPED);
             javaMethod.setBinding(mySOAPBinding);
         } else {
-            com.sun.xml.internal.ws.model.soap.SOAPBindingImpl sb = new com.sun.xml.internal.ws.model.soap.SOAPBindingImpl(defaultBinding);
-            if (action != null)
+            SOAPBindingImpl sb = new SOAPBindingImpl(defaultBinding);
+            if (action != null) {
                 sb.setSOAPAction(action);
-            else
-                sb.setSOAPAction("");
+            } else {
+                String defaults = SOAPVersion.SOAP_11 == sb.getSOAPVersion() ? "" : null;
+                sb.setSOAPAction(defaults);
+            }
             javaMethod.setBinding(sb);
         }
         if (!methodIsWrapped) {
@@ -577,7 +722,7 @@ public class RuntimeModeler {
     }
 
     private MEP getMEP(Method m){
-        if (m.isAnnotationPresent(Oneway.class)) {
+        if (getAnnotation(m, Oneway.class)!= null) {
             return MEP.ONE_WAY;
         }
         if(Response.class.isAssignableFrom(m.getReturnType())){
@@ -598,12 +743,13 @@ public class RuntimeModeler {
     protected void processDocWrappedMethod(JavaMethodImpl javaMethod, String methodName,
                                            String operationName, Method method) {
         boolean methodHasHeaderParams = false;
-        boolean isOneway = method.isAnnotationPresent(Oneway.class);
-        RequestWrapper reqWrapper = method.getAnnotation(RequestWrapper.class);
-        ResponseWrapper resWrapper = method.getAnnotation(ResponseWrapper.class);
+        boolean isOneway = getAnnotation(method, Oneway.class)!= null;
+        RequestWrapper reqWrapper = getAnnotation(method,RequestWrapper.class);
+        ResponseWrapper resWrapper = getAnnotation(method,ResponseWrapper.class);
         String beanPackage = packageName + PD_JAXWS_PACKAGE_PD;
-        if (packageName == null || (packageName != null && packageName.length() == 0))
+        if (packageName == null || packageName.length() == 0) {
             beanPackage = JAXWS_PACKAGE_PD;
+        }
         String requestClassName;
         if(reqWrapper != null && reqWrapper.className().length()>0){
             requestClassName = reqWrapper.className();
@@ -636,6 +782,7 @@ public class RuntimeModeler {
             }
         }
         QName reqElementName = new QName(reqNamespace, reqName);
+        javaMethod.setRequestPayloadName(reqElementName);
         Class requestClass = getRequestWrapperClass(requestClassName, method, reqElementName);
 
         Class responseClass = null;
@@ -661,8 +808,9 @@ public class RuntimeModeler {
             responseClass = getResponseWrapperClass(responseClassName, method, resElementName);
         }
 
-        TypeReference typeRef =
-                new TypeReference(reqElementName, requestClass);
+        TypeInfo typeRef =
+                new TypeInfo(reqElementName, requestClass);
+        typeRef.setNillable(false);
         WrapperParameter requestWrapper = new WrapperParameter(javaMethod, typeRef,
             Mode.IN, 0);
         requestWrapper.setPartName(reqPartName);
@@ -670,7 +818,8 @@ public class RuntimeModeler {
         javaMethod.addParameter(requestWrapper);
         WrapperParameter responseWrapper = null;
         if (!isOneway) {
-            typeRef = new TypeReference(resElementName, responseClass);
+            typeRef = new TypeInfo(resElementName, responseClass);
+            typeRef.setNillable(false);
             responseWrapper = new WrapperParameter(javaMethod, typeRef, Mode.OUT, -1);
             javaMethod.addParameter(responseWrapper);
             responseWrapper.setBinding(ParameterBinding.BODY);
@@ -679,8 +828,8 @@ public class RuntimeModeler {
         // return value
 
 
-        WebResult webResult = method.getAnnotation(WebResult.class);
-        XmlElement xmlElem = method.getAnnotation(XmlElement.class);
+        WebResult webResult = getAnnotation(method, WebResult.class);
+        XmlElement xmlElem = getAnnotation(method, XmlElement.class);
         QName resultQName = getReturnQName(method, webResult, xmlElem);
         Class returnType = method.getReturnType();
         boolean isResultHeader = false;
@@ -700,11 +849,13 @@ public class RuntimeModeler {
             returnType = getAsyncReturnType(method, returnType);
             resultQName = new QName(RETURN);
         }
-
+        resultQName = qualifyWrappeeIfNeeded(resultQName, resNamespace);
         if (!isOneway && (returnType != null) && (!returnType.getName().equals("void"))) {
-            Annotation[] rann = method.getAnnotations();
+            Annotation[] rann = getAnnotations(method);
             if (resultQName.getLocalPart() != null) {
-                TypeReference rTypeReference = new TypeReference(resultQName, returnType, rann);
+                TypeInfo rTypeReference = new TypeInfo(resultQName, returnType, rann);
+                metadataReader.getProperties(rTypeReference.properties(), method);
+                rTypeReference.setGenericType(method.getGenericReturnType());
                 ParameterImpl returnParameter = new ParameterImpl(javaMethod, rTypeReference, Mode.OUT, -1);
                 if (isResultHeader) {
                     returnParameter.setBinding(ParameterBinding.HEADER);
@@ -719,7 +870,7 @@ public class RuntimeModeler {
         //get WebParam
         Class<?>[] parameterTypes = method.getParameterTypes();
         Type[] genericParameterTypes = method.getGenericParameterTypes();
-        Annotation[][] pannotations = getPrivParameterAnnotations(method);
+        Annotation[][] pannotations = getParamAnnotations(method);
         int pos = 0;
         for (Class clazzType : parameterTypes) {
             String partName=null;
@@ -735,7 +886,7 @@ public class RuntimeModeler {
             //set the actual type argument of Holder in the TypeReference
             if (isHolder) {
                 if(clazzType==Holder.class){
-                    clazzType = Navigator.REFLECTION.erasure(((ParameterizedType)genericParameterTypes[pos]).getActualTypeArguments()[0]);
+                    clazzType = BindingHelper.erasure(((ParameterizedType)genericParameterTypes[pos]).getActualTypeArguments()[0]);
                 }
             }
             Mode paramMode = isHolder ? Mode.INOUT : Mode.IN;
@@ -766,8 +917,11 @@ public class RuntimeModeler {
                 if (isHolder && paramMode == Mode.IN)
                     paramMode = Mode.INOUT;
             }
+            paramQName = qualifyWrappeeIfNeeded(paramQName, reqNamespace);
             typeRef =
-                new TypeReference(paramQName, clazzType, pannotations[pos]);
+                new TypeInfo(paramQName, clazzType, pannotations[pos]);
+            metadataReader.getProperties(typeRef.properties(), method, pos);
+            typeRef.setGenericType(genericParameterTypes[pos]);
             ParameterImpl param = new ParameterImpl(javaMethod, typeRef, paramMode, pos++);
 
             if (isHeader) {
@@ -800,6 +954,16 @@ public class RuntimeModeler {
         processExceptions(javaMethod, method);
     }
 
+    private QName qualifyWrappeeIfNeeded(QName resultQName, String ns) {
+        Object o = config.properties().get(DocWrappeeNamespapceQualified);
+        boolean qualified = (o!= null && o instanceof Boolean) ? ((Boolean) o) : false;
+        if (qualified) {
+            if (resultQName.getNamespaceURI() == null || "".equals(resultQName.getNamespaceURI())) {
+                return new QName(ns, resultQName.getLocalPart());
+            }
+        }
+        return resultQName;
+    }
 
     /**
      * models a rpc/literal method
@@ -810,7 +974,7 @@ public class RuntimeModeler {
      */
     protected void processRpcMethod(JavaMethodImpl javaMethod, String methodName,
                                     String operationName, Method method) {
-        boolean isOneway = method.isAnnotationPresent(Oneway.class);
+        boolean isOneway = getAnnotation(method, Oneway.class) != null;
 
         // use Map to build parameters in the part order when they are known.
         // if part is unbound, we just put them at the end, and for that we
@@ -824,9 +988,9 @@ public class RuntimeModeler {
         String reqNamespace = targetNamespace;
         String respNamespace = targetNamespace;
 
-        if(binding != null && binding.getBinding().isRpcLit()){
+        if(binding != null && Style.RPC.equals(binding.getBinding().getStyle())){
             QName opQName = new QName(binding.getBinding().getPortTypeName().getNamespaceURI(), operationName);
-            WSDLBoundOperationImpl op = binding.getBinding().get(opQName);
+            WSDLBoundOperation op = binding.getBinding().get(opQName);
             if(op != null){
                 //it cant be null, but lets not fail and try to work with service namespce
                 if(op.getRequestNamespace() != null){
@@ -841,19 +1005,20 @@ public class RuntimeModeler {
         }
 
         QName reqElementName = new QName(reqNamespace, operationName);
+        javaMethod.setRequestPayloadName(reqElementName);
         QName resElementName = null;
         if (!isOneway) {
             resElementName = new QName(respNamespace, operationName+RESPONSE);
         }
 
-        Class wrapperType = CompositeStructure.class;
-        TypeReference typeRef = new TypeReference(reqElementName, wrapperType);
+        Class wrapperType = WrapperComposite.class;
+        TypeInfo typeRef = new TypeInfo(reqElementName, wrapperType);
         WrapperParameter requestWrapper = new WrapperParameter(javaMethod, typeRef, Mode.IN, 0);
         requestWrapper.setInBinding(ParameterBinding.BODY);
         javaMethod.addParameter(requestWrapper);
         WrapperParameter responseWrapper = null;
         if (!isOneway) {
-            typeRef = new TypeReference(resElementName, wrapperType);
+            typeRef = new TypeInfo(resElementName, wrapperType);
             responseWrapper = new WrapperParameter(javaMethod, typeRef, Mode.OUT, -1);
             responseWrapper.setOutBinding(ParameterBinding.BODY);
             javaMethod.addParameter(responseWrapper);
@@ -864,7 +1029,7 @@ public class RuntimeModeler {
         String resultTNS = targetNamespace;
         String resultPartName = resultName;
         boolean isResultHeader = false;
-        WebResult webResult = method.getAnnotation(WebResult.class);
+        WebResult webResult = getAnnotation(method, WebResult.class);
 
         if (webResult != null) {
             isResultHeader = webResult.header();
@@ -891,17 +1056,21 @@ public class RuntimeModeler {
         }
 
         if (!isOneway && returnType!=null && returnType!=void.class) {
-            Annotation[] rann = method.getAnnotations();
-            TypeReference rTypeReference = new TypeReference(resultQName, returnType, rann);
+            Annotation[] rann = getAnnotations(method);
+            TypeInfo rTypeReference = new TypeInfo(resultQName, returnType, rann);
+            metadataReader.getProperties(rTypeReference.properties(), method);
+            rTypeReference.setGenericType(method.getGenericReturnType());
             ParameterImpl returnParameter = new ParameterImpl(javaMethod, rTypeReference, Mode.OUT, -1);
             returnParameter.setPartName(resultPartName);
             if(isResultHeader){
                 returnParameter.setBinding(ParameterBinding.HEADER);
                 javaMethod.addParameter(returnParameter);
+                rTypeReference.setGlobalElement(true);
             }else{
                 ParameterBinding rb = getBinding(operationName, resultPartName, false, Mode.OUT);
                 returnParameter.setBinding(rb);
                 if(rb.isBody()){
+                    rTypeReference.setGlobalElement(false);
                     WSDLPart p = getPart(new QName(targetNamespace,operationName), resultPartName, Mode.OUT);
                     if(p == null)
                         resRpcParams.put(resRpcParams.size()+10000, returnParameter);
@@ -916,7 +1085,7 @@ public class RuntimeModeler {
         //get WebParam
         Class<?>[] parameterTypes = method.getParameterTypes();
         Type[] genericParameterTypes = method.getGenericParameterTypes();
-        Annotation[][] pannotations = getPrivParameterAnnotations(method);
+        Annotation[][] pannotations = getParamAnnotations(method);
         int pos = 0;
         for (Class clazzType : parameterTypes) {
             String paramName = "";
@@ -932,7 +1101,7 @@ public class RuntimeModeler {
             //set the actual type argument of Holder in the TypeReference
             if (isHolder) {
                 if (clazzType==Holder.class)
-                    clazzType = Navigator.REFLECTION.erasure(((ParameterizedType)genericParameterTypes[pos]).getActualTypeArguments()[0]);
+                    clazzType = BindingHelper.erasure(((ParameterizedType)genericParameterTypes[pos]).getActualTypeArguments()[0]);
             }
             Mode paramMode = isHolder ? Mode.INOUT : Mode.IN;
             for (Annotation annotation : pannotations[pos]) {
@@ -972,8 +1141,9 @@ public class RuntimeModeler {
                 paramQName = new QName(paramNamespace, paramName);
             }
             typeRef =
-                new TypeReference(paramQName, clazzType, pannotations[pos]);
-
+                new TypeInfo(paramQName, clazzType, pannotations[pos]);
+            metadataReader.getProperties(typeRef.properties(), method, pos);
+            typeRef.setGenericType(genericParameterTypes[pos]);
             ParameterImpl param = new ParameterImpl(javaMethod, typeRef, paramMode, pos++);
             param.setPartName(partName);
 
@@ -984,6 +1154,7 @@ public class RuntimeModeler {
                 param.setOutBinding(pb);
             }else{
                 if (isHeader) {
+                    typeRef.setGlobalElement(true);
                     param.setBinding(ParameterBinding.HEADER);
                 } else {
                     ParameterBinding pb = getBinding(operationName, partName, false, paramMode);
@@ -991,6 +1162,7 @@ public class RuntimeModeler {
                 }
             }
             if(param.getInBinding().isBody()){
+                typeRef.setGlobalElement(false);
                 if(!param.isOUT()){
                     WSDLPart p = getPart(new QName(targetNamespace,operationName), partName, Mode.IN);
                     if(p == null)
@@ -1028,7 +1200,7 @@ public class RuntimeModeler {
      * @param method the <code>method</code> from which to find the exceptions to model
      */
     protected void processExceptions(JavaMethodImpl javaMethod, Method method) {
-        Action actionAnn = method.getAnnotation(Action.class);
+        Action actionAnn = getAnnotation(method, Action.class);
         FaultAction[] faultActions = {};
         if(actionAnn != null)
             faultActions = actionAnn.fault();
@@ -1042,7 +1214,7 @@ public class RuntimeModeler {
 
             Class exceptionBean;
             Annotation[] anns;
-            WebFault webFault = getPrivClassAnnotation(exception, WebFault.class);
+            WebFault webFault = getAnnotation(exception, WebFault.class);
             Method faultInfoMethod = getWSDLExceptionFaultInfo(exception);
             ExceptionType exceptionType = ExceptionType.WSDLException;
             String namespace = targetNamespace;
@@ -1065,13 +1237,13 @@ public class RuntimeModeler {
             if (faultInfoMethod == null)  {
                 exceptionBean = getExceptionBeanClass(className, exception, name, namespace);
                 exceptionType = ExceptionType.UserDefined;
-                anns = exceptionBean.getAnnotations();
+                anns = getAnnotations(exceptionBean);
             } else {
                 exceptionBean = faultInfoMethod.getReturnType();
-                anns = faultInfoMethod.getAnnotations();
+                anns = getAnnotations(faultInfoMethod);
             }
             QName faultName = new QName(namespace, name);
-            TypeReference typeRef = new TypeReference(faultName, exceptionBean, anns);
+            TypeInfo typeRef = new TypeInfo(faultName, exceptionBean, anns);
             CheckedExceptionImpl checkedException =
                 new CheckedExceptionImpl(javaMethod, exception, typeRef, exceptionType);
             checkedException.setMessageName(messageName);
@@ -1093,7 +1265,8 @@ public class RuntimeModeler {
      * exception that contains the <code>WebFault</code> annotation.  Otherwise it returns null
      */
     protected Method getWSDLExceptionFaultInfo(Class exception) {
-        if (!exception.isAnnotationPresent(WebFault.class))
+//      if (!exception.isAnnotationPresent(WebFault.class))
+        if (getAnnotation(exception, WebFault.class) == null)
             return null;
         try {
             return exception.getMethod("getFaultInfo");
@@ -1115,7 +1288,7 @@ public class RuntimeModeler {
         String resultTNS = targetNamespace;
         String resultPartName = null;
         boolean isResultHeader = false;
-        WebResult webResult = method.getAnnotation(WebResult.class);
+        WebResult webResult = getAnnotation(method, WebResult.class);
         if (webResult != null) {
             if (webResult.name().length() > 0)
                 resultName = webResult.name();
@@ -1126,16 +1299,18 @@ public class RuntimeModeler {
         }
 
         Class returnType = method.getReturnType();
-
+        Type gReturnType = method.getGenericReturnType();
         if(javaMethod.isAsync()){
             returnType = getAsyncReturnType(method, returnType);
         }
 
         if ((returnType != null) && (!returnType.getName().equals("void"))) {
-            Annotation[] rann = method.getAnnotations();
+            Annotation[] rann = getAnnotations(method);
             if (resultName != null) {
                 QName responseQName = new QName(resultTNS, resultName);
-                TypeReference rTypeReference = new TypeReference(responseQName, returnType, rann);
+                TypeInfo rTypeReference = new TypeInfo(responseQName, returnType, rann);
+                rTypeReference.setGenericType(gReturnType);
+                metadataReader.getProperties(rTypeReference.properties(), method);
                 ParameterImpl returnParameter = new ParameterImpl(javaMethod, rTypeReference, Mode.OUT, -1);
 
                 if(resultPartName == null || (resultPartName.length() == 0)){
@@ -1155,7 +1330,7 @@ public class RuntimeModeler {
         //get WebParam
         Class<?>[] parameterTypes = method.getParameterTypes();
         Type[] genericParameterTypes = method.getGenericParameterTypes();
-        Annotation[][] pannotations = getPrivParameterAnnotations(method);
+        Annotation[][] pannotations = getParamAnnotations(method);
         int pos = 0;
         for (Class clazzType : parameterTypes) {
             String paramName = operationName; //method.getName();
@@ -1172,7 +1347,7 @@ public class RuntimeModeler {
             //set the actual type argument of Holder in the TypeReference
             if (isHolder) {
                 if (clazzType==Holder.class)
-                    clazzType = Navigator.REFLECTION.erasure(((ParameterizedType)genericParameterTypes[pos]).getActualTypeArguments()[0]);
+                    clazzType = BindingHelper.erasure(((ParameterizedType)genericParameterTypes[pos]).getActualTypeArguments()[0]);
             }
 
             Mode paramMode = isHolder ? Mode.INOUT : Mode.IN;
@@ -1198,11 +1373,13 @@ public class RuntimeModeler {
             }
 
             QName requestQName = new QName(requestNamespace, paramName);
+            if (!isHeader && paramMode != Mode.OUT) javaMethod.setRequestPayloadName(requestQName);
             //doclit/wrapped
-            TypeReference typeRef = //operationName with upper 1 char
-                new TypeReference(requestQName, clazzType,
+            TypeInfo typeRef = //operationName with upper 1 char
+                new TypeInfo(requestQName, clazzType,
                     pannotations[pos]);
-
+            metadataReader.getProperties(typeRef.properties(), method, pos);
+            typeRef.setGenericType(genericParameterTypes[pos]);
             ParameterImpl param = new ParameterImpl(javaMethod, typeRef, paramMode, pos++);
             if(partName == null || (partName.length() == 0)){
                 partName = paramName;
@@ -1258,14 +1435,14 @@ public class RuntimeModeler {
     private Class getAsyncReturnType(Method method, Class returnType) {
         if(Response.class.isAssignableFrom(returnType)){
             Type ret = method.getGenericReturnType();
-            return Navigator.REFLECTION.erasure(((ParameterizedType)ret).getActualTypeArguments()[0]);
+            return BindingHelper.erasure(((ParameterizedType)ret).getActualTypeArguments()[0]);
         }else{
             Type[] types = method.getGenericParameterTypes();
             Class[] params = method.getParameterTypes();
             int i = 0;
             for(Class cls : params){
                 if(AsyncHandler.class.isAssignableFrom(cls)){
-                    return Navigator.REFLECTION.erasure(((ParameterizedType)types[i]).getActualTypeArguments()[0]);
+                    return BindingHelper.erasure(((ParameterizedType)types[i]).getActualTypeArguments()[0]);
                 }
                 i++;
             }
@@ -1296,6 +1473,18 @@ public class RuntimeModeler {
      * @return the <code>wsdl:serviceName</code> for the <code>implClass</code>
      */
     public static QName getServiceName(Class<?> implClass) {
+        return getServiceName(implClass, null);
+    }
+
+    public static QName getServiceName(Class<?> implClass, boolean isStandard) {
+        return getServiceName(implClass, null, isStandard);
+    }
+
+    public static QName getServiceName(Class<?> implClass, MetadataReader reader) {
+        return getServiceName(implClass, reader, true);
+    }
+
+    public static QName getServiceName(Class<?> implClass, MetadataReader reader, boolean isStandard) {
         if (implClass.isInterface()) {
             throw new RuntimeModelerException("runtime.modeler.cannot.get.serviceName.from.interface",
                                     implClass.getCanonicalName());
@@ -1306,24 +1495,21 @@ public class RuntimeModeler {
         if (implClass.getPackage() != null)
             packageName = implClass.getPackage().getName();
 
-        WebService webService = implClass.getAnnotation(WebService.class);
-        if (webService == null) {
+        WebService webService = getAnnotation(WebService.class, implClass, reader);
+        if (isStandard && webService == null) {
             throw new RuntimeModelerException("runtime.modeler.no.webservice.annotation",
                 implClass.getCanonicalName());
         }
-        if (webService.serviceName().length() > 0) {
+        if (webService != null && webService.serviceName().length() > 0) {
             name = webService.serviceName();
         }
         String targetNamespace = getNamespace(packageName);
-        if (webService.targetNamespace().length() > 0) {
+        if (webService != null && webService.targetNamespace().length() > 0) {
             targetNamespace = webService.targetNamespace();
         } else if (targetNamespace == null) {
             throw new RuntimeModelerException("runtime.modeler.no.package",
                 implClass.getName());
         }
-
-
-
         return new QName(targetNamespace, name);
     }
 
@@ -1334,29 +1520,43 @@ public class RuntimeModeler {
      * @return the <code>wsdl:portName</code> for the <code>implClass</code>
      */
     public static QName getPortName(Class<?> implClass, String targetNamespace) {
-        WebService webService = implClass.getAnnotation(WebService.class);
-        if (webService == null) {
+        return getPortName(implClass, null, targetNamespace);
+    }
+
+    public static QName getPortName(Class<?> implClass, String targetNamespace, boolean isStandard) {
+        return getPortName(implClass, null, targetNamespace, isStandard);
+    }
+
+    public static QName getPortName(Class<?> implClass, MetadataReader reader, String targetNamespace) {
+        return getPortName(implClass, reader, targetNamespace, true);
+    }
+
+    public static QName getPortName(Class<?> implClass, MetadataReader reader, String targetNamespace, boolean isStandard) {
+        WebService webService = getAnnotation(WebService.class, implClass, reader);
+        if (isStandard && webService == null) {
             throw new RuntimeModelerException("runtime.modeler.no.webservice.annotation",
                 implClass.getCanonicalName());
         }
         String name;
-        if (webService.portName().length() > 0) {
+        if (webService != null && webService.portName().length() > 0) {
             name = webService.portName();
-        } else if (webService.name().length() > 0) {
+        } else if (webService != null && webService.name().length() > 0) {
             name = webService.name()+PORT;
         } else {
             name = implClass.getSimpleName()+PORT;
         }
 
         if (targetNamespace == null) {
-            if (webService.targetNamespace().length() > 0) {
+            if (webService != null && webService.targetNamespace().length() > 0) {
                 targetNamespace = webService.targetNamespace();
             } else {
                 String packageName = null;
                 if (implClass.getPackage() != null) {
                     packageName = implClass.getPackage().getName();
                 }
-                targetNamespace = getNamespace(packageName);
+                if (packageName != null) {
+                    targetNamespace = getNamespace(packageName);
+                }
                 if (targetNamespace == null) {
                     throw new RuntimeModelerException("runtime.modeler.no.package",
                         implClass.getName());
@@ -1368,20 +1568,32 @@ public class RuntimeModeler {
         return new QName(targetNamespace, name);
     }
 
+    static <A extends Annotation> A getAnnotation(Class<A> t, Class<?> cls, MetadataReader reader) {
+        return (reader == null)? cls.getAnnotation(t) : reader.getAnnotation(t, cls);
+    }
+
     /**
      * Gives portType QName from implementatorClass or SEI
      * @param  implOrSeiClass cant be null
      * @return  <code>wsdl:portType@name</code>, null if it could not find the annotated class.
      */
     public static QName getPortTypeName(Class<?> implOrSeiClass){
+        return getPortTypeName(implOrSeiClass, null, null);
+    }
+
+    public static QName getPortTypeName(Class<?> implOrSeiClass, MetadataReader metadataReader){
+        return getPortTypeName(implOrSeiClass, null, metadataReader);
+    }
+
+    public static QName getPortTypeName(Class<?> implOrSeiClass, String tns, MetadataReader reader){
         assert(implOrSeiClass != null);
+        WebService webService = getAnnotation(WebService.class, implOrSeiClass, reader);
         Class<?> clazz = implOrSeiClass;
-        if (!implOrSeiClass.isAnnotationPresent(WebService.class))
+        if (webService == null)
                 throw new RuntimeModelerException("runtime.modeler.no.webservice.annotation",
                                            implOrSeiClass.getCanonicalName());
 
         if (!implOrSeiClass.isInterface()) {
-            WebService webService = implOrSeiClass.getAnnotation(WebService.class);
             String epi = webService.endpointInterface();
             if (epi.length() > 0) {
                 try {
@@ -1389,20 +1601,20 @@ public class RuntimeModeler {
                 } catch (ClassNotFoundException e) {
                     throw new RuntimeModelerException("runtime.modeler.class.not.found", epi);
                 }
-                if (!clazz.isAnnotationPresent(javax.jws.WebService.class)) {
+                WebService ws = getAnnotation(WebService.class, clazz, reader);
+                if (ws == null) {
                     throw new RuntimeModelerException("runtime.modeler.endpoint.interface.no.webservice",
                                         webService.endpointInterface());
                 }
             }
         }
 
-        WebService webService = clazz.getAnnotation(WebService.class);
+        webService = getAnnotation(WebService.class, clazz, reader);
         String name = webService.name();
         if(name.length() == 0){
             name = clazz.getSimpleName();
         }
-
-        String tns = webService.targetNamespace();
+        if (tns == null || "".equals(tns.trim())) tns = webService.targetNamespace();
         if (tns.length() == 0)
             tns = getNamespace(clazz.getPackage().getName());
         if (tns == null) {
@@ -1424,11 +1636,22 @@ public class RuntimeModeler {
 
     private WSDLPart getPart(QName opName, String partName, Mode mode){
         if(binding != null){
-            WSDLBoundOperationImpl bo = binding.getBinding().get(opName);
+            WSDLBoundOperation bo = binding.getBinding().get(opName);
             if(bo != null)
                 return bo.getPart(partName, mode);
         }
         return null;
+    }
+
+    private static Boolean getBooleanSystemProperty(final String prop) {
+        return AccessController.doPrivileged(
+            new java.security.PrivilegedAction<Boolean>() {
+                public Boolean run() {
+                    String value = System.getProperty(prop);
+                    return value != null ? Boolean.valueOf(value) : Boolean.FALSE;
+                }
+            }
+        );
     }
 
     private static QName getReturnQName(Method method, WebResult webResult, XmlElement xmlElem) {

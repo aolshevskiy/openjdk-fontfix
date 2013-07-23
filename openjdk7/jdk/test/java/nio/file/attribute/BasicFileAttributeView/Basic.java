@@ -49,9 +49,9 @@ public class Basic {
         check(!attrs.isSymbolicLink(), "is not a link");
         check(!attrs.isOther(), "is not other");
 
-        // last-modified-time should match java.io.File
+        // last-modified-time should match java.io.File in seconds
         File f = new File(dir.toString());
-        check(f.lastModified() == attrs.lastModifiedTime().toMillis(),
+        check(f.lastModified()/1000 == attrs.lastModifiedTime().to(TimeUnit.SECONDS),
               "last-modified time should be the same");
     }
 
@@ -64,28 +64,22 @@ public class Basic {
         check(!attrs.isSymbolicLink(), "is not a link");
         check(!attrs.isOther(), "is not other");
 
-        // size and last-modified-time should match java.io.File
+        // size and last-modified-time should match java.io.File in seconds
         File f = new File(file.toString());
         check(f.length() == attrs.size(), "size should be the same");
-        check(f.lastModified() == attrs.lastModifiedTime().toMillis(),
+        check(f.lastModified()/1000 == attrs.lastModifiedTime().to(TimeUnit.SECONDS),
               "last-modified time should be the same");
 
-        // copy last-modified time and file create time from directory to file,
+        // copy last-modified time from directory to file,
         // re-read attribtues, and check they match
         BasicFileAttributeView view =
             Files.getFileAttributeView(file, BasicFileAttributeView.class);
         BasicFileAttributes dirAttrs = Files.readAttributes(dir, BasicFileAttributes.class);
         view.setTimes(dirAttrs.lastModifiedTime(), null, null);
-        if (dirAttrs.creationTime() != null) {
-            view.setTimes(null, null, dirAttrs.creationTime());
-        }
+
         attrs = view.readAttributes();
         check(attrs.lastModifiedTime().equals(dirAttrs.lastModifiedTime()),
             "last-modified time should be equal");
-        if (dirAttrs.creationTime() != null) {
-            check(attrs.creationTime().equals(dirAttrs.creationTime()),
-                "create time should be the same");
-        }
 
         // security tests
         check (!(attrs instanceof PosixFileAttributes),

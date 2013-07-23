@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,7 +44,7 @@ static void *getJRSFramework() {
     return jrsFwk;
 }
 
-static char *getPosixLocale(int cat) {
+char *getPosixLocale(int cat) {
     char *lc = setlocale(cat, NULL);
     if ((lc == NULL) || (strcmp(lc, "C") == 0)) {
         lc = getenv("LANG");
@@ -54,24 +54,20 @@ static char *getPosixLocale(int cat) {
 }
 
 #define LOCALEIDLENGTH  128
-char *setupMacOSXLocale(int cat) {
+char *getMacOSXLocale(int cat) {
     switch (cat) {
     case LC_MESSAGES:
         {
             void *jrsFwk = getJRSFramework();
-            if (jrsFwk == NULL) return getPosixLocale(cat);
+            if (jrsFwk == NULL) return NULL;
 
             char *(*JRSCopyPrimaryLanguage)() = dlsym(jrsFwk, "JRSCopyPrimaryLanguage");
             char *primaryLanguage = JRSCopyPrimaryLanguage ? JRSCopyPrimaryLanguage() : NULL;
-            if (primaryLanguage == NULL) return getPosixLocale(cat);
+            if (primaryLanguage == NULL) return NULL;
 
             char *(*JRSCopyCanonicalLanguageForPrimaryLanguage)(char *) = dlsym(jrsFwk, "JRSCopyCanonicalLanguageForPrimaryLanguage");
             char *canonicalLanguage = JRSCopyCanonicalLanguageForPrimaryLanguage ?  JRSCopyCanonicalLanguageForPrimaryLanguage(primaryLanguage) : NULL;
             free (primaryLanguage);
-            if (canonicalLanguage == NULL) return getPosixLocale(cat);
-
-            void (*JRSSetDefaultLocalization)(char *) = dlsym(jrsFwk, "JRSSetDefaultLocalization");
-            if (JRSSetDefaultLocalization) JRSSetDefaultLocalization(canonicalLanguage);
 
             return canonicalLanguage;
         }
@@ -88,6 +84,24 @@ char *setupMacOSXLocale(int cat) {
     }
 
     return NULL;
+}
+
+char *setupMacOSXLocale(int cat) {
+    char * ret = getMacOSXLocale(cat);
+
+    if (cat == LC_MESSAGES && ret != NULL) {
+        void *jrsFwk = getJRSFramework();
+        if (jrsFwk != NULL) {
+            void (*JRSSetDefaultLocalization)(char *) = dlsym(jrsFwk, "JRSSetDefaultLocalization");
+            if (JRSSetDefaultLocalization) JRSSetDefaultLocalization(ret);
+        }
+    }
+
+    if (ret == NULL) {
+        return getPosixLocale(cat);
+    } else {
+        return ret;
+    }
 }
 
 /* There are several toolkit options on Mac OS X, so we should try to
@@ -126,27 +140,22 @@ PreferredToolkit getPreferredToolkit() {
     return pref = HToolkit;
 }
 
-void setUnknownOSAndVersion(java_props_t *sprops) {
-    sprops->os_name = strdup("Unknown");
-    sprops->os_version = strdup("Unknown");
-}
-
 void setOSNameAndVersion(java_props_t *sprops) {
+    /* Don't rely on JRSCopyOSName because there's no guarantee the value will
+     * remain the same, or even if the JRS functions will continue to be part of
+     * Mac OS X.  So hardcode os_name, and fill in os_version if we can.
+     */
+    sprops->os_name = strdup("Mac OS X");
+
     void *jrsFwk = getJRSFramework();
-    if (jrsFwk == NULL) {
-        setUnknownOSAndVersion(sprops);
-        return;
+    if (jrsFwk != NULL) {
+        char *(*copyOSVersion)() = dlsym(jrsFwk, "JRSCopyOSVersion");
+        if (copyOSVersion != NULL) {
+            sprops->os_version = copyOSVersion();
+            return;
+        }
     }
-
-    char *(*copyOSName)() = dlsym(jrsFwk, "JRSCopyOSName");
-    char *(*copyOSVersion)() = dlsym(jrsFwk, "JRSCopyOSVersion");
-    if (copyOSName == NULL || copyOSVersion == NULL) {
-        setUnknownOSAndVersion(sprops);
-        return;
-    }
-
-    sprops->os_name = copyOSName();
-    sprops->os_version = copyOSVersion();
+    sprops->os_version = strdup("Unknown");
 }
 
 

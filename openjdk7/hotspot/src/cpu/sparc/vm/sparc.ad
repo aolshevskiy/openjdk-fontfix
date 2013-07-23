@@ -549,17 +549,17 @@ int MachCallDynamicJavaNode::ret_addr_offset() {
   int vtable_index = this->_vtable_index;
   if (vtable_index < 0) {
     // must be invalid_vtable_index, not nonvirtual_vtable_index
-    assert(vtable_index == methodOopDesc::invalid_vtable_index, "correct sentinel value");
+    assert(vtable_index == Method::invalid_vtable_index, "correct sentinel value");
     return (NativeMovConstReg::instruction_size +
            NativeCall::instruction_size);  // sethi; setlo; call; delay slot
   } else {
     assert(!UseInlineCaches, "expect vtable calls only if not using ICs");
-    int entry_offset = instanceKlass::vtable_start_offset() + vtable_index*vtableEntry::size();
+    int entry_offset = InstanceKlass::vtable_start_offset() + vtable_index*vtableEntry::size();
     int v_off = entry_offset*wordSize + vtableEntry::method_offset_in_bytes();
     int klass_load_size;
-    if (UseCompressedOops) {
+    if (UseCompressedKlassPointers) {
       assert(Universe::heap() != NULL, "java heap should be initialized");
-      if (Universe::narrow_oop_base() == NULL)
+      if (Universe::narrow_klass_base() == NULL)
         klass_load_size = 2*BytesPerInstWord; // see MacroAssembler::load_klass()
       else
         klass_load_size = 3*BytesPerInstWord;
@@ -1656,62 +1656,15 @@ uint BoxLockNode::size(PhaseRegAlloc *ra_) const {
 }
 
 //=============================================================================
-
-// emit call stub, compiled java to interpretor
-void emit_java_to_interp(CodeBuffer &cbuf ) {
-
-  // Stub is fixed up when the corresponding call is converted from calling
-  // compiled code to calling interpreted code.
-  // set (empty), G5
-  // jmp -1
-
-  address mark = cbuf.insts_mark();  // get mark within main instrs section
-
-  MacroAssembler _masm(&cbuf);
-
-  address base =
-  __ start_a_stub(Compile::MAX_stubs_size);
-  if (base == NULL)  return;  // CodeBuffer::expand failed
-
-  // static stub relocation stores the instruction address of the call
-  __ relocate(static_stub_Relocation::spec(mark));
-
-  __ set_oop(NULL, reg_to_register_object(Matcher::inline_cache_reg_encode()));
-
-  __ set_inst_mark();
-  AddressLiteral addrlit(-1);
-  __ JUMP(addrlit, G3, 0);
-
-  __ delayed()->nop();
-
-  // Update current stubs pointer and restore code_end.
-  __ end_a_stub();
-}
-
-// size of call stub, compiled java to interpretor
-uint size_java_to_interp() {
-  // This doesn't need to be accurate but it must be larger or equal to
-  // the real size of the stub.
-  return (NativeMovConstReg::instruction_size +  // sethi/setlo;
-          NativeJump::instruction_size + // sethi; jmp; nop
-          (TraceJumps ? 20 * BytesPerInstWord : 0) );
-}
-// relocation entries for call stub, compiled java to interpretor
-uint reloc_java_to_interp() {
-  return 10;  // 4 in emit_java_to_interp + 1 in Java_Static_Call
-}
-
-
-//=============================================================================
 #ifndef PRODUCT
 void MachUEPNode::format( PhaseRegAlloc *ra_, outputStream *st ) const {
   st->print_cr("\nUEP:");
 #ifdef    _LP64
-  if (UseCompressedOops) {
+  if (UseCompressedKlassPointers) {
     assert(Universe::heap() != NULL, "java heap should be initialized");
     st->print_cr("\tLDUW   [R_O0 + oopDesc::klass_offset_in_bytes],R_G5\t! Inline cache check - compressed klass");
     st->print_cr("\tSLL    R_G5,3,R_G5");
-    if (Universe::narrow_oop_base() != NULL)
+    if (Universe::narrow_klass_base() != NULL)
       st->print_cr("\tADD    R_G5,R_G6_heap_base,R_G5");
   } else {
     st->print_cr("\tLDX    [R_O0 + oopDesc::klass_offset_in_bytes],R_G5\t! Inline cache check");
@@ -1858,18 +1811,6 @@ int Matcher::regnum_to_fpu_offset(int regnum) {
 address last_rethrow = NULL;  // debugging aid for Rethrow encoding
 #endif
 
-// Map Types to machine register types
-const int Matcher::base2reg[Type::lastype] = {
-  Node::NotAMachineReg,0,0, Op_RegI, Op_RegL, 0, Op_RegN,
-  Node::NotAMachineReg, Node::NotAMachineReg, /* tuple, array */
-  0, Op_RegD, 0, 0, /* Vectors */
-  Op_RegP, Op_RegP, Op_RegP, Op_RegP, Op_RegP, Op_RegP, /* the pointers */
-  0, 0/*abio*/,
-  Op_RegP /* Return address */, 0, /* the memories */
-  Op_RegF, Op_RegF, Op_RegF, Op_RegD, Op_RegD, Op_RegD,
-  0  /*bottom*/
-};
-
 // Vector width in bytes
 const int Matcher::vector_width_in_bytes(BasicType bt) {
   assert(MaxVectorSize == 8, "");
@@ -1951,6 +1892,12 @@ const bool Matcher::need_masked_shift_count = false;
 bool Matcher::narrow_oop_use_complex_address() {
   NOT_LP64(ShouldNotCallThis());
   assert(UseCompressedOops, "only for compressed oops code");
+  return false;
+}
+
+bool Matcher::narrow_klass_use_complex_address() {
+  NOT_LP64(ShouldNotCallThis());
+  assert(UseCompressedKlassPointers, "only for compressed klass code");
   return false;
 }
 
@@ -2582,15 +2529,15 @@ encode %{
   enc_class Java_Static_Call (method meth) %{    // JAVA STATIC CALL
     // CALL to fixup routine.  Fixup routine uses ScopeDesc info to determine
     // who we intended to call.
-    if ( !_method ) {
+    if (!_method) {
       emit_call_reloc(cbuf, $meth$$method, relocInfo::runtime_call_type);
     } else if (_optimized_virtual) {
       emit_call_reloc(cbuf, $meth$$method, relocInfo::opt_virtual_call_type);
     } else {
       emit_call_reloc(cbuf, $meth$$method, relocInfo::static_call_type);
     }
-    if( _method ) {  // Emit stub for static call
-      emit_java_to_interp(cbuf);
+    if (_method) {  // Emit stub for static call.
+      CompiledStaticCall::emit_to_interp_stub(cbuf);
     }
   %}
 
@@ -2601,20 +2548,11 @@ encode %{
     // MachCallDynamicJavaNode::ret_addr_offset uses this same test
     if (vtable_index < 0) {
       // must be invalid_vtable_index, not nonvirtual_vtable_index
-      assert(vtable_index == methodOopDesc::invalid_vtable_index, "correct sentinel value");
+      assert(vtable_index == Method::invalid_vtable_index, "correct sentinel value");
       Register G5_ic_reg = reg_to_register_object(Matcher::inline_cache_reg_encode());
       assert(G5_ic_reg == G5_inline_cache_reg, "G5_inline_cache_reg used in assemble_ic_buffer_code()");
       assert(G5_ic_reg == G5_megamorphic_method, "G5_megamorphic_method used in megamorphic call stub");
-      // !!!!!
-      // Generate  "set 0x01, R_G5", placeholder instruction to load oop-info
-      // emit_call_dynamic_prologue( cbuf );
-      __ set_oop((jobject)Universe::non_oop_word(), G5_ic_reg);
-
-      address  virtual_call_oop_addr = __ inst_mark();
-      // CALL to fixup routine.  Fixup routine uses ScopeDesc info to determine
-      // who we intended to call.
-      __ relocate(virtual_call_Relocation::spec(virtual_call_oop_addr));
-      emit_call_reloc(cbuf, $meth$$method, relocInfo::none);
+      __ ic_call((address)$meth$$method);
     } else {
       assert(!UseInlineCaches, "expect vtable calls only if not using ICs");
       // Just go thru the vtable
@@ -2623,16 +2561,16 @@ encode %{
       int off = __ offset();
       __ load_klass(O0, G3_scratch);
       int klass_load_size;
-      if (UseCompressedOops) {
+      if (UseCompressedKlassPointers) {
         assert(Universe::heap() != NULL, "java heap should be initialized");
-        if (Universe::narrow_oop_base() == NULL)
+        if (Universe::narrow_klass_base() == NULL)
           klass_load_size = 2*BytesPerInstWord;
         else
           klass_load_size = 3*BytesPerInstWord;
       } else {
         klass_load_size = 1*BytesPerInstWord;
       }
-      int entry_offset = instanceKlass::vtable_start_offset() + vtable_index*vtableEntry::size();
+      int entry_offset = InstanceKlass::vtable_start_offset() + vtable_index*vtableEntry::size();
       int v_off = entry_offset*wordSize + vtableEntry::method_offset_in_bytes();
       if (Assembler::is_simm13(v_off)) {
         __ ld_ptr(G3, v_off, G5_method);
@@ -2648,7 +2586,7 @@ encode %{
       // NOTE: for vtable dispatches, the vtable entry will never be null.
       // However it may very well end up in handle_wrong_method if the
       // method is abstract for the particular class.
-      __ ld_ptr(G5_method, in_bytes(methodOopDesc::from_compiled_offset()), G3_scratch);
+      __ ld_ptr(G5_method, in_bytes(Method::from_compiled_offset()), G3_scratch);
       // jump to target (either compiled code or c2iadapter)
       __ jmpl(G3_scratch, G0, O7);
       __ delayed()->nop();
@@ -2664,7 +2602,7 @@ encode %{
 
     assert(temp_reg != G5_ic_reg, "conflicting registers");
     // Load nmethod
-    __ ld_ptr(G5_ic_reg, in_bytes(methodOopDesc::from_compiled_offset()), temp_reg);
+    __ ld_ptr(G5_ic_reg, in_bytes(Method::from_compiled_offset()), temp_reg);
 
     // CALL to compiled java, indirect the contents of G3
     __ set_inst_mark();
@@ -2840,10 +2778,7 @@ enc_class Fast_Unlock(iRegP oop, iRegP box, o7RegP scratch, iRegP scratch2) %{
     Register Rold = reg_to_register_object($old$$reg);
     Register Rnew = reg_to_register_object($new$$reg);
 
-    // casx_under_lock picks 1 of 3 encodings:
-    // For 32-bit pointers you get a 32-bit CAS
-    // For 64-bit pointers you get a 64-bit CASX
-    __ casn(Rmem, Rold, Rnew); // Swap(*Rmem,Rnew) if *Rmem == Rold
+    __ cas_ptr(Rmem, Rold, Rnew); // Swap(*Rmem,Rnew) if *Rmem == Rold
     __ cmp( Rold, Rnew );
   %}
 
@@ -3129,7 +3064,7 @@ enc_class enc_Array_Equals(o0RegP ary1, o1RegP ary2, g3RegP tmp1, notemp_iRegI r
     AddressLiteral last_rethrow_addrlit(&last_rethrow);
     __ sethi(last_rethrow_addrlit, L1);
     Address addr(L1, last_rethrow_addrlit.low10());
-    __ get_pc(L2);
+    __ rdpc(L2);
     __ inc(L2, 3 * BytesPerInstWord);  // skip this & 2 more insns to point at jump_to
     __ st_ptr(L2, addr);
     __ restore();
@@ -3230,7 +3165,7 @@ frame %{
 
   // These two registers define part of the calling convention
   // between compiled code and the interpreter.
-  inline_cache_reg(R_G5);                // Inline Cache Register or methodOop for I2C
+  inline_cache_reg(R_G5);                // Inline Cache Register or Method* for I2C
   interpreter_method_oop_reg(R_G5);      // Method Oop Register when calling interpreter
 
   // Optional: name the operand used by cisc-spilling to access [stack_pointer + offset]
@@ -3625,6 +3560,15 @@ operand immP_poll() %{
 operand immN()
 %{
   match(ConN);
+
+  op_cost(10);
+  format %{ %}
+  interface(CONST_INTER);
+%}
+
+operand immNKlass()
+%{
+  match(ConNKlass);
 
   op_cost(10);
   format %{ %}
@@ -6081,12 +6025,15 @@ instruct loadConP(iRegP dst, immP con) %{
   ins_cost(DEFAULT_COST * 3/2);
   format %{ "SET    $con,$dst\t!ptr" %}
   ins_encode %{
-    // [RGV] This next line should be generated from ADLC
-    if (_opnds[1]->constant_is_oop()) {
+    relocInfo::relocType constant_reloc = _opnds[1]->constant_reloc();
       intptr_t val = $con$$constant;
+    if (constant_reloc == relocInfo::oop_type) {
       __ set_oop_constant((jobject) val, $dst$$Register);
+    } else if (constant_reloc == relocInfo::metadata_type) {
+      __ set_metadata_constant((Metadata*)val, $dst$$Register);
     } else {          // non-oop pointers, e.g. card mark base, heap top
-      __ set($con$$constant, $dst$$Register);
+      assert(constant_reloc == relocInfo::none, "unexpected reloc type");
+      __ set(val, $dst$$Register);
     }
   %}
   ins_pipe(loadConP);
@@ -6097,12 +6044,15 @@ instruct loadConP_set(iRegP dst, immP_set con) %{
   ins_cost(DEFAULT_COST * 3/2);
   format %{ "SET    $con,$dst\t! ptr" %}
   ins_encode %{
-    // [RGV] This next line should be generated from ADLC
-    if (_opnds[1]->constant_is_oop()) {
+    relocInfo::relocType constant_reloc = _opnds[1]->constant_reloc();
       intptr_t val = $con$$constant;
+    if (constant_reloc == relocInfo::oop_type) {
       __ set_oop_constant((jobject) val, $dst$$Register);
+    } else if (constant_reloc == relocInfo::metadata_type) {
+      __ set_metadata_constant((Metadata*)val, $dst$$Register);
     } else {          // non-oop pointers, e.g. card mark base, heap top
-      __ set($con$$constant, $dst$$Register);
+      assert(constant_reloc == relocInfo::none, "unexpected reloc type");
+      __ set(val, $dst$$Register);
     }
   %}
   ins_pipe(loadConP);
@@ -6170,6 +6120,17 @@ instruct loadConN(iRegN dst, immN src) %{
   ins_encode %{
     Register dst = $dst$$Register;
     __ set_narrow_oop((jobject)$src$$constant, dst);
+  %}
+  ins_pipe(ialu_hi_lo_reg);
+%}
+
+instruct loadConNKlass(iRegN dst, immNKlass src) %{
+  match(Set dst src);
+  ins_cost(DEFAULT_COST * 3/2);
+  format %{ "SET    $src,$dst\t! compressed klass ptr" %}
+  ins_encode %{
+    Register dst = $dst$$Register;
+    __ set_narrow_klass((Klass*)$src$$constant, dst);
   %}
   ins_pipe(ialu_hi_lo_reg);
 %}
@@ -6490,6 +6451,25 @@ instruct storeN(memory dst, iRegN src) %{
    ins_pipe(istore_mem_spORreg);
 %}
 
+instruct storeNKlass(memory dst, iRegN src) %{
+   match(Set dst (StoreNKlass dst src));
+   ins_cost(MEMORY_REF_COST);
+   size(4);
+
+   format %{ "STW    $src,$dst\t! compressed klass ptr" %}
+   ins_encode %{
+     Register base = as_Register($dst$$base);
+     Register index = as_Register($dst$$index);
+     Register src = $src$$Register;
+     if (index != G0) {
+       __ stw(src, base, index);
+     } else {
+       __ stw(src, base, $dst$$disp);
+     }
+   %}
+   ins_pipe(istore_mem_spORreg);
+%}
+
 instruct storeN0(memory dst, immN0 src) %{
    match(Set dst (StoreN dst src));
    ins_cost(MEMORY_REF_COST);
@@ -6597,6 +6577,23 @@ instruct decodeHeapOop_not_null(iRegP dst, iRegN src) %{
   ins_pipe(ialu_reg);
 %}
 
+instruct encodeKlass_not_null(iRegN dst, iRegP src) %{
+  match(Set dst (EncodePKlass src));
+  format %{ "encode_klass_not_null $src, $dst" %}
+  ins_encode %{
+    __ encode_klass_not_null($src$$Register, $dst$$Register);
+  %}
+  ins_pipe(ialu_reg);
+%}
+
+instruct decodeKlass_not_null(iRegP dst, iRegN src) %{
+  match(Set dst (DecodeNKlass src));
+  format %{ "decode_klass_not_null $src, $dst" %}
+  ins_encode %{
+    __ decode_klass_not_null($src$$Register, $dst$$Register);
+  %}
+  ins_pipe(ialu_reg);
+%}
 
 //----------MemBar Instructions-----------------------------------------------
 // Memory barrier flavors

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,7 +45,7 @@ import static com.sun.java.util.jar.pack.Constants.*;
  * attribute layouts.
  * @author John Rose
  */
-class Attribute implements Comparable {
+class Attribute implements Comparable<Attribute> {
     // Attribute instance fields.
 
     Layout def;     // the name and format of this attr
@@ -99,8 +99,8 @@ class Attribute implements Comparable {
         return this == def.canon;
     }
 
-    public int compareTo(Object o) {
-        Attribute that = (Attribute) o;
+    @Override
+    public int compareTo(Attribute that) {
         return this.def.compareTo(that.def);
     }
 
@@ -167,6 +167,7 @@ class Attribute implements Comparable {
         define(sd, ATTR_CONTEXT_CLASS, "SourceFile", "RUH");
         define(sd, ATTR_CONTEXT_CLASS, "EnclosingMethod", "RCHRDNH");
         define(sd, ATTR_CONTEXT_CLASS, "InnerClasses", "NH[RCHRCNHRUNHFH]");
+        define(sd, ATTR_CONTEXT_CLASS, "BootstrapMethods", "NH[RMHNH[KLH]]");
 
         define(sd, ATTR_CONTEXT_FIELD, "Signature", "RSH");
         define(sd, ATTR_CONTEXT_FIELD, "Synthetic", "");
@@ -177,6 +178,7 @@ class Attribute implements Comparable {
         define(sd, ATTR_CONTEXT_METHOD, "Synthetic", "");
         define(sd, ATTR_CONTEXT_METHOD, "Deprecated", "");
         define(sd, ATTR_CONTEXT_METHOD, "Exceptions", "NH[RCH]");
+        define(sd, ATTR_CONTEXT_METHOD, "MethodParameters", "NB[RUNHFH]");
         //define(sd, ATTR_CONTEXT_METHOD, "Code", "HHNI[B]NH[PHPOHPOHRCNH]NH[RUHNI[B]]");
 
         define(sd, ATTR_CONTEXT_CODE, "StackMapTable",
@@ -204,25 +206,27 @@ class Attribute implements Comparable {
         // Their layout specs. are given here for completeness.
         // The Code spec is incomplete, in that it does not distinguish
         // bytecode bytes or locate CP references.
+        // The BootstrapMethods attribute is also special-cased
+        // elsewhere as an appendix to the local constant pool.
     }
 
     // Metadata.
     //
     // We define metadata using similar layouts
-    // for all five kinds of metadata attributes.
+    // for all five kinds of metadata attributes and 2 type metadata attributes
     //
     // Regular annotations are a counted list of [RSHNH[RUH(1)]][...]
     //   pack.method.attribute.RuntimeVisibleAnnotations=[NH[(1)]][RSHNH[RUH(1)]][TB...]
     //
     // Parameter annotations are a counted list of regular annotations.
-    //   pack.method.attribute.RuntimeVisibleParameterAnnotations=[NH[(1)]][NH[(1)]][RSHNH[RUH(1)]][TB...]
+    //   pack.method.attribute.RuntimeVisibleParameterAnnotations=[NB[(1)]][NH[(1)]][RSHNH[RUH(1)]][TB...]
     //
     // RuntimeInvisible annotations are defined similarly...
     // Non-method annotations are defined similarly...
     //
     // Annotation are a simple tagged value [TB...]
     //   pack.attribute.method.AnnotationDefault=[TB...]
-    //
+
     static {
         String mdLayouts[] = {
             Attribute.normalizeLayoutString
@@ -235,6 +239,9 @@ class Attribute implements Comparable {
              +"\n  # annotations :="
              +"\n  [ NH[(1)] ]     # forward call to annotation"
              +"\n  "
+            ),
+            Attribute.normalizeLayoutString
+             (""
              +"\n  # annotation :="
              +"\n  [RSH"
              +"\n    NH[RUH (1)]   # forward call to value"
@@ -256,24 +263,67 @@ class Attribute implements Comparable {
              +"\n    ()[] ]"
              )
         };
+        /*
+         * RuntimeVisibleTypeAnnotation and RuntimeInvisibleTypeAnnotatation are
+         * similar to RuntimeVisibleAnnotation and RuntimeInvisibleAnnotation,
+         * a type-annotation union  and a type-path structure precedes the
+         * annotation structure
+         */
+        String typeLayouts[] = {
+            Attribute.normalizeLayoutString
+            (""
+             +"\n # type-annotations :="
+             +"\n  [ NH[(1)(2)(3)] ]     # forward call to type-annotations"
+            ),
+            Attribute.normalizeLayoutString
+            ( ""
+             +"\n  # type-annotation :="
+             +"\n  [TB"
+             +"\n    (0-1) [B] # {CLASS, METHOD}_TYPE_PARAMETER"
+             +"\n    (16) [FH] # CLASS_EXTENDS"
+             +"\n    (17-18) [BB] # {CLASS, METHOD}_TYPE_PARAMETER_BOUND"
+             +"\n    (19-21) [] # FIELD, METHOD_RETURN, METHOD_RECEIVER"
+             +"\n    (22) [B] # METHOD_FORMAL_PARAMETER"
+             +"\n    (23) [H] # THROWS"
+             +"\n    (64-65) [NH[PHOHH]] # LOCAL_VARIABLE, RESOURCE_VARIABLE"
+             +"\n    (66) [H] # EXCEPTION_PARAMETER"
+             +"\n    (67-70) [PH] # INSTANCEOF, NEW, {CONSTRUCTOR, METHOD}_REFERENCE_RECEIVER"
+             +"\n    (71-75) [PHB] # CAST, {CONSTRUCTOR,METHOD}_INVOCATION_TYPE_ARGUMENT, {CONSTRUCTOR, METHOD}_REFERENCE_TYPE_ARGUMENT"
+             +"\n    ()[] ]"
+            ),
+            Attribute.normalizeLayoutString
+            (""
+             +"\n # type-path"
+             +"\n [ NB[BB] ]"
+            )
+        };
         Map<Layout, Attribute> sd = standardDefs;
-        String defaultLayout     = mdLayouts[2];
-        String annotationsLayout = mdLayouts[1] + mdLayouts[2];
+        String defaultLayout     = mdLayouts[3];
+        String annotationsLayout = mdLayouts[1] + mdLayouts[2] + mdLayouts[3];
         String paramsLayout      = mdLayouts[0] + annotationsLayout;
+        String typesLayout       = typeLayouts[0] + typeLayouts[1] +
+                                   typeLayouts[2] + mdLayouts[2] + mdLayouts[3];
+
         for (int ctype = 0; ctype < ATTR_CONTEXT_LIMIT; ctype++) {
-            if (ctype == ATTR_CONTEXT_CODE)  continue;
-            define(sd, ctype,
-                   "RuntimeVisibleAnnotations",   annotationsLayout);
-            define(sd, ctype,
-                   "RuntimeInvisibleAnnotations", annotationsLayout);
-            if (ctype == ATTR_CONTEXT_METHOD) {
+            if (ctype != ATTR_CONTEXT_CODE) {
                 define(sd, ctype,
-                       "RuntimeVisibleParameterAnnotations",   paramsLayout);
+                       "RuntimeVisibleAnnotations",   annotationsLayout);
                 define(sd, ctype,
-                       "RuntimeInvisibleParameterAnnotations", paramsLayout);
-                define(sd, ctype,
-                       "AnnotationDefault", defaultLayout);
+                       "RuntimeInvisibleAnnotations",  annotationsLayout);
+
+                if (ctype == ATTR_CONTEXT_METHOD) {
+                    define(sd, ctype,
+                           "RuntimeVisibleParameterAnnotations",   paramsLayout);
+                    define(sd, ctype,
+                           "RuntimeInvisibleParameterAnnotations", paramsLayout);
+                    define(sd, ctype,
+                           "AnnotationDefault", defaultLayout);
+                }
             }
+            define(sd, ctype,
+                   "RuntimeVisibleTypeAnnotations", typesLayout);
+            define(sd, ctype,
+                   "RuntimeInvisibleTypeAnnotations", typesLayout);
         }
     }
 
@@ -447,7 +497,7 @@ class Attribute implements Comparable {
      *  and format.  The formats are specified in a "little language".
      */
     public static
-    class Layout implements Comparable {
+    class Layout implements Comparable<Layout> {
         int ctype;       // attribute context type, e.g., ATTR_CONTEXT_CODE
         String name;     // name of attribute
         boolean hasRefs; // this kind of attr contains CP refs?
@@ -526,6 +576,7 @@ class Attribute implements Comparable {
             return canon.addContent(bytes, null);
         }
 
+        @Override
         public boolean equals(Object x) {
             return ( x != null) && ( x.getClass() == Layout.class ) &&
                     equals((Layout)x);
@@ -535,13 +586,14 @@ class Attribute implements Comparable {
                 && this.layout.equals(that.layout)
                 && this.ctype == that.ctype;
         }
+        @Override
         public int hashCode() {
             return (((17 + name.hashCode())
                     * 37 + layout.hashCode())
                     * 37 + ctype);
         }
-        public int compareTo(Object o) {
-            Layout that = (Layout) o;
+        @Override
+        public int compareTo(Layout that) {
             int r;
             r = this.name.compareTo(that.name);
             if (r != 0)  return r;
@@ -549,6 +601,7 @@ class Attribute implements Comparable {
             if (r != 0)  return r;
             return this.ctype - that.ctype;
         }
+        @Override
         public String toString() {
             String str = contextName(ctype)+"."+name+"["+layout+"]";
             // If -ea, print out more informative strings!
@@ -652,8 +705,8 @@ class Attribute implements Comparable {
             return fixups[0]; // return ref-bearing cookie, if any
         }
 
-        public String layoutForPackageMajver(int majver) {
-            if (majver <= JAVA5_PACKAGE_MAJOR_VERSION) {
+        public String layoutForClassVersion(Package.Version vers) {
+            if (vers.lessThan(JAVA6_MAX_CLASS_VERSION)) {
                 // Disallow layout syntax in the oldest protocol version.
                 return expandCaseDashNotation(layout);
             }
@@ -663,6 +716,8 @@ class Attribute implements Comparable {
 
     public static
     class FormatException extends IOException {
+        private static final long serialVersionUID = -2542243830788066513L;
+
         private int ctype;
         private String name;
         String layout;
@@ -694,11 +749,14 @@ class Attribute implements Comparable {
         // References (to a local cpMap) are embedded in the bytes.
         def.parse(holder, bytes, 0, bytes.length,
             new ValueStream() {
+                @Override
                 public void putInt(int bandIndex, int value) {
                 }
+                @Override
                 public void putRef(int bandIndex, Entry ref) {
                     refs.add(ref);
                 }
+                @Override
                 public int encodeBCI(int bci) {
                     return bci;
                 }
@@ -712,6 +770,7 @@ class Attribute implements Comparable {
         return def.unparse(in, out);
     }
 
+    @Override
     public String toString() {
         return def
             +"{"+(bytes == null ? -1 : size())+"}"
@@ -822,9 +881,9 @@ class Attribute implements Comparable {
   reference_type:
         ( constant_ref | schema_ref | utf8_ref | untyped_ref )
   constant_ref:
-        ( 'KI' | 'KJ' | 'KF' | 'KD' | 'KS' | 'KQ' )
+        ( 'KI' | 'KJ' | 'KF' | 'KD' | 'KS' | 'KQ' | 'KM' | 'KT' | 'KL' )
   schema_ref:
-        ( 'RC' | 'RS' | 'RD' | 'RF' | 'RM' | 'RI' )
+        ( 'RC' | 'RS' | 'RD' | 'RF' | 'RM' | 'RI' | 'RY' | 'RB' | 'RN' )
   utf8_ref:
         'RU'
   untyped_ref:
@@ -1012,7 +1071,12 @@ class Attribute implements Comparable {
                 case 'F': e.refKind = CONSTANT_Float; break;
                 case 'D': e.refKind = CONSTANT_Double; break;
                 case 'S': e.refKind = CONSTANT_String; break;
-                case 'Q': e.refKind = CONSTANT_Literal; break;
+                case 'Q': e.refKind = CONSTANT_FieldSpecific; break;
+
+                // new in 1.7:
+                case 'M': e.refKind = CONSTANT_MethodHandle; break;
+                case 'T': e.refKind = CONSTANT_MethodType; break;
+                case 'L': e.refKind = CONSTANT_LoadableValue; break;
                 default: { i = -i; continue; } // fail
                 }
                 break;
@@ -1028,6 +1092,11 @@ class Attribute implements Comparable {
 
                 case 'U': e.refKind = CONSTANT_Utf8; break; //utf8_ref
                 case 'Q': e.refKind = CONSTANT_All; break; //untyped_ref
+
+                // new in 1.7:
+                case 'Y': e.refKind = CONSTANT_InvokeDynamic; break;
+                case 'B': e.refKind = CONSTANT_BootstrapMethod; break;
+                case 'N': e.refKind = CONSTANT_AnyMember; break;
 
                 default: { i = -i; continue; } // fail
                 }
@@ -1273,22 +1342,29 @@ class Attribute implements Comparable {
                 if (localRef == 0) {
                     globalRef = null;  // N.B. global null reference is -1
                 } else {
-                    globalRef = holder.getCPMap()[localRef];
-                    if (e.refKind == CONSTANT_Signature
+                    Entry[] cpMap = holder.getCPMap();
+                    globalRef = (localRef >= 0 && localRef < cpMap.length
+                                    ? cpMap[localRef]
+                                    : null);
+                    byte tag = e.refKind;
+                    if (globalRef != null && tag == CONSTANT_Signature
                         && globalRef.getTag() == CONSTANT_Utf8) {
                         // Cf. ClassReader.readSignatureRef.
                         String typeName = globalRef.stringValue();
                         globalRef = ConstantPool.getSignatureEntry(typeName);
-                    } else if (e.refKind == CONSTANT_Literal) {
-                        assert(globalRef.getTag() >= CONSTANT_Integer);
-                        assert(globalRef.getTag() <= CONSTANT_String);
-                    } else if (e.refKind != CONSTANT_All) {
-                        assert(e.refKind == globalRef.getTag());
+                    }
+                    String got = (globalRef == null
+                        ? "invalid CP index"
+                        : "type=" + ConstantPool.tagName(globalRef.tag));
+                    if (globalRef == null || !globalRef.tagMatches(tag)) {
+                        throw new IllegalArgumentException(
+                                "Bad constant, expected type=" +
+                                ConstantPool.tagName(tag) + " got " + got);
                     }
                 }
                 out.putRef(bandIndex, globalRef);
                 break;
-            default: assert(false); continue;
+            default: assert(false);
             }
         }
         return pos;
@@ -1395,8 +1471,7 @@ class Attribute implements Comparable {
                 int localRef;
                 if (globalRef != null) {
                     // It's a one-element array, really an lvalue.
-                    fixups[0] = Fixups.add(fixups[0], null, out.size(),
-                                           Fixups.U2_FORMAT, globalRef);
+                    fixups[0] = Fixups.addRefWithLoc(fixups[0], out.size(), globalRef);
                     localRef = 0; // placeholder for fixups
                 } else {
                     localRef = 0; // fixed null value
@@ -1462,27 +1537,29 @@ class Attribute implements Comparable {
                 "NH[PHPOHIIH]",         // CharacterRangeTable
                 "NH[PHHII]",            // CoverageTable
                 "NH[RCHRCNHRUNHFH]",    // InnerClasses
+                "NH[RMHNH[KLH]]",       // BootstrapMethods
                 "HHNI[B]NH[PHPOHPOHRCNH]NH[RUHNI[B]]", // Code
                 "=AnnotationDefault",
                 // Like metadata, but with a compact tag set:
                 "[NH[(1)]]"
-                +"[NH[(2)]]"
-                +"[RSHNH[RUH(3)]]"
-                +"[TB(0,1,3)[KIH](2)[KDH](5)[KFH](4)[KJH](7)[RSH](8)[RSHRUH](9)[RUH](10)[(2)](6)[NH[(3)]]()[]]",
+                +"[NH[(1)]]"
+                +"[RSHNH[RUH(1)]]"
+                +"[TB(0,1,3)[KIH](2)[KDH](5)[KFH](4)[KJH](7)[RSH](8)[RSHRUH](9)[RUH](10)[(-1)](6)[NH[(0)]]()[]]",
                 ""
             };
             ap = 0;
         }
+        Utils.currentInstance.set(new PackerImpl());
         final int[][] counts = new int[2][3];  // int bci ref
         final Entry[] cpMap = new Entry[maxVal+1];
         for (int i = 0; i < cpMap.length; i++) {
             if (i == 0)  continue;  // 0 => null
             cpMap[i] = ConstantPool.getLiteralEntry(new Integer(i));
         }
-        Class cls = new Package().new Class("");
+        Package.Class cls = new Package().new Class("");
         cls.cpMap = cpMap;
         class TestValueStream extends ValueStream {
-            Random rand = new Random(0);
+            java.util.Random rand = new java.util.Random(0);
             ArrayList history = new ArrayList();
             int ckidx = 0;
             int maxVal;
@@ -1570,8 +1647,7 @@ class Attribute implements Comparable {
                 String layout = av[i];
                 if (layout.startsWith("=")) {
                     String name = layout.substring(1);
-                    for (Iterator j = standardDefs.values().iterator(); j.hasNext(); ) {
-                        Attribute a = (Attribute) j.next();
+                    for (Attribute a : standardDefs.values()) {
                         if (a.name().equals(name)) {
                             layout = a.layout().layout();
                             break;
@@ -1604,7 +1680,7 @@ class Attribute implements Comparable {
                 if (verbose) {
                     System.out.print("  parse: {");
                 }
-                self.parse(0, cls, bytes, 0, bytes.length, tts);
+                self.parse(cls, bytes, 0, bytes.length, tts);
                 if (verbose) {
                     System.out.println("}");
                 }

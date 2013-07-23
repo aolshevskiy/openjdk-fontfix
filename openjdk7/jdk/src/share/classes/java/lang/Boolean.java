@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -60,7 +60,8 @@ public final class Boolean implements java.io.Serializable,
      *
      * @since   JDK1.1
      */
-    public static final Class<Boolean> TYPE = Class.getPrimitiveClass("boolean");
+    @SuppressWarnings("unchecked")
+    public static final Class<Boolean> TYPE = (Class<Boolean>) Class.getPrimitiveClass("boolean");
 
     /**
      * The value of the Boolean.
@@ -101,7 +102,7 @@ public final class Boolean implements java.io.Serializable,
      * @param   s   the string to be converted to a {@code Boolean}.
      */
     public Boolean(String s) {
-        this(toBoolean(s));
+        this(parseBoolean(s));
     }
 
     /**
@@ -118,7 +119,7 @@ public final class Boolean implements java.io.Serializable,
      * @since 1.5
      */
     public static boolean parseBoolean(String s) {
-        return toBoolean(s);
+        return ((s != null) && s.equalsIgnoreCase("true"));
     }
 
     /**
@@ -159,7 +160,7 @@ public final class Boolean implements java.io.Serializable,
      * @return  the {@code Boolean} value represented by the string.
      */
     public static Boolean valueOf(String s) {
-        return toBoolean(s) ? TRUE : FALSE;
+        return parseBoolean(s) ? TRUE : FALSE;
     }
 
     /**
@@ -195,11 +196,24 @@ public final class Boolean implements java.io.Serializable,
      * {@code true}; returns the integer {@code 1237} if this
      * object represents {@code false}.
      */
+    @Override
     public int hashCode() {
-        return value ? 1231 : 1237;
+        return Boolean.hashCode(value);
     }
 
     /**
+     * Returns a hash code for a {@code boolean} value; compatible with
+     * {@code Boolean.hashCode()}.
+     *
+     * @param value the value to hash
+     * @return a hash code value for a {@code boolean} value.
+     * @since 1.8
+     */
+    public static int hashCode(boolean value) {
+        return value ? 1231 : 1237;
+    }
+
+   /**
      * Returns {@code true} if and only if the argument is not
      * {@code null} and is a {@code Boolean} object that
      * represents the same {@code boolean} value as this object.
@@ -229,15 +243,16 @@ public final class Boolean implements java.io.Serializable,
      *
      * @param   name   the system property name.
      * @return  the {@code boolean} value of the system property.
+     * @throws  SecurityException for the same reasons as
+     *          {@link System#getProperty(String) System.getProperty}
      * @see     java.lang.System#getProperty(java.lang.String)
      * @see     java.lang.System#getProperty(java.lang.String, java.lang.String)
      */
     public static boolean getBoolean(String name) {
         boolean result = false;
         try {
-            result = toBoolean(System.getProperty(name));
-        } catch (IllegalArgumentException e) {
-        } catch (NullPointerException e) {
+            result = parseBoolean(System.getProperty(name));
+        } catch (IllegalArgumentException | NullPointerException e) {
         }
         return result;
     }
@@ -276,7 +291,45 @@ public final class Boolean implements java.io.Serializable,
         return (x == y) ? 0 : (x ? 1 : -1);
     }
 
-    private static boolean toBoolean(String name) {
-        return ((name != null) && name.equalsIgnoreCase("true"));
+    /**
+     * Returns the result of applying the logical AND operator to the
+     * specified {@code boolean} operands.
+     *
+     * @param a the first operand
+     * @param b the second operand
+     * @return the logical AND of {@code a} and {@code b}
+     * @see java.util.function.BinaryOperator
+     * @since 1.8
+     */
+    public static boolean logicalAnd(boolean a, boolean b) {
+        return a && b;
+    }
+
+    /**
+     * Returns the result of applying the logical OR operator to the
+     * specified {@code boolean} operands.
+     *
+     * @param a the first operand
+     * @param b the second operand
+     * @return the logical OR of {@code a} and {@code b}
+     * @see java.util.function.BinaryOperator
+     * @since 1.8
+     */
+    public static boolean logicalOr(boolean a, boolean b) {
+        return a || b;
+    }
+
+    /**
+     * Returns the result of applying the logical XOR operator to the
+     * specified {@code boolean} operands.
+     *
+     * @param a the first operand
+     * @param b the second operand
+     * @return  the logical XOR of {@code a} and {@code b}
+     * @see java.util.function.BinaryOperator
+     * @since 1.8
+     */
+    public static boolean logicalXor(boolean a, boolean b) {
+        return a ^ b;
     }
 }

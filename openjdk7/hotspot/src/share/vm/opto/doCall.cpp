@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,6 @@
  */
 
 #include "precompiled.hpp"
-#include "ci/ciCPCache.hpp"
 #include "ci/ciCallSite.hpp"
 #include "ci/ciMethodHandle.hpp"
 #include "classfile/vmSymbols.hpp"
@@ -177,9 +176,12 @@ CallGenerator* Compile::call_generator(ciMethod* callee, int vtable_index, bool 
           // Delay the inlining of this method to give us the
           // opportunity to perform some high level optimizations
           // first.
-          if (should_delay_inlining(callee, jvms)) {
+          if (should_delay_string_inlining(callee, jvms)) {
             assert(!delayed_forbidden, "strange");
             return CallGenerator::for_string_late_inline(callee, cg);
+          } else if (should_delay_boxing_inlining(callee, jvms)) {
+            assert(!delayed_forbidden, "strange");
+            return CallGenerator::for_boxing_late_inline(callee, cg);
           } else if ((should_delay || AlwaysIncrementalInline) && !delayed_forbidden) {
             return CallGenerator::for_late_inline(callee, cg);
           }
@@ -277,7 +279,7 @@ CallGenerator* Compile::call_generator(ciMethod* callee, int vtable_index, bool 
 
 // Return true for methods that shouldn't be inlined early so that
 // they are easier to analyze and optimize as intrinsics.
-bool Compile::should_delay_inlining(ciMethod* call_method, JVMState* jvms) {
+bool Compile::should_delay_string_inlining(ciMethod* call_method, JVMState* jvms) {
   if (has_stringbuilder()) {
 
     if ((call_method->holder() == C->env()->StringBuilder_klass() ||
@@ -328,6 +330,13 @@ bool Compile::should_delay_inlining(ciMethod* call_method, JVMState* jvms) {
   return false;
 }
 
+bool Compile::should_delay_boxing_inlining(ciMethod* call_method, JVMState* jvms) {
+  if (eliminate_boxing() && call_method->is_boxing_method()) {
+    set_has_boxed_value(true);
+    return true;
+  }
+  return false;
+}
 
 // uncommon-trap call-sites where callee is unloaded, uninitialized or will not link
 bool Parse::can_not_compile_call_site(ciMethod *dest_method, ciInstanceKlass* klass) {
@@ -417,7 +426,7 @@ void Parse::do_call() {
 
   // Try to get the most accurate receiver type
   ciMethod* callee             = orig_callee;
-  int       vtable_index       = methodOopDesc::invalid_vtable_index;
+  int       vtable_index       = Method::invalid_vtable_index;
   bool      call_does_dispatch = false;
 
   if (is_virtual_or_interface) {
@@ -849,9 +858,9 @@ void Parse::count_compiled_calls(bool at_method_entry, bool is_inline) {
     if( at_method_entry ) {
       // bump invocation counter if top method (for statistics)
       if (CountCompiledCalls && depth() == 1) {
-        const TypeOopPtr* addr_type = TypeOopPtr::make_from_constant(method());
+        const TypePtr* addr_type = TypeMetadataPtr::make(method());
         Node* adr1 = makecon(addr_type);
-        Node* adr2 = basic_plus_adr(adr1, adr1, in_bytes(methodOopDesc::compiled_invocation_counter_offset()));
+        Node* adr2 = basic_plus_adr(adr1, adr1, in_bytes(Method::compiled_invocation_counter_offset()));
         increment_counter(adr2);
       }
     } else if (is_inline) {
@@ -884,7 +893,7 @@ ciMethod* Compile::optimize_virtual_call(ciMethod* caller, int bci, ciInstanceKl
                                          bool& call_does_dispatch, int& vtable_index) {
   // Set default values for out-parameters.
   call_does_dispatch = true;
-  vtable_index       = methodOopDesc::invalid_vtable_index;
+  vtable_index       = Method::invalid_vtable_index;
 
   // Choose call strategy.
   ciMethod* optimized_virtual_method = optimize_inlining(caller, bci, klass, callee, receiver_type);

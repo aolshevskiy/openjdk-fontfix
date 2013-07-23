@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -130,6 +130,9 @@ final public class XConstants {
     public static final long ColormapChangeMask = (1L<<23) ;
     public static final long OwnerGrabButtonMask = (1L<<24) ;
 
+    public static final int MAX_BUTTONS = 5;
+    public static final int ALL_BUTTONS_MASK = (int) (Button1MotionMask | Button2MotionMask | Button3MotionMask | Button4MotionMask | Button5MotionMask);
+
     /* Event names.  Used in "type" field in XEvent structures.  Not to be
     confused with event masks above.  They start from 2 because 0 and 1
     are reserved in the protocol for errors and replies. */
@@ -193,34 +196,6 @@ final public class XConstants {
     public static final int Mod3MapIndex = 5 ;
     public static final int Mod4MapIndex = 6 ;
     public static final int Mod5MapIndex = 7 ;
-
-
-    /* button masks.  Used in same manner as Key masks above. Not to be confused
-       with button names below. */
-    public static final int [] buttonsMask = new int []{ 1<<8,
-                                                         1<<9,
-                                                         1<<10,
-                                                         1<<11,
-                                                         1<<12,
-                                                         1<<13,
-                                                         1<<14,
-                                                         1<<15,
-                                                         1<<16,
-                                                         1<<17,
-                                                         1<<18,
-                                                         1<<19,
-                                                         1<<20,
-                                                         1<<21,
-                                                         1<<22,
-                                                         1<<23,
-                                                         1<<24,
-                                                         1<<25,
-                                                         1<<26,
-                                                         1<<27,
-                                                         1<<28,
-                                                         1<<29,
-                                                         1<<30,
-                                                         1<<31 };
 
     public static final int AnyModifier = (1<<15) ; /* used in GrabButton, GrabKey */
 
@@ -699,4 +674,9 @@ final public class XConstants {
     public static final long XkbModifierMapMask = (1L<<2);
     public static final long XkbVirtualModsMask = (1L<<6); //server map
 
+    /*****************************************************************
+     * X SHARED MEMORY EXTENSION FUNCTIONS
+     *****************************************************************/
+
+    public static final int X_ShmAttach = 1;
 }

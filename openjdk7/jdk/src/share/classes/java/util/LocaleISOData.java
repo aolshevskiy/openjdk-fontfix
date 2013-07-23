@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -404,7 +404,7 @@ class LocaleISOData {
         + "PG" + "PNG"  // Papua New Guinea
         + "PH" + "PHL"  // Philippines, Republic of the
         + "PK" + "PAK"  // Pakistan, Islamic Republic of
-        + "PL" + "POL"  // Poland, Polish People's Republic
+        + "PL" + "POL"  // Poland, Republic of Poland
         + "PM" + "SPM"  // St. Pierre and Miquelon
         + "PN" + "PCN"  // Pitcairn Island
         + "PR" + "PRI"  // Puerto Rico
@@ -433,6 +433,7 @@ class LocaleISOData {
         + "SN" + "SEN"  // Senegal, Republic of
         + "SO" + "SOM"  // Somalia, Somali Republic
         + "SR" + "SUR"  // Suriname, Republic of
+        + "SS" + "SSD"  // South Sudan
         + "ST" + "STP"  // Sao Tome and Principe, Democratic Republic of
         + "SV" + "SLV"  // El Salvador, Republic of
         + "SX" + "SXM"  // Sint Maarten (Dutch part)

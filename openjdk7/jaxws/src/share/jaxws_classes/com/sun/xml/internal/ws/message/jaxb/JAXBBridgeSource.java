@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,8 @@
 
 package com.sun.xml.internal.ws.message.jaxb;
 
-import com.sun.xml.internal.bind.api.Bridge;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+
 import org.xml.sax.*;
 import org.xml.sax.ext.LexicalHandler;
 import org.xml.sax.helpers.XMLFilterImpl;
@@ -40,7 +41,7 @@ import javax.xml.transform.sax.SAXSource;
  */
 final class JAXBBridgeSource extends SAXSource {
 
-    public JAXBBridgeSource( Bridge bridge, Object contentObject ) {
+    public JAXBBridgeSource( XMLBridge bridge, Object contentObject ) {
         this.bridge = bridge;
         this.contentObject = contentObject;
 
@@ -49,7 +50,7 @@ final class JAXBBridgeSource extends SAXSource {
         super.setInputSource(new InputSource());
     }
 
-    private final Bridge bridge;
+    private final XMLBridge bridge;
     private final Object contentObject;
 
     // this object will pretend as an XMLReader.
@@ -104,7 +105,7 @@ final class JAXBBridgeSource extends SAXSource {
             try {
                 startDocument();
                 // this method only writes a fragment, so need start/end document
-                bridge.marshal( contentObject, this );
+                bridge.marshal( contentObject, this, null );
                 endDocument();
             } catch( JAXBException e ) {
                 // wrap it to a SAXException

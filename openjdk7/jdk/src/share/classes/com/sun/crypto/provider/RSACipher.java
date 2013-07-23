@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -178,16 +178,14 @@ public final class RSACipher extends CipherSpi {
         if (spec != null) {
             try {
                 AlgorithmParameters params =
-                    AlgorithmParameters.getInstance("OAEP", "SunJCE");
+                    AlgorithmParameters.getInstance("OAEP",
+                        SunJCE.getInstance());
                 params.init(spec);
                 return params;
             } catch (NoSuchAlgorithmException nsae) {
                 // should never happen
                 throw new RuntimeException("Cannot find OAEP " +
                     " AlgorithmParameters implementation in SunJCE provider");
-            } catch (NoSuchProviderException nspe) {
-                // should never happen
-                throw new RuntimeException("Cannot find SunJCE provider");
             } catch (InvalidParameterSpecException ipse) {
                 // should never happen
                 throw new RuntimeException("OAEPParameterSpec not supported");
@@ -227,8 +225,8 @@ public final class RSACipher extends CipherSpi {
             init(opmode, key, random, null);
         } else {
             try {
-                OAEPParameterSpec spec = (OAEPParameterSpec)
-                    params.getParameterSpec(OAEPParameterSpec.class);
+                OAEPParameterSpec spec =
+                        params.getParameterSpec(OAEPParameterSpec.class);
                 init(opmode, key, random, spec);
             } catch (InvalidParameterSpecException ipse) {
                 InvalidAlgorithmParameterException iape =

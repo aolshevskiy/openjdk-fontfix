@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 #include "interpreter/interpreter.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/markOop.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/methodHandles.hpp"
 #include "runtime/frame.inline.hpp"
@@ -97,6 +97,7 @@ bool frame::safe_for_sender(JavaThread *thread) {
     // check for a valid frame_size, otherwise we are unlikely to get a valid sender_pc
 
     if (!Interpreter::contains(_pc) && _cb->frame_size() <= 0) {
+      //assert(0, "Invalid frame_size");
       return false;
     }
 
@@ -116,11 +117,15 @@ bool frame::safe_for_sender(JavaThread *thread) {
       // an entry frame must have a valid fp.
 
       if (!fp_safe) return false;
+
       // Validate the JavaCallWrapper an entry frame must have
 
       address jcw = (address)entry_frame_call_wrapper();
+
       bool jcw_safe = (jcw < thread->stack_base()) && ( jcw > fp);
+
       return jcw_safe;
+
     }
 
     intptr_t* sender_sp = NULL;
@@ -210,12 +215,12 @@ bool frame::safe_for_sender(JavaThread *thread) {
     }
 
     if (sender_blob->is_nmethod()) {
-      nmethod* nm = sender_blob->as_nmethod_or_null();
-      if (nm != NULL) {
-        if (nm->is_deopt_mh_entry(sender_pc) || nm->is_deopt_entry(sender_pc)) {
-          return false;
+        nmethod* nm = sender_blob->as_nmethod_or_null();
+        if (nm != NULL) {
+            if (nm->is_deopt_mh_entry(sender_pc) || nm->is_deopt_entry(sender_pc)) {
+                return false;
+            }
         }
-      }
     }
 
     // If the frame size is 0 something (or less) is bad because every nmethod has a non-zero frame size
@@ -381,7 +386,7 @@ frame frame::sender_for_entry_frame(RegisterMap* map) const {
 // Verifies the calculated original PC of a deoptimization PC for the
 // given unextended SP.  The unextended SP might also be the saved SP
 // for MethodHandle call sites.
-#if ASSERT
+#ifdef ASSERT
 void frame::verify_deopt_original_pc(nmethod* nm, intptr_t* unextended_sp, bool is_method_handle_return) {
   frame fr;
 
@@ -525,7 +530,7 @@ frame frame::sender(RegisterMap* map) const {
 
 bool frame::interpreter_frame_equals_unpacked_fp(intptr_t* fp) {
   assert(is_interpreted_frame(), "must be interpreter frame");
-  methodOop method = interpreter_frame_method();
+  Method* method = interpreter_frame_method();
   // When unpacking an optimized frame the frame pointer is
   // adjusted with:
   int diff = (method->max_locals() - method->size_of_parameters()) *
@@ -562,10 +567,10 @@ bool frame::is_interpreted_frame_valid(JavaThread* thread) const {
 
   // first the method
 
-  methodOop m = *interpreter_frame_method_addr();
+  Method* m = *interpreter_frame_method_addr();
 
   // validate the method we'd find in this potential sender
-  if (!Universe::heap()->is_valid_method(m)) return false;
+  if (!m->is_valid_method()) return false;
 
   // stack frames shouldn't be much larger than max_stack elements
 
@@ -580,13 +585,9 @@ bool frame::is_interpreted_frame_valid(JavaThread* thread) const {
     return false;
   }
 
-  // validate constantPoolCacheOop
-
-  constantPoolCacheOop cp = *interpreter_frame_cache_addr();
-
-  if (cp == NULL ||
-      !Space::is_aligned(cp) ||
-      !Universe::heap()->is_permanent((void*)cp)) return false;
+  // validate ConstantPoolCache*
+  ConstantPoolCache* cp = *interpreter_frame_cache_addr();
+  if (cp == NULL || !cp->is_metaspace_object()) return false;
 
   // validate locals
 
@@ -607,7 +608,7 @@ BasicType frame::interpreter_frame_result(oop* oop_result, jvalue* value_result)
   interpreterState istate = get_interpreterState();
 #endif // CC_INTERP
   assert(is_interpreted_frame(), "interpreted frame expected");
-  methodOop method = interpreter_frame_method();
+  Method* method = interpreter_frame_method();
   BasicType type = method->result_type();
 
   intptr_t* tos_addr;

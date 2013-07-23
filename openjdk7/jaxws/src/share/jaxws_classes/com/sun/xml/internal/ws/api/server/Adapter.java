@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 package com.sun.xml.internal.ws.api.server;
 
 import com.sun.xml.internal.ws.api.config.management.Reconfigurable;
+import com.sun.xml.internal.ws.api.Component;
 import com.sun.xml.internal.ws.api.pipe.Codec;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.server.WSEndpoint.PipeHead;
@@ -71,7 +72,7 @@ import com.sun.xml.internal.ws.util.Pool;
  * @author Kohsuke Kawaguchi
  */
 public abstract class Adapter<TK extends Adapter.Toolkit>
-        implements Reconfigurable, EndpointComponent {
+        implements Reconfigurable, Component {
 
     protected final WSEndpoint<?> endpoint;
 
@@ -115,7 +116,18 @@ public abstract class Adapter<TK extends Adapter.Toolkit>
         assert endpoint!=null;
         this.endpoint = endpoint;
         // Enables other components to reconfigure this adapter
-        endpoint.getComponentRegistry().add(this);
+        endpoint.getComponents().add(getEndpointComponent());
+    }
+
+    protected Component getEndpointComponent() {
+        return new Component() {
+                        public <S> S getSPI(Class<S> spiType) {
+                        if (spiType.isAssignableFrom(Reconfigurable.class)) {
+                            return spiType.cast(Adapter.this);
+                        }
+                                return null;
+                        }
+        };
     }
 
     /**
@@ -129,13 +141,14 @@ public abstract class Adapter<TK extends Adapter.Toolkit>
         };
     }
 
-    public <T> T getSPI(Class<T> spiType) {
+    public <S> S getSPI(Class<S> spiType) {
         if (spiType.isAssignableFrom(Reconfigurable.class)) {
             return spiType.cast(this);
         }
-        else {
-            return null;
+        if (endpoint != null) {
+                return endpoint.getSPI(spiType);
         }
+        return null;
     }
 
     /**
@@ -170,5 +183,4 @@ public abstract class Adapter<TK extends Adapter.Toolkit>
      * to {@link Toolkit}, simply implement this as {@code new Toolkit()}.
      */
     protected abstract TK createToolkit();
-
 }

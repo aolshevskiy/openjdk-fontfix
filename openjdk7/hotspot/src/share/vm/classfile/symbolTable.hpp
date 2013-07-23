@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -94,17 +94,17 @@ private:
   // Adding elements
   Symbol* basic_add(int index, u1* name, int len, unsigned int hashValue,
                     bool c_heap, TRAPS);
-
-  bool basic_add(Handle class_loader, constantPoolHandle cp, int names_count,
+  bool basic_add(ClassLoaderData* loader_data,
+                 constantPoolHandle cp, int names_count,
                  const char** names, int* lengths, int* cp_indices,
                  unsigned int* hashValues, TRAPS);
 
-  static void new_symbols(Handle class_loader, constantPoolHandle cp,
-                          int names_count,
+  static void new_symbols(ClassLoaderData* loader_data,
+                          constantPoolHandle cp, int names_count,
                           const char** name, int* lengths,
                           int* cp_indices, unsigned int* hashValues,
                           TRAPS) {
-    add(class_loader, cp, names_count, name, lengths, cp_indices, hashValues, THREAD);
+    add(loader_data, cp, names_count, name, lengths, cp_indices, hashValues, THREAD);
   }
 
   // Table size
@@ -170,7 +170,8 @@ public:
   static Symbol* lookup_unicode(const jchar* name, int len, TRAPS);
   static Symbol* lookup_only_unicode(const jchar* name, int len, unsigned int& hash);
 
-  static void add(Handle class_loader, constantPoolHandle cp, int names_count,
+  static void add(ClassLoaderData* loader_data,
+                  constantPoolHandle cp, int names_count,
                   const char** names, int* lengths, int* cp_indices,
                   unsigned int* hashValues, TRAPS);
 
@@ -245,11 +246,18 @@ private:
   // Set if one bucket is out of balance due to hash algorithm deficiency
   static bool _needs_rehashing;
 
+  // Claimed high water mark for parallel chunked scanning
+  static volatile int _parallel_claimed_idx;
+
   static oop intern(Handle string_or_null, jchar* chars, int length, TRAPS);
   oop basic_add(int index, Handle string_or_null, jchar* name, int len,
                 unsigned int hashValue, TRAPS);
 
   oop lookup(int index, jchar* chars, int length, unsigned int hashValue);
+
+  // Apply the give oop closure to the entries to the buckets
+  // in the range [start_idx, end_idx).
+  static void buckets_do(OopClosure* f, int start_idx, int end_idx);
 
   StringTable() : Hashtable<oop, mtSymbol>((int)StringTableSize,
                               sizeof (HashtableEntry<oop, mtSymbol>)) {}
@@ -261,25 +269,26 @@ public:
   // The string table
   static StringTable* the_table() { return _the_table; }
 
+  // Size of one bucket in the string table.  Used when checking for rollover.
+  static uint bucket_size() { return sizeof(HashtableBucket<mtSymbol>); }
+
   static void create_table() {
     assert(_the_table == NULL, "One string table allowed.");
     _the_table = new StringTable();
   }
 
-  static void create_table(HashtableBucket<mtSymbol>* t, int length,
-                           int number_of_entries) {
-    assert(_the_table == NULL, "One string table allowed.");
-    assert((size_t)length == StringTableSize * sizeof(HashtableBucket<mtSymbol>),
-           "bad shared string size.");
-    _the_table = new StringTable(t, number_of_entries);
-  }
-
   // GC support
   //   Delete pointers to otherwise-unreachable objects.
-  static void unlink(BoolObjectClosure* cl);
+  static void unlink_or_oops_do(BoolObjectClosure* cl, OopClosure* f);
+  static void unlink(BoolObjectClosure* cl) {
+    unlink_or_oops_do(cl, NULL);
+  }
 
-  // Invoke "f->do_oop" on the locations of all oops in the table.
+  // Serially invoke "f->do_oop" on the locations of all oops in the table.
   static void oops_do(OopClosure* f);
+
+  // Possibly parallel version of the above
+  static void possibly_parallel_oops_do(OopClosure* f);
 
   // Hashing algorithm, used as the hash value used by the
   //     StringTable for bucket selection and comparison (stored in the
@@ -291,6 +300,7 @@ public:
 
   // Probing
   static oop lookup(Symbol* symbol);
+  static oop lookup(jchar* chars, int length);
 
   // Interning
   static oop intern(Symbol* symbol, TRAPS);
@@ -315,5 +325,8 @@ public:
   // Rehash the symbol table if it gets out of balance
   static void rehash_table();
   static bool needs_rehashing() { return _needs_rehashing; }
+
+  // Parallel chunked scanning
+  static void clear_parallel_claimed_index() { _parallel_claimed_idx = 0; }
 };
 #endif // SHARE_VM_CLASSFILE_SYMBOLTABLE_HPP

@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2002, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,7 +43,7 @@ GCTaskThread::GCTaskThread(GCTaskManager* manager,
   _time_stamp_index(0)
 {
   if (!os::create_thread(this, os::pgc_thread))
-    vm_exit_out_of_memory(0, "Cannot create GC thread. Out of system resources.");
+    vm_exit_out_of_memory(0, OOM_MALLOC_ERROR, "Cannot create GC thread. Out of system resources.");
 
   if (PrintGCTaskTimeStamps) {
     _time_stamps = NEW_C_HEAP_ARRAY(GCTaskTimeStamp, GCTaskTimeStampEntries, mtGC);

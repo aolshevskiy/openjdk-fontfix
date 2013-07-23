@@ -27,11 +27,9 @@ package sun.security.ssl;
 
 import java.util.*;
 import java.io.*;
-import java.math.*;
 import java.security.*;
 import java.security.cert.*;
 import javax.net.ssl.*;
-import java.security.spec.AlgorithmParameterSpec;
 
 import sun.security.validator.Validator;
 
@@ -45,6 +43,7 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
         // empty
     }
 
+    @Override
     protected void engineInit(KeyStore ks) throws KeyStoreException {
         if (ks == null) {
             try {
@@ -85,6 +84,7 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
     abstract X509TrustManager getInstance(ManagerFactoryParameters spec)
             throws InvalidAlgorithmParameterException;
 
+    @Override
     protected void engineInit(ManagerFactoryParameters spec) throws
             InvalidAlgorithmParameterException {
         trustManager = getInstance(spec);
@@ -94,6 +94,7 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
     /**
      * Returns one trust manager for each type of trust material.
      */
+    @Override
     protected TrustManager[] engineGetTrustManagers() {
         if (!isInitialized) {
             throw new IllegalStateException(
@@ -109,6 +110,7 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
             throws Exception {
         return AccessController.doPrivileged(
                 new PrivilegedExceptionAction<FileInputStream>() {
+                    @Override
                     public FileInputStream run() throws Exception {
                         try {
                             if (file.exists()) {
@@ -139,6 +141,7 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
         KeyStore ks = null;
 
         AccessController.doPrivileged(new PrivilegedExceptionAction<Void>() {
+            @Override
             public Void run() throws Exception {
                 props.put("trustStore", System.getProperty(
                                 "javax.net.ssl.trustStore"));
@@ -164,81 +167,86 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
          * If none exists, we use an empty keystore.
          */
 
-        storeFileName = props.get("trustStore");
-        if (!"NONE".equals(storeFileName)) {
-            if (storeFileName != null) {
-                storeFile = new File(storeFileName);
-                fis = getFileInputStream(storeFile);
-            } else {
-                String javaHome = props.get("javaHome");
-                storeFile = new File(javaHome + sep + "lib" + sep
-                                                + "security" + sep +
-                                                "jssecacerts");
-                if ((fis = getFileInputStream(storeFile)) == null) {
-                    storeFile = new File(javaHome + sep + "lib" + sep
-                                                + "security" + sep +
-                                                "cacerts");
+        try {
+            storeFileName = props.get("trustStore");
+            if (!"NONE".equals(storeFileName)) {
+                if (storeFileName != null) {
+                    storeFile = new File(storeFileName);
                     fis = getFileInputStream(storeFile);
+                } else {
+                    String javaHome = props.get("javaHome");
+                    storeFile = new File(javaHome + sep + "lib" + sep
+                                                    + "security" + sep +
+                                                    "jssecacerts");
+                    if ((fis = getFileInputStream(storeFile)) == null) {
+                        storeFile = new File(javaHome + sep + "lib" + sep
+                                                    + "security" + sep +
+                                                    "cacerts");
+                        fis = getFileInputStream(storeFile);
+                    }
+                }
+
+                if (fis != null) {
+                    storeFileName = storeFile.getPath();
+                } else {
+                    storeFileName = "No File Available, using empty keystore.";
                 }
             }
 
-            if (fis != null) {
-                storeFileName = storeFile.getPath();
-            } else {
-                storeFileName = "No File Available, using empty keystore.";
-            }
-        }
-
-        defaultTrustStoreType = props.get("trustStoreType");
-        defaultTrustStoreProvider = props.get("trustStoreProvider");
-        if (debug != null && Debug.isOn(dbgname)) {
-            System.out.println("trustStore is: " + storeFileName);
-            System.out.println("trustStore type is : " +
-                                defaultTrustStoreType);
-            System.out.println("trustStore provider is : " +
-                                defaultTrustStoreProvider);
-        }
-
-        /*
-         * Try to initialize trust store.
-         */
-        if (defaultTrustStoreType.length() != 0) {
+            defaultTrustStoreType = props.get("trustStoreType");
+            defaultTrustStoreProvider = props.get("trustStoreProvider");
             if (debug != null && Debug.isOn(dbgname)) {
-                System.out.println("init truststore");
+                System.out.println("trustStore is: " + storeFileName);
+                System.out.println("trustStore type is : " +
+                                    defaultTrustStoreType);
+                System.out.println("trustStore provider is : " +
+                                    defaultTrustStoreProvider);
             }
-            if (defaultTrustStoreProvider.length() == 0) {
-                ks = KeyStore.getInstance(defaultTrustStoreType);
-            } else {
-                ks = KeyStore.getInstance(defaultTrustStoreType,
-                                        defaultTrustStoreProvider);
-            }
-            char[] passwd = null;
-            String defaultTrustStorePassword = props.get("trustStorePasswd");
-            if (defaultTrustStorePassword.length() != 0)
-                passwd = defaultTrustStorePassword.toCharArray();
 
-            // if trustStore is NONE, fis will be null
-            ks.load(fis, passwd);
+            /*
+             * Try to initialize trust store.
+             */
+            if (defaultTrustStoreType.length() != 0) {
+                if (debug != null && Debug.isOn(dbgname)) {
+                    System.out.println("init truststore");
+                }
+                if (defaultTrustStoreProvider.length() == 0) {
+                    ks = KeyStore.getInstance(defaultTrustStoreType);
+                } else {
+                    ks = KeyStore.getInstance(defaultTrustStoreType,
+                                            defaultTrustStoreProvider);
+                }
+                char[] passwd = null;
+                String defaultTrustStorePassword =
+                        props.get("trustStorePasswd");
+                if (defaultTrustStorePassword.length() != 0)
+                    passwd = defaultTrustStorePassword.toCharArray();
 
-            // Zero out the temporary password storage
-            if (passwd != null) {
-                for (int i = 0; i < passwd.length; i++) {
-                    passwd[i] = (char)0;
+                // if trustStore is NONE, fis will be null
+                ks.load(fis, passwd);
+
+                // Zero out the temporary password storage
+                if (passwd != null) {
+                    for (int i = 0; i < passwd.length; i++) {
+                        passwd[i] = (char)0;
+                    }
                 }
             }
-        }
-
-        if (fis != null) {
-            fis.close();
+        } finally {
+            if (fis != null) {
+                fis.close();
+            }
         }
 
         return ks;
     }
 
     public static final class SimpleFactory extends TrustManagerFactoryImpl {
+        @Override
         X509TrustManager getInstance(KeyStore ks) throws KeyStoreException {
             return new X509TrustManagerImpl(Validator.TYPE_SIMPLE, ks);
         }
+        @Override
         X509TrustManager getInstance(ManagerFactoryParameters spec)
                 throws InvalidAlgorithmParameterException {
             throw new InvalidAlgorithmParameterException
@@ -248,9 +256,11 @@ abstract class TrustManagerFactoryImpl extends TrustManagerFactorySpi {
    }
 
     public static final class PKIXFactory extends TrustManagerFactoryImpl {
+        @Override
         X509TrustManager getInstance(KeyStore ks) throws KeyStoreException {
             return new X509TrustManagerImpl(Validator.TYPE_PKIX, ks);
         }
+        @Override
         X509TrustManager getInstance(ManagerFactoryParameters spec)
                 throws InvalidAlgorithmParameterException {
             if (spec instanceof CertPathTrustManagerParameters == false) {

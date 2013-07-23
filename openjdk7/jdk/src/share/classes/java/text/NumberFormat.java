@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,8 +54,8 @@ import java.util.ResourceBundle;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.spi.LocaleServiceProvider;
-import sun.util.LocaleServiceProviderPool;
-import sun.util.resources.LocaleData;
+import sun.util.locale.provider.LocaleProviderAdapter;
+import sun.util.locale.provider.LocaleServiceProviderPool;
 
 /**
  * <code>NumberFormat</code> is the abstract base class for all number
@@ -232,6 +232,7 @@ public abstract class NumberFormat extends Format  {
      *                   mode being set to RoundingMode.UNNECESSARY
      * @see              java.text.FieldPosition
      */
+    @Override
     public StringBuffer format(Object number,
                                StringBuffer toAppendTo,
                                FieldPosition pos) {
@@ -272,6 +273,7 @@ public abstract class NumberFormat extends Format  {
      *         error, returns null.
      * @exception NullPointerException if <code>pos</code> is null.
      */
+    @Override
     public final Object parseObject(String source, ParsePosition pos) {
         return parse(source, pos);
     }
@@ -283,9 +285,20 @@ public abstract class NumberFormat extends Format  {
      * @see java.text.Format#format
      */
     public final String format(double number) {
+        // Use fast-path for double result if that works
+        String result = fastFormat(number);
+        if (result != null)
+            return result;
+
         return format(number, new StringBuffer(),
                       DontCareFieldPosition.INSTANCE).toString();
     }
+
+    /*
+     * fastFormat() is supposed to be implemented in concrete subclasses only.
+     * Default implem always returns null.
+     */
+    String fastFormat(double number) { return null; }
 
    /**
      * Specialization of format.
@@ -376,7 +389,8 @@ public abstract class NumberFormat extends Format  {
     //============== Locale Stuff =====================
 
     /**
-     * Returns a general-purpose number format for the current default locale.
+     * Returns a general-purpose number format for the current default
+     * {@link java.util.Locale.Category#FORMAT FORMAT} locale.
      * This is the same as calling
      * {@link #getNumberInstance() getNumberInstance()}.
      */
@@ -394,7 +408,13 @@ public abstract class NumberFormat extends Format  {
     }
 
     /**
-     * Returns a general-purpose number format for the current default locale.
+     * Returns a general-purpose number format for the current default
+     * {@link java.util.Locale.Category#FORMAT FORMAT} locale.
+     * <p>This is equivalent to calling
+     * {@link #getNumberInstance(Locale)
+     *     getNumberInstance(Locale.getDefault(Locale.Category.FORMAT))}.
+     * @see java.util.Locale#getDefault(java.util.Locale.Category)
+     * @see java.util.Locale.Category#FORMAT
      */
     public final static NumberFormat getNumberInstance() {
         return getInstance(Locale.getDefault(Locale.Category.FORMAT), NUMBERSTYLE);
@@ -408,14 +428,20 @@ public abstract class NumberFormat extends Format  {
     }
 
     /**
-     * Returns an integer number format for the current default locale. The
+     * Returns an integer number format for the current default
+     * {@link java.util.Locale.Category#FORMAT FORMAT} locale. The
      * returned number format is configured to round floating point numbers
      * to the nearest integer using half-even rounding (see {@link
      * java.math.RoundingMode#HALF_EVEN RoundingMode.HALF_EVEN}) for formatting,
      * and to parse only the integer part of an input string (see {@link
      * #isParseIntegerOnly isParseIntegerOnly}).
+     * <p>This is equivalent to calling
+     * {@link #getIntegerInstance(Locale)
+     *     getIntegerInstance(Locale.getDefault(Locale.Category.FORMAT))}.
      *
      * @see #getRoundingMode()
+     * @see java.util.Locale#getDefault(java.util.Locale.Category)
+     * @see java.util.Locale.Category#FORMAT
      * @return a number format for integer values
      * @since 1.4
      */
@@ -440,7 +466,14 @@ public abstract class NumberFormat extends Format  {
     }
 
     /**
-     * Returns a currency format for the current default locale.
+     * Returns a currency format for the current default
+     * {@link java.util.Locale.Category#FORMAT FORMAT} locale.
+     * <p>This is equivalent to calling
+     * {@link #getCurrencyInstance(Locale)
+     *     getCurrencyInstance(Locale.getDefault(Locale.Category.FORMAT))}.
+     *
+     * @see java.util.Locale#getDefault(java.util.Locale.Category)
+     * @see java.util.Locale.Category#FORMAT
      */
     public final static NumberFormat getCurrencyInstance() {
         return getInstance(Locale.getDefault(Locale.Category.FORMAT), CURRENCYSTYLE);
@@ -454,7 +487,14 @@ public abstract class NumberFormat extends Format  {
     }
 
     /**
-     * Returns a percentage format for the current default locale.
+     * Returns a percentage format for the current default
+     * {@link java.util.Locale.Category#FORMAT FORMAT} locale.
+     * <p>This is equivalent to calling
+     * {@link #getPercentInstance(Locale)
+     *     getPercentInstance(Locale.getDefault(Locale.Category.FORMAT))}.
+     *
+     * @see java.util.Locale#getDefault(java.util.Locale.Category)
+     * @see java.util.Locale.Category#FORMAT
      */
     public final static NumberFormat getPercentInstance() {
         return getInstance(Locale.getDefault(Locale.Category.FORMAT), PERCENTSTYLE);
@@ -501,16 +541,18 @@ public abstract class NumberFormat extends Format  {
     }
 
     /**
-     * Overrides hashCode
+     * Overrides hashCode.
      */
+    @Override
     public int hashCode() {
         return maximumIntegerDigits * 37 + maxFractionDigits;
         // just enough fields for a reasonable distribution
     }
 
     /**
-     * Overrides equals
+     * Overrides equals.
      */
+    @Override
     public boolean equals(Object obj) {
         if (obj == null) {
             return false;
@@ -531,8 +573,9 @@ public abstract class NumberFormat extends Format  {
     }
 
     /**
-     * Overrides Cloneable
+     * Overrides Cloneable.
      */
+    @Override
     public Object clone() {
         NumberFormat other = (NumberFormat) super.clone();
         return other;
@@ -741,42 +784,36 @@ public abstract class NumberFormat extends Format  {
 
     private static NumberFormat getInstance(Locale desiredLocale,
                                            int choice) {
-        // Check whether a provider can provide an implementation that's closer
-        // to the requested locale than what the Java runtime itself can provide.
-        LocaleServiceProviderPool pool =
-            LocaleServiceProviderPool.getPool(NumberFormatProvider.class);
-        if (pool.hasProviders()) {
-            NumberFormat providersInstance = pool.getLocalizedObject(
-                                    NumberFormatGetter.INSTANCE,
-                                    desiredLocale,
-                                    choice);
-            if (providersInstance != null) {
-                return providersInstance;
-            }
+        LocaleProviderAdapter adapter;
+        adapter = LocaleProviderAdapter.getAdapter(NumberFormatProvider.class,
+                                                   desiredLocale);
+        NumberFormat numberFormat = getInstance(adapter, desiredLocale, choice);
+        if (numberFormat == null) {
+            numberFormat = getInstance(LocaleProviderAdapter.forJRE(),
+                                       desiredLocale, choice);
         }
+        return numberFormat;
+    }
 
-        /* try the cache first */
-        String[] numberPatterns = (String[])cachedLocaleData.get(desiredLocale);
-        if (numberPatterns == null) { /* cache miss */
-            ResourceBundle resource = LocaleData.getNumberFormatData(desiredLocale);
-            numberPatterns = resource.getStringArray("NumberPatterns");
-            /* update cache */
-            cachedLocaleData.put(desiredLocale, numberPatterns);
+    private static NumberFormat getInstance(LocaleProviderAdapter adapter,
+                                            Locale locale, int choice) {
+        NumberFormatProvider provider = adapter.getNumberFormatProvider();
+        NumberFormat numberFormat = null;
+        switch (choice) {
+        case NUMBERSTYLE:
+            numberFormat = provider.getNumberInstance(locale);
+            break;
+        case PERCENTSTYLE:
+            numberFormat = provider.getPercentInstance(locale);
+            break;
+        case CURRENCYSTYLE:
+            numberFormat = provider.getCurrencyInstance(locale);
+            break;
+        case INTEGERSTYLE:
+            numberFormat = provider.getIntegerInstance(locale);
+            break;
         }
-
-        DecimalFormatSymbols symbols = DecimalFormatSymbols.getInstance(desiredLocale);
-        int entry = (choice == INTEGERSTYLE) ? NUMBERSTYLE : choice;
-        DecimalFormat format = new DecimalFormat(numberPatterns[entry], symbols);
-
-        if (choice == INTEGERSTYLE) {
-            format.setMaximumFractionDigits(0);
-            format.setDecimalSeparatorAlwaysShown(false);
-            format.setParseIntegerOnly(true);
-        } else if (choice == CURRENCYSTYLE) {
-            format.adjustForCurrencyDefaultFractionDigits();
-        }
-
-        return format;
+        return numberFormat;
     }
 
     /**
@@ -840,11 +877,6 @@ public abstract class NumberFormat extends Format  {
                             Byte.MAX_VALUE : (byte)minimumFractionDigits;
         stream.defaultWriteObject();
     }
-
-    /**
-     * Cache to hold the NumberPatterns of a Locale.
-     */
-    private static final Hashtable cachedLocaleData = new Hashtable(3);
 
     // Constants used by factory methods to specify a style of format.
     private static final int NUMBERSTYLE = 0;
@@ -1035,7 +1067,7 @@ public abstract class NumberFormat extends Format  {
         private static final long serialVersionUID = 7494728892700160890L;
 
         // table of all instances in this class, used by readResolve
-        private static final Map instanceMap = new HashMap(11);
+        private static final Map<String, Field> instanceMap = new HashMap<>(11);
 
         /**
          * Creates a Field instance with the specified
@@ -1056,6 +1088,7 @@ public abstract class NumberFormat extends Format  {
          * @throws InvalidObjectException if the constant could not be resolved.
          * @return resolved NumberFormat.Field constant
          */
+        @Override
         protected Object readResolve() throws InvalidObjectException {
             if (this.getClass() != NumberFormat.Field.class) {
                 throw new InvalidObjectException("subclass didn't correctly implement readResolve");
@@ -1126,37 +1159,5 @@ public abstract class NumberFormat extends Format  {
          * Constant identifying the exponent sign field.
          */
         public static final Field EXPONENT_SIGN = new Field("exponent sign");
-    }
-
-    /**
-     * Obtains a NumberFormat instance from a NumberFormatProvider implementation.
-     */
-    private static class NumberFormatGetter
-        implements LocaleServiceProviderPool.LocalizedObjectGetter<NumberFormatProvider,
-                                                                   NumberFormat> {
-        private static final NumberFormatGetter INSTANCE = new NumberFormatGetter();
-
-        public NumberFormat getObject(NumberFormatProvider numberFormatProvider,
-                                Locale locale,
-                                String key,
-                                Object... params) {
-            assert params.length == 1;
-            int choice = (Integer)params[0];
-
-            switch (choice) {
-            case NUMBERSTYLE:
-                return numberFormatProvider.getNumberInstance(locale);
-            case PERCENTSTYLE:
-                return numberFormatProvider.getPercentInstance(locale);
-            case CURRENCYSTYLE:
-                return numberFormatProvider.getCurrencyInstance(locale);
-            case INTEGERSTYLE:
-                return numberFormatProvider.getIntegerInstance(locale);
-            default:
-                assert false : choice;
-            }
-
-            return null;
-        }
     }
 }

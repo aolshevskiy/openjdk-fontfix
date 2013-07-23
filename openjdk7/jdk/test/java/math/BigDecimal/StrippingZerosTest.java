@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,8 +45,17 @@ public class StrippingZerosTest {
             {new BigDecimal("1234.56780"),      new BigDecimal("1234.5678")},
             {new BigDecimal("1234.567800000"),  new BigDecimal("1234.5678")},
             {new BigDecimal("0"),               new BigDecimal("0")},
-            {new BigDecimal("0e100"),           new BigDecimal("0e100")},
-            {new BigDecimal("0e-100"),          new BigDecimal("0e-100")},
+            {new BigDecimal("0e2"),             BigDecimal.ZERO},
+            {new BigDecimal("0e-2"),            BigDecimal.ZERO},
+            {new BigDecimal("0e42"),            BigDecimal.ZERO},
+            {new BigDecimal("+0e42"),           BigDecimal.ZERO},
+            {new BigDecimal("-0e42"),           BigDecimal.ZERO},
+            {new BigDecimal("0e-42"),           BigDecimal.ZERO},
+            {new BigDecimal("+0e-42"),          BigDecimal.ZERO},
+            {new BigDecimal("-0e-42"),          BigDecimal.ZERO},
+            {new BigDecimal("0e-2"),            BigDecimal.ZERO},
+            {new BigDecimal("0e100"),           BigDecimal.ZERO},
+            {new BigDecimal("0e-100"),          BigDecimal.ZERO},
             {new BigDecimal("10"),              new BigDecimal("1e1")},
             {new BigDecimal("20"),              new BigDecimal("2e1")},
             {new BigDecimal("100"),             new BigDecimal("1e2")},

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,7 @@
 # SA components are built if BUILD_WIN_SA=1 is specified.
 # See notes in README. This produces files:
 #  1. sa-jdi.jar       - This is built before building jvm.dll
-#  2. sawindbg[_g].dll - Native library for SA - This is built after jvm.dll
+#  2. sawindbg.dll     - Native library for SA - This is built after jvm.dll
 #                      - Also, .lib, .map, .pdb.
 #
 # Please refer to ./makefiles/sa.make
@@ -113,7 +113,7 @@ VARIANT_TEXT=Tiered
 !endif
 
 #########################################################################
-# Parameters for VERSIONINFO resource for jvm[_g].dll.
+# Parameters for VERSIONINFO resource for jvm.dll.
 # These can be overridden via the nmake.exe command line.
 # They are overridden by RE during the control builds.
 #
@@ -229,11 +229,6 @@ checkSA::
 
 #########################################################################
 
-# With the jvm_g.dll now being named jvm.dll, we can't build both and place
-#   the dll's in the same directory, so we only build one at a time,
-#   re-directing the output to different output directories (done by user
-#   of this makefile).
-#
 defaultTarget: product
 
 # The product or release build is an optimized build, and is the default
@@ -246,17 +241,13 @@ product release optimized: checks $(variantDir) $(variantDir)\local.make sanity
 	cd $(variantDir)
 	nmake -nologo -f $(WorkSpace)\make\windows\makefiles\top.make BUILD_FLAVOR=product ARCH=$(ARCH)
 
-# The debug or jvmg (all the same thing) is an optional build
-debug jvmg: checks $(variantDir) $(variantDir)\local.make sanity
+# The debug build is an optional build
+debug: checks $(variantDir) $(variantDir)\local.make sanity
 	cd $(variantDir)
 	nmake -nologo -f $(WorkSpace)\make\windows\makefiles\top.make BUILD_FLAVOR=debug ARCH=$(ARCH)
 fastdebug: checks $(variantDir) $(variantDir)\local.make sanity
 	cd $(variantDir)
 	nmake -nologo -f $(WorkSpace)\make\windows\makefiles\top.make BUILD_FLAVOR=fastdebug ARCH=$(ARCH)
-
-develop: checks $(variantDir) $(variantDir)\local.make sanity
-	cd $(variantDir)
-	nmake -nologo -f $(WorkSpace)\make\windows\makefiles\top.make BUILD_FLAVOR=product DEVELOP=1 ARCH=$(ARCH)
 
 # target to create just the directory structure
 tree: checks $(variantDir) $(variantDir)\local.make sanity

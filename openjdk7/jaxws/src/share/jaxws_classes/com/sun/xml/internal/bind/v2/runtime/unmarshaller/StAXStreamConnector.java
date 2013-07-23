@@ -33,7 +33,6 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
 import com.sun.xml.internal.bind.WhiteSpaceProcessor;
-import com.sun.xml.internal.bind.v2.util.ClassLoaderRetriever;
 
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
@@ -386,8 +385,12 @@ class StAXStreamConnector extends StAXConnector {
         }
     }
 
-    public static ClassLoader getClassLoader() {
-        return ClassLoaderRetriever.getClassLoader();
+    private static ClassLoader getClassLoader() {
+        ClassLoader cl = SecureLoader.getClassClassLoader(UnmarshallerImpl.class);
+        if (cl == null) {
+            cl = SecureLoader.getContextClassLoader();
+        }
+        return cl;
     }
 
 }

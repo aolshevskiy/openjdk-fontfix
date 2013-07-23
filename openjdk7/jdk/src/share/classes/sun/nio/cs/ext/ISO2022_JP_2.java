@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
 package sun.nio.cs.ext;
 
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CharsetEncoder;
 
 public class ISO2022_JP_2 extends ISO2022_JP
 {
@@ -44,12 +46,18 @@ public class ISO2022_JP_2 extends ISO2022_JP
              (cs instanceof ISO2022_JP_2);
     }
 
-    protected DoubleByteDecoder get0212Decoder() {
-        return new JIS_X_0212_Decoder(this);
+    public CharsetDecoder newDecoder() {
+        return new Decoder(this, Decoder.DEC0208, CoderHolder.DEC0212);
     }
 
-    protected DoubleByteEncoder get0212Encoder() {
-        return new JIS_X_0212_Encoder(this);
+    public CharsetEncoder newEncoder() {
+        return new Encoder(this, Encoder.ENC0208, CoderHolder.ENC0212, true);
     }
 
+    private static class CoderHolder {
+        final static DoubleByte.Decoder DEC0212 =
+            (DoubleByte.Decoder)new JIS_X_0212().newDecoder();
+        final static DoubleByte.Encoder ENC0212 =
+            (DoubleByte.Encoder)new JIS_X_0212().newEncoder();
+    }
 }

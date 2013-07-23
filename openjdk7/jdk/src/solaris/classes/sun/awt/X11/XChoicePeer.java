@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -550,10 +550,10 @@ public class XChoicePeer extends XComponentPeer implements ChoicePeer, ToplevelS
     /**
      * Paint the choice
      */
-    public void paint(Graphics g) {
+    @Override
+    void paintPeer(final Graphics g) {
         flush();
         Dimension size = getPeerSize();
-
         // TODO: when mouse is down over button, widget should be drawn depressed
         g.setColor(getPeerBackground());
         g.fillRect(0, 0, width, height);
@@ -892,7 +892,7 @@ public class XChoicePeer extends XComponentPeer implements ChoicePeer, ToplevelS
                 if (transX > 0 && transX < width &&
                     transY > 0 && transY < height) {
                     int newIdx = helper.y2index(transY);
-                    if (log.isLoggable(PlatformLogger.FINE)) {
+                    if (log.isLoggable(PlatformLogger.Level.FINE)) {
                         log.fine("transX=" + transX + ", transY=" + transY
                                  + ",width=" + width + ", height=" + height
                                  + ", newIdx=" + newIdx + " on " + target);
@@ -912,16 +912,22 @@ public class XChoicePeer extends XComponentPeer implements ChoicePeer, ToplevelS
         /*
          * fillRect with current Background color on the whole dropdown list.
          */
-        public void paintBackground(){
-            Graphics g = getGraphics();
-            g.setColor(getPeerBackground());
-            g.fillRect(0, 0, width, height);
+        public void paintBackground() {
+            final Graphics g = getGraphics();
+            if (g != null) {
+                try {
+                    g.setColor(getPeerBackground());
+                    g.fillRect(0, 0, width, height);
+                } finally {
+                    g.dispose();
+                }
+            }
         }
-
         /*
          * 6405689. In some cases we should erase background to eliminate painting
          * artefacts.
          */
+        @Override
         public void repaint() {
             if (!isVisible()) {
                 return;
@@ -931,8 +937,8 @@ public class XChoicePeer extends XComponentPeer implements ChoicePeer, ToplevelS
             }
             super.repaint();
         }
-
-        public void paint(Graphics g) {
+        @Override
+        public void paintPeer(Graphics g) {
             //System.out.println("UC.paint()");
             Choice choice = (Choice)target;
             Color colors[] = XChoicePeer.this.getGUIcolors();
@@ -1027,15 +1033,17 @@ public class XChoicePeer extends XComponentPeer implements ChoicePeer, ToplevelS
             //fix 6252982: PIT: Keyboard FocusTraversal not working when choice's drop-down is visible, on XToolkit
             if (e instanceof KeyEvent){
                 // notify XWindow that this event had been already handled and no need to post it again
-                EventQueue.invokeLater(new Runnable() {
-                        public void run() {
-                            if(target.isFocusable() &&
-                               getParentTopLevel().isFocusableWindow() )
-                            {
-                                handleJavaKeyEvent((KeyEvent)e);
-                            }
+                InvocationEvent ev = new InvocationEvent(target, new Runnable() {
+                    public void run() {
+                        if(target.isFocusable() &&
+                                getParentTopLevel().isFocusableWindow() )
+                        {
+                            handleJavaKeyEvent((KeyEvent)e);
                         }
-                    });
+                    }
+                });
+                postEvent(ev);
+
                 return true;
             } else {
                 if (e instanceof MouseEvent){
@@ -1077,11 +1085,13 @@ public class XChoicePeer extends XComponentPeer implements ChoicePeer, ToplevelS
     //convenient method
     //do not generate this kind of Events
     public boolean handleMouseEventByChoice(final MouseEvent me){
-        EventQueue.invokeLater(new Runnable() {
-                public void run() {
-                    handleJavaMouseEvent(me);
-                }
-            });
+        InvocationEvent ev = new InvocationEvent(target, new Runnable() {
+            public void run() {
+                handleJavaMouseEvent(me);
+            }
+        });
+        postEvent(ev);
+
         return true;
     }
 
@@ -1101,18 +1111,4 @@ public class XChoicePeer extends XComponentPeer implements ChoicePeer, ToplevelS
         }
         return true;
     }
-}
-
-/*
- * The listener interface for receiving "interesting" for XFileDialogPeer
- * choice events (opening, closing).
- * The listener added by means of the method addXChoicePeerListener
- * A opening choice event is generated when the invoking unfurledChoice.toFront()
- * A closing choice event is generated at the time of the processing the mouse releasing
- * and the Enter pressing.
- * see 6240074 for more information
- */
-interface XChoicePeerListener{
-    public void unfurledChoiceOpening(ListHelper choiceHelper);
-    public void unfurledChoiceClosing();
 }

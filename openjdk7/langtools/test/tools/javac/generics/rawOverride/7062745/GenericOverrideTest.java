@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,23 +23,39 @@
 
 /*
  * @test
- * @bug 7062745
- * @summary  Regression: difference in overload resolution when two methods are maximally specific
+ * @bug 7062745 8006694
+ * @summary  Regression: difference in overload resolution when two methods
+ *  are maximally specific
+ *  temporarily workaround combo tests are causing time out in several platforms
+ * @library ../../../lib
+ * @build JavacTestingAbstractThreadedTest
+ * @run main/othervm GenericOverrideTest
  */
 
-import com.sun.source.util.JavacTask;
+// use /othervm to avoid jtreg timeout issues (CODETOOLS-7900047)
+// see JDK-8006746
+
 import java.net.URI;
 import java.util.Arrays;
 import javax.tools.Diagnostic;
-import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
 import javax.tools.SimpleJavaFileObject;
-import javax.tools.StandardJavaFileManager;
-import javax.tools.ToolProvider;
+import com.sun.source.util.JavacTask;
 
-public class GenericOverrideTest {
+public class GenericOverrideTest
+    extends JavacTestingAbstractThreadedTest
+    implements Runnable {
 
-    static int checkCount = 0;
+    enum SourceLevel {
+        SOURCE_7("-source", "7"),
+        SOURCE_DEFAULT();
+
+        String[] opts;
+
+        SourceLevel(String... opts) {
+            this.opts = opts;
+        }
+    }
 
     enum SignatureKind {
         NON_GENERIC(""),
@@ -107,12 +123,13 @@ public class GenericOverrideTest {
             }
         }
 
-        boolean assignableTo(TypeArgumentKind that, SignatureKind sig) {
+        boolean assignableTo(TypeArgumentKind that, SignatureKind sig, SourceLevel level) {
             switch (this) {
                 case NONE:
                     //this case needs to workaround to javac's impl of 15.12.2.8 being too strict
-                    //ideally should be just 'return true' (see 7067746)
-                    return sig == SignatureKind.NON_GENERIC || that == NONE;
+                    //ideally should be just 'return true' (see 7067746/8015505)
+                    return level == SourceLevel.SOURCE_DEFAULT ||
+                            sig == SignatureKind.NON_GENERIC || that == NONE;
                 case UNBOUND:
                     return that == this || that == NONE;
                 case INTEGER:
@@ -126,11 +143,6 @@ public class GenericOverrideTest {
     }
 
     public static void main(String... args) throws Exception {
-
-        //create default shared JavaCompiler - reused across multiple compilations
-        JavaCompiler comp = ToolProvider.getSystemJavaCompiler();
-        StandardJavaFileManager fm = comp.getStandardFileManager(null, null, null);
-
         for (SignatureKind sig1 : SignatureKind.values()) {
             for (ReturnTypeKind rt1 : ReturnTypeKind.values()) {
                 for (TypeArgumentKind ta1 : TypeArgumentKind.values()) {
@@ -141,8 +153,14 @@ public class GenericOverrideTest {
                                 if (!ta2.compatibleWith(sig2)) continue;
                                 for (ReturnTypeKind rt3 : ReturnTypeKind.values()) {
                                     for (TypeArgumentKind ta3 : TypeArgumentKind.values()) {
-                                        if (!ta3.compatibleWith(SignatureKind.NON_GENERIC)) continue;
-                                        new GenericOverrideTest(sig1, rt1, ta1, sig2, rt2, ta2, rt3, ta3).run(comp, fm);
+                                        if (!ta3.compatibleWith(SignatureKind.NON_GENERIC))
+                                            continue;
+                                        for (SourceLevel level : SourceLevel.values()) {
+                                            pool.execute(
+                                                    new GenericOverrideTest(sig1,
+                                                    rt1, ta1, sig2, rt2,
+                                                    ta2, rt3, ta3, level));
+                                        }
                                     }
                                 }
                             }
@@ -151,17 +169,20 @@ public class GenericOverrideTest {
                 }
             }
         }
-        System.out.println("Total check executed: " + checkCount);
+
+        checkAfterExec();
     }
 
     SignatureKind sig1, sig2;
     ReturnTypeKind rt1, rt2, rt3;
     TypeArgumentKind ta1, ta2, ta3;
+    SourceLevel level;
     JavaSource source;
     DiagnosticChecker diagChecker;
 
     GenericOverrideTest(SignatureKind sig1, ReturnTypeKind rt1, TypeArgumentKind ta1,
-            SignatureKind sig2, ReturnTypeKind rt2, TypeArgumentKind ta2, ReturnTypeKind rt3, TypeArgumentKind ta3) {
+            SignatureKind sig2, ReturnTypeKind rt2, TypeArgumentKind ta2,
+            ReturnTypeKind rt3, TypeArgumentKind ta3, SourceLevel level) {
         this.sig1 = sig1;
         this.sig2 = sig2;
         this.rt1 = rt1;
@@ -170,6 +191,7 @@ public class GenericOverrideTest {
         this.ta1 = ta1;
         this.ta2 = ta2;
         this.ta3 = ta3;
+        this.level = level;
         this.source = new JavaSource();
         this.diagChecker = new DiagnosticChecker();
     }
@@ -204,19 +226,22 @@ public class GenericOverrideTest {
         }
     }
 
-    void run(JavaCompiler tool, StandardJavaFileManager fm) throws Exception {
-        JavacTask ct = (JavacTask)tool.getTask(null, fm, diagChecker,
-                null, null, Arrays.asList(source));
+    @Override
+    public void run() {
+        JavacTask ct = (JavacTask)comp.getTask(null, fm.get(), diagChecker,
+                level.opts != null ? Arrays.asList(level.opts) : null,
+                null, Arrays.asList(source));
         try {
             ct.analyze();
         } catch (Throwable ex) {
-            throw new AssertionError("Error thron when compiling the following code:\n" + source.getCharContent(true));
+            throw new AssertionError("Error thrown when compiling the following code:\n" +
+                    source.getCharContent(true));
         }
         check();
     }
 
     void check() {
-        checkCount++;
+        checkCount.incrementAndGet();
 
         boolean errorExpected = false;
         int mostSpecific = 0;
@@ -234,14 +259,17 @@ public class GenericOverrideTest {
         //check that either TA1 <= TA2 or TA2 <= TA1 (unless most specific return found above is raw)
         if (!errorExpected) {
             if (ta1 != ta2) {
-                boolean useStrictCheck = ta1.moreSpecificThan(ta2, true) || ta2.moreSpecificThan(ta1, true);
+                boolean useStrictCheck = ta1.moreSpecificThan(ta2, true) ||
+                        ta2.moreSpecificThan(ta1, true);
                 if (!ta1.moreSpecificThan(ta2, useStrictCheck) &&
                         !ta2.moreSpecificThan(ta1, useStrictCheck)) {
                     errorExpected = true;
                 } else {
                     int mostSpecific2 = ta1.moreSpecificThan(ta2, useStrictCheck) ? 1 : 2;
                     if (mostSpecific != 0 && mostSpecific2 != mostSpecific) {
-                        errorExpected = mostSpecific == 1 ? ta1 != TypeArgumentKind.NONE : ta2 != TypeArgumentKind.NONE;
+                        errorExpected = mostSpecific == 1 ?
+                                ta1 != TypeArgumentKind.NONE :
+                                ta2 != TypeArgumentKind.NONE;
                     } else {
                         mostSpecific = mostSpecific2;
                     }
@@ -260,7 +288,7 @@ public class GenericOverrideTest {
             SignatureKind mssig = mostSpecific == 1 ? sig1 : sig2;
 
             if (!msrt.moreSpecificThan(rt3) ||
-                    !msta.assignableTo(ta3, mssig)) {
+                    !msta.assignableTo(ta3, mssig, level)) {
                 errorExpected = true;
             }
         }
@@ -273,7 +301,8 @@ public class GenericOverrideTest {
         }
     }
 
-    static class DiagnosticChecker implements javax.tools.DiagnosticListener<JavaFileObject> {
+    static class DiagnosticChecker
+        implements javax.tools.DiagnosticListener<JavaFileObject> {
 
         boolean errorFound;
 
@@ -283,4 +312,5 @@ public class GenericOverrideTest {
             }
         }
     }
+
 }

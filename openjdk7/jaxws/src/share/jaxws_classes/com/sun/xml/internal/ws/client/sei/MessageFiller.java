@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package com.sun.xml.internal.ws.client.sei;
 
-import com.sun.xml.internal.bind.api.Bridge;
 import com.sun.xml.internal.ws.api.message.Attachment;
 import com.sun.xml.internal.ws.api.message.Headers;
 import com.sun.xml.internal.ws.api.message.Message;
@@ -33,6 +32,8 @@ import com.sun.xml.internal.ws.message.ByteArrayAttachment;
 import com.sun.xml.internal.ws.message.DataHandlerAttachment;
 import com.sun.xml.internal.ws.message.JAXBAttachment;
 import com.sun.xml.internal.ws.model.ParameterImpl;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.UUID;
@@ -98,7 +99,7 @@ abstract class MessageFiller {
          *      as a method argument.
          */
         public static MessageFiller createAttachmentFiller(ParameterImpl param, ValueGetter getter) {
-            Class type = (Class)param.getTypeReference().type;
+            Class type = (Class)param.getTypeInfo().type;
             if (DataHandler.class.isAssignableFrom(type) || Source.class.isAssignableFrom(type)) {
                 return new DataHandlerFiller(param, getter);
             } else if (byte[].class==type) {
@@ -147,7 +148,7 @@ abstract class MessageFiller {
         void fillIn(Object[] methodArgs, Message msg) {
             String contentId = getContentId();
             Object obj = getter.get(methodArgs[methodPos]);
-            Attachment att = new JAXBAttachment(contentId, obj, param.getBridge(), mimeType);
+            Attachment att = new JAXBAttachment(contentId, obj, param.getXMLBridge(), mimeType);
             msg.getAttachments().add(att);
         }
     }
@@ -156,10 +157,10 @@ abstract class MessageFiller {
      * Adds a parameter as an header.
      */
     static final class Header extends MessageFiller {
-        private final Bridge bridge;
+        private final XMLBridge bridge;
         private final ValueGetter getter;
 
-        protected Header(int methodPos, Bridge bridge, ValueGetter getter) {
+        protected Header(int methodPos, XMLBridge bridge, ValueGetter getter) {
             super(methodPos);
             this.bridge = bridge;
             this.getter = getter;

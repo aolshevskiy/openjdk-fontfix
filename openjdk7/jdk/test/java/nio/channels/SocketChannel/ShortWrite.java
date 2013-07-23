@@ -42,7 +42,7 @@ public class ShortWrite {
      */
     static long computeChecksum(ByteBuffer bb) {
         CRC32 crc32 = new CRC32();
-        crc32.update(bb.array());
+        crc32.update(bb);
         return crc32.getValue();
     }
 

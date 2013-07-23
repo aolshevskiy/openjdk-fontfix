@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,23 +23,24 @@
  */
 
 #include "precompiled.hpp"
+#include "gc_implementation/shared/copyFailedInfo.hpp"
 #include "gc_implementation/shared/gcHeapSummary.hpp"
 #include "gc_implementation/shared/gcTimer.hpp"
 #include "gc_implementation/shared/gcTrace.hpp"
-#include "gc_implementation/shared/copyFailedInfo.hpp"
+#include "gc_implementation/shared/objectCountEventSender.hpp"
 #include "memory/heapInspection.hpp"
-#include "memory/iterator.hpp"
 #include "memory/referenceProcessorStats.hpp"
+#include "runtime/os.hpp"
 #include "utilities/globalDefinitions.hpp"
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/g1/evacuationInfo.hpp"
 #endif
 
 #define assert_unset_gc_id() assert(_shared_gc_info.id() == SharedGCInfo::UNSET_GCID, "GC already started?")
 #define assert_set_gc_id() assert(_shared_gc_info.id() != SharedGCInfo::UNSET_GCID, "GC not started?")
 
-static jlong GCTracer_next_gc_id = 0;
+static GCId GCTracer_next_gc_id = 0;
 static GCId create_new_gc_id() {
   return GCTracer_next_gc_id++;
 }
@@ -91,42 +92,59 @@ void GCTracer::report_gc_reference_stats(const ReferenceProcessorStats& rps) con
   send_reference_stats_event(REF_PHANTOM, rps.phantom_count());
 }
 
+#if INCLUDE_SERVICES
 class ObjectCountEventSenderClosure : public KlassInfoClosure {
-  GCTracer* _gc_tracer;
+  const GCId _gc_id;
+  const double _size_threshold_percentage;
+  const size_t _total_size_in_words;
+  const jlong _timestamp;
+
  public:
-  ObjectCountEventSenderClosure(GCTracer* gc_tracer) : _gc_tracer(gc_tracer) {}
- private:
-  void do_cinfo(KlassInfoEntry* entry) {
-    if (is_visible_klass(entry->klass())) {
-      _gc_tracer->send_object_count_after_gc_event(entry->klass(), entry->count(),
-                                                   entry->words() * BytesPerWord);
-      }
+  ObjectCountEventSenderClosure(GCId gc_id, size_t total_size_in_words, jlong timestamp) :
+    _gc_id(gc_id),
+    _size_threshold_percentage(ObjectCountCutOffPercent / 100),
+    _total_size_in_words(total_size_in_words),
+    _timestamp(timestamp)
+  {}
+
+  virtual void do_cinfo(KlassInfoEntry* entry) {
+    if (should_send_event(entry)) {
+      ObjectCountEventSender::send(entry, _gc_id, _timestamp);
+    }
   }
 
-  // Do not expose internal implementation specific classes
-  bool is_visible_klass(klassOop k) {
-    return k->klass_part()->oop_is_instance() ||
-           (k->klass_part()->oop_is_array() && k != Universe::systemObjArrayKlassObj());
+ private:
+  bool should_send_event(const KlassInfoEntry* entry) const {
+    double percentage_of_heap = ((double) entry->words()) / _total_size_in_words;
+    return percentage_of_heap >= _size_threshold_percentage;
   }
 };
 
-void GCTracer::report_object_count_after_gc(BoolObjectClosure *is_alive_cl) {
-  if (should_send_object_count_after_gc_event()) {
+void GCTracer::report_object_count_after_gc(BoolObjectClosure* is_alive_cl) {
+  assert_set_gc_id();
+  assert(is_alive_cl != NULL, "Must supply function to check liveness");
+
+  if (ObjectCountEventSender::should_send_event()) {
     ResourceMark rm;
 
-    KlassInfoTable cit(HeapInspection::start_of_perm_gen());
+    KlassInfoTable cit(false);
     if (!cit.allocation_failed()) {
-      ObjectCountEventSenderClosure event_sender(this);
-      HeapInspection::instance_inspection(&cit, &event_sender, false, is_alive_cl);
+      HeapInspection hi(false, false, false, NULL);
+      hi.populate_table(&cit, is_alive_cl);
+
+      jlong timestamp = os::elapsed_counter();
+      ObjectCountEventSenderClosure event_sender(_shared_gc_info.id(), cit.size_of_instances_in_words(), timestamp);
+      cit.iterate(&event_sender);
     }
   }
 }
+#endif // INCLUDE_SERVICES
 
-void GCTracer::report_gc_heap_summary(GCWhen::Type when, const GCHeapSummary& heap_summary, const PermGenSummary& perm_gen_summary) const {
+void GCTracer::report_gc_heap_summary(GCWhen::Type when, const GCHeapSummary& heap_summary, const MetaspaceSummary& meta_space_summary) const {
   assert_set_gc_id();
 
   send_gc_heap_summary_event(when, heap_summary);
-  send_perm_gen_summary_event(when, perm_gen_summary);
+  send_meta_space_summary_event(when, meta_space_summary);
 }
 
 void YoungGCTracer::report_gc_end_impl(jlong timestamp, TimePartitions* time_partitions) {
@@ -175,7 +193,7 @@ void OldGCTracer::report_concurrent_mode_failure() {
   send_concurrent_mode_failure_event();
 }
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 void G1NewTracer::report_yc_type(G1YCType type) {
   assert_set_gc_id();
 

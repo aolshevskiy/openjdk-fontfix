@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -90,14 +90,14 @@ abstract class XMLProviderArgumentBuilder<T> extends ProviderArgumentsBuilder<T>
             this.binding = binding;
         }
         public DataSource getParameter(Packet packet) {
-            Message msg = packet.getMessage();
+            Message msg = packet.getInternalMessage();
             return (msg instanceof XMLMessage.MessageDataSource)
                     ? ((XMLMessage.MessageDataSource) msg).getDataSource()
-                    : XMLMessage.getDataSource(msg, binding);
+                    : XMLMessage.getDataSource(msg, binding.getFeatures());
         }
 
         public Message getResponseMessage(DataSource ds) {
-            return XMLMessage.create(ds, binding);
+            return XMLMessage.create(ds, binding.getFeatures());
         }
 
         protected Message getResponseMessage(Exception e) {

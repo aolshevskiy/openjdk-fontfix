@@ -26,15 +26,12 @@
 package sun.security.provider.certpath;
 
 import java.io.IOException;
-import java.security.PublicKey;
 import java.security.cert.CertificateException;
 import java.security.cert.CertPathValidatorException;
 import java.security.cert.PKIXCertPathChecker;
 import java.security.cert.X509Certificate;
-import java.security.interfaces.DSAPublicKey;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 import javax.security.auth.x500.X500Principal;
@@ -76,8 +73,6 @@ class ForwardState implements State {
     /* Flag indicating if state is initial (path is just starting) */
     private boolean init = true;
 
-    /* the checker used for revocation status */
-    public CrlRevocationChecker crlChecker;
 
     /* the untrusted certificates checker */
     UntrustedChecker untrustedChecker;
@@ -96,6 +91,7 @@ class ForwardState implements State {
      *
      * @return boolean flag indicating if the state is initial (just starting)
      */
+    @Override
     public boolean isInitial() {
         return init;
     }
@@ -107,6 +103,7 @@ class ForwardState implements State {
      * @return boolean true if key needing to inherit parameters has been
      * encountered; false otherwise.
      */
+    @Override
     public boolean keyParamsNeeded() {
         return keyParamsNeededFlag;
     }
@@ -114,23 +111,18 @@ class ForwardState implements State {
     /**
      * Display state for debugging purposes
      */
+    @Override
     public String toString() {
-        StringBuffer sb = new StringBuffer();
-        try {
-            sb.append("State [");
-            sb.append("\n  issuerDN of last cert: " + issuerDN);
-            sb.append("\n  traversedCACerts: " + traversedCACerts);
-            sb.append("\n  init: " + String.valueOf(init));
-            sb.append("\n  keyParamsNeeded: "
-                + String.valueOf(keyParamsNeededFlag));
-            sb.append("\n  subjectNamesTraversed: \n" + subjectNamesTraversed);
-            sb.append("]\n");
-        } catch (Exception e) {
-            if (debug != null) {
-                debug.println("ForwardState.toString() unexpected exception");
-                e.printStackTrace();
-            }
-        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("State [");
+        sb.append("\n  issuerDN of last cert: ").append(issuerDN);
+        sb.append("\n  traversedCACerts: ").append(traversedCACerts);
+        sb.append("\n  init: ").append(String.valueOf(init));
+        sb.append("\n  keyParamsNeeded: ").append
+                 (String.valueOf(keyParamsNeededFlag));
+        sb.append("\n  subjectNamesTraversed: \n").append
+                 (subjectNamesTraversed);
+        sb.append("]\n");
         return sb.toString();
     }
 
@@ -150,12 +142,10 @@ class ForwardState implements State {
          * that supports forward checking and initialize the forwardCheckers
          */
         forwardCheckers = new ArrayList<PKIXCertPathChecker>();
-        if (certPathCheckers != null) {
-            for (PKIXCertPathChecker checker : certPathCheckers) {
-                if (checker.isForwardCheckingSupported()) {
-                    checker.init(true);
-                    forwardCheckers.add(checker);
-                }
+        for (PKIXCertPathChecker checker : certPathCheckers) {
+            if (checker.isForwardCheckingSupported()) {
+                checker.init(true);
+                forwardCheckers.add(checker);
             }
         }
 
@@ -167,6 +157,7 @@ class ForwardState implements State {
      *
      * @param cert the certificate which is used to update the state
      */
+    @Override
     public void updateState(X509Certificate cert)
         throws CertificateException, IOException, CertPathValidatorException {
 
@@ -176,9 +167,7 @@ class ForwardState implements State {
         X509CertImpl icert = X509CertImpl.toImpl(cert);
 
         /* see if certificate key has null parameters */
-        PublicKey newKey = icert.getPublicKey();
-        if (newKey instanceof DSAPublicKey &&
-            ((DSAPublicKey)newKey).getParams() == null) {
+        if (PKIX.isDSAPublicKeyWithoutParams(icert.getPublicKey())) {
             keyParamsNeededFlag = true;
         }
 
@@ -209,15 +198,13 @@ class ForwardState implements State {
                 SubjectAlternativeNameExtension subjAltNameExt
                     = icert.getSubjectAlternativeNameExtension();
                 if (subjAltNameExt != null) {
-                    GeneralNames gNames = (GeneralNames)
-                        subjAltNameExt.get(SubjectAlternativeNameExtension.SUBJECT_NAME);
-                    for (Iterator<GeneralName> t = gNames.iterator();
-                                t.hasNext(); ) {
-                        GeneralNameInterface gName = t.next().getName();
-                        subjectNamesTraversed.add(gName);
+                    GeneralNames gNames = subjAltNameExt.get(
+                            SubjectAlternativeNameExtension.SUBJECT_NAME);
+                    for (GeneralName gName : gNames.names()) {
+                        subjectNamesTraversed.add(gName.getName());
                     }
                 }
-            } catch (Exception e) {
+            } catch (IOException e) {
                 if (debug != null) {
                     debug.println("ForwardState.updateState() unexpected "
                         + "exception");
@@ -239,6 +226,8 @@ class ForwardState implements State {
      * because some of them will
      * not have their contents modified by subsequent calls to updateState.
      */
+    @Override
+    @SuppressWarnings("unchecked") // Safe casts assuming clone() works correctly
     public Object clone() {
         try {
             ForwardState clonedState = (ForwardState) super.clone();
@@ -264,7 +253,7 @@ class ForwardState implements State {
                 = (HashSet<GeneralNameInterface>)subjectNamesTraversed.clone();
             return clonedState;
         } catch (CloneNotSupportedException e) {
-            throw new InternalError(e.toString());
+            throw new InternalError(e.toString(), e);
         }
     }
 }

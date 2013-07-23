@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -221,8 +221,6 @@ FILES_src = \
 	sun/nio/cs/HistoricallyNamedCharset.java \
 	sun/nio/cs/ISO_8859_1.java \
 	sun/nio/cs/SingleByte.java \
-	sun/nio/cs/SingleByteDecoder.java \
-	sun/nio/cs/SingleByteEncoder.java \
 	sun/nio/cs/StreamEncoder.java \
 	sun/nio/cs/StreamDecoder.java \
 	sun/nio/cs/Surrogate.java \
@@ -232,6 +230,7 @@ FILES_src = \
 	sun/nio/cs/UTF_16BE.java \
 	sun/nio/cs/UTF_16LE.java \
 	sun/nio/cs/UTF_8.java \
+	sun/nio/cs/CESU_8.java \
 	sun/nio/cs/Unicode.java \
 	sun/nio/cs/UnicodeDecoder.java \
 	sun/nio/cs/UnicodeEncoder.java \

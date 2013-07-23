@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,8 +47,6 @@ public class JSJavaInstanceKlass extends JSJavaKlass {
    private static final int FIELD_IS_SYNTHETIC       = 13;
    private static final int FIELD_IS_INTERFACE       = 14;
    private static final int FIELD_CLASS_LOADER       = 15;
-   private static final int FIELD_PROTECTION_DOMAIN  = 16;
-   private static final int FIELD_SIGNERS            = 17;
    private static final int FIELD_STATICS            = 18;
    private static final int FIELD_UNDEFINED          = -1;
 
@@ -100,10 +98,6 @@ public class JSJavaInstanceKlass extends JSJavaKlass {
          return Boolean.valueOf(ik.isInterface());
       case FIELD_CLASS_LOADER:
          return factory.newJSJavaObject(ik.getClassLoader());
-      case FIELD_PROTECTION_DOMAIN:
-         return factory.newJSJavaObject(ik.getProtectionDomain());
-      case FIELD_SIGNERS:
-         return factory.newJSJavaObject(ik.getSigners());
       case FIELD_STATICS:
          return getStatics();
       case FIELD_UNDEFINED:
@@ -246,8 +240,6 @@ public class JSJavaInstanceKlass extends JSJavaKlass {
       addField("isSynthetic", FIELD_IS_SYNTHETIC);
       addField("isInterface", FIELD_IS_INTERFACE);
       addField("classLoader", FIELD_CLASS_LOADER);
-      addField("protectionDomain", FIELD_PROTECTION_DOMAIN);
-      addField("signers", FIELD_SIGNERS);
       addField("statics", FIELD_STATICS);
    }
 
@@ -259,6 +251,34 @@ public class JSJavaInstanceKlass extends JSJavaKlass {
    }
 
    private Object getFieldValue(Field fld, String name, Oop oop) {
+       FieldType fd = fld.getFieldType();
+       if (fd.isObject() || fd.isArray()) {
+         return factory.newJSJavaObject(((OopField)fld).getValue(oop));
+       } else if (fd.isByte()) {
+          return new Byte(((ByteField)fld).getValue(oop));
+       } else if (fd.isChar()) {
+          return new String(new char[] { ((CharField)fld).getValue(oop) });
+       } else if (fd.isDouble()) {
+          return new Double(((DoubleField)fld).getValue(oop));
+       } else if (fd.isFloat()) {
+          return new Float(((FloatField)fld).getValue(oop));
+       } else if (fd.isInt()) {
+          return new Integer(((IntField)fld).getValue(oop));
+       } else if (fd.isLong()) {
+          return new Long(((LongField)fld).getValue(oop));
+       } else if (fd.isShort()) {
+          return new Short(((ShortField)fld).getValue(oop));
+       } else if (fd.isBoolean()) {
+          return Boolean.valueOf(((BooleanField)fld).getValue(oop));
+       } else {
+          if (Assert.ASSERTS_ENABLED) {
+             Assert.that(false, "invalid field type for " + name);
+          }
+          return null;
+       }
+   }
+
+   private Object getFieldValue(Field fld, String name, InstanceKlass oop) {
        FieldType fd = fld.getFieldType();
        if (fd.isObject() || fd.isArray()) {
          return factory.newJSJavaObject(((OopField)fld).getValue(oop));

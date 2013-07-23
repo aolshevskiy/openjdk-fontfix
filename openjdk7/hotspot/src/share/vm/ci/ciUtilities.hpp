@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -80,6 +80,9 @@
 #define GUARDED_VM_ENTRY(action)            \
   {if (IS_IN_VM) { action } else { VM_ENTRY_MARK; { action }}}
 
+#define GUARDED_VM_QUICK_ENTRY(action)      \
+  {if (IS_IN_VM) { action } else { VM_QUICK_ENTRY_MARK; { action }}}
+
 // Redefine this later.
 #define KILL_COMPILE_ON_FATAL_(result)           \
   THREAD);                                       \
@@ -93,7 +96,7 @@
     CLEAR_PENDING_EXCEPTION;                     \
     return (result);                             \
   }                                              \
-  (0
+  (void)(0
 
 #define KILL_COMPILE_ON_ANY                      \
   THREAD);                                       \
@@ -101,7 +104,7 @@
     fatal("unhandled ci exception");             \
     CLEAR_PENDING_EXCEPTION;                     \
   }                                              \
-(0
+(void)(0
 
 
 inline const char* bool_to_str(bool b) {

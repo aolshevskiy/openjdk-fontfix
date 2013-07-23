@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -136,8 +136,10 @@ WildcardIterator_for(const char *wildcard)
 {
     WildcardIterator it = NEW_(WildcardIterator);
     HANDLE handle = FindFirstFile(wildcard, &find_data);
-    if (handle == INVALID_HANDLE_VALUE)
+    if (handle == INVALID_HANDLE_VALUE) {
+        JLI_MemFree(it);
         return NULL;
+    }
     it->handle = handle;
     it->firstFile = find_data.cFileName;
     return it;
@@ -356,8 +358,13 @@ wildcardFileList(const char *wildcard)
     const char *basename;
     FileList fl = FileList_new(16);
     WildcardIterator it = WildcardIterator_for(wildcard);
+
     if (it == NULL)
+    {
+        FileList_free(fl);
         return NULL;
+    }
+
     while ((basename = WildcardIterator_next(it)) != NULL)
         if (isJarFileName(basename))
             FileList_add(fl, wildcardConcat(wildcard, basename));

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -798,7 +798,7 @@ public class MLet extends java.net.URLClassLoader
       * Allows the m-let to perform any operations it needs before being unregistered
       * by the MBean server.
       *
-      * @exception java.langException This exception should be caught
+      * @exception java.lang.Exception This exception should be caught
       * by the MBean server and re-thrown as an
       * MBeanRegistrationException.
       */

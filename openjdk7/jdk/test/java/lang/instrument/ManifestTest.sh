@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2008, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -312,7 +312,7 @@ make_a_JAR() {
     fi
 
     rm -f ${AGENT}.jar
-    ${JAR} cvfm ${AGENT}.jar ${AGENT}.mf ${AGENT}.class
+    ${JAR} ${TESTTOOLVMOPTS} cvfm ${AGENT}.jar ${AGENT}.mf ${AGENT}.class
 
     echo "$expect_boot_cp_line" > expect_boot_cp_line
     echo "$expect_redef_line"   > expect_redef_line
@@ -326,6 +326,12 @@ then
   exit 1
 fi
 
+if [ "${COMPILEJAVA}" = "" ]
+then
+  COMPILEJAVA="${TESTJAVA}"
+fi
+echo "COMPILEJAVA=${COMPILEJAVA}"
+
 if [ "${TESTSRC}" = "" ]
 then
   echo "TESTSRC not set.  Test cannot execute.  Failed."
@@ -338,8 +344,8 @@ then
   exit 1
 fi
 
-JAR="${TESTJAVA}/bin/jar"
-JAVAC="${TESTJAVA}"/bin/javac
+JAR="${COMPILEJAVA}/bin/jar"
+JAVAC="${COMPILEJAVA}"/bin/javac
 JAVA="${TESTJAVA}"/bin/java
 
 # Now that ManifestTestApp.class is built, we move
@@ -353,7 +359,7 @@ mv "${TESTCLASSES}/ExampleForBootClassPath.class" $OUT_OF_THE_WAY
 # so we can tell when the wrong version is run
 sed 's/return 15/return 42/' "${TESTSRC}"/ExampleForBootClassPath.java \
     > ExampleForBootClassPath.java
-"$JAVAC" ExampleForBootClassPath.java
+"$JAVAC" ${TESTJAVACOPTS} ${TESTTOOLVMOPTS} ExampleForBootClassPath.java
 mv ExampleForBootClassPath.class \
     $OUT_OF_THE_WAY/ExampleForBootClassPath.class.bad
 mv ExampleForBootClassPath.java \
@@ -363,7 +369,7 @@ AGENT=ManifestTestAgent
 # We compile the agent in the working directory instead of with
 # a build task because we construct a different agent JAR file
 # for each test case.
-${JAVAC} -d . ${TESTSRC}/${AGENT}.java
+${JAVAC} ${TESTJAVACOPTS} ${TESTTOOLVMOPTS} -d . ${TESTSRC}/${AGENT}.java
 
 FAIL_MARKER=fail_marker
 rm -f $FAIL_MARKER
@@ -396,7 +402,7 @@ while read token; do
         touch $FAIL_MARKER
     fi
 
-    MESG=`cat expect_boot_cp_line`
+    MESG=`cat expect_boot_cp_line | tr -d '\n\r'`
     grep -s "$MESG" output.log > /dev/null
     result=$?
     if [ "$result" = 0 ]; then
@@ -406,7 +412,7 @@ while read token; do
         touch $FAIL_MARKER
     fi
 
-    MESG=`cat expect_redef_line`
+    MESG=`cat expect_redef_line | tr -d '\n\r'`
     grep -s "$MESG" output.log > /dev/null
     result=$?
     if [ "$result" = 0 ]; then
@@ -416,7 +422,7 @@ while read token; do
         touch $FAIL_MARKER
     fi
 
-    MESG=`cat expect_retrans_line`
+    MESG=`cat expect_retrans_line | tr -d '\n\r'`
     grep -s "$MESG" output.log > /dev/null
     result=$?
     if [ "$result" = 0 ]; then
@@ -426,7 +432,7 @@ while read token; do
         touch $FAIL_MARKER
     fi
 
-    MESG=`cat expect_set_nmp_line`
+    MESG=`cat expect_set_nmp_line | tr -d '\n\r'`
     grep -s "$MESG" output.log > /dev/null
     result=$?
     if [ "$result" = 0 ]; then

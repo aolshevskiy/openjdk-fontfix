@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -322,9 +322,9 @@ Java_com_sun_management_UnixOperatingSystem_getFreePhysicalMemorySize
     return (jlong)vm_stats.free_count * page_size;
 #elif defined(_ALLBSD_SOURCE)
     /*
-     * XXXBSD: there's no way available to do it in FreeBSD, AFAIK.
+     * XXBSDL no way to do it in FreeBSD
      */
-    // throw_internal_error(env, "Unimplemented in FreeBSD");
+    // throw_internal_error(env, "unimplemented in FreeBSD")
     return (128 * MB);
 #else // solaris / linux
     jlong num_avail_physical_pages = sysconf(_SC_AVPHYS_PAGES);
@@ -372,7 +372,7 @@ Java_com_sun_management_UnixOperatingSystem_getOpenFileDescriptorCount
     size_t fds_size;
 
     kres = pid_for_task(mach_task_self(), &my_pid);
-    if (res != KERN_SUCCESS) {
+    if (kres != KERN_SUCCESS) {
         throw_internal_error(env, "pid_for_task failed");
         return -1;
     }

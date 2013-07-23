@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,9 +40,10 @@
 #include "services/heapDumper.hpp"
 #include "services/threadService.hpp"
 #include "utilities/ostream.hpp"
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/parallelScavenge/parallelScavengeHeap.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 /*
  * HPROF binary format - description copied from:
@@ -608,7 +609,7 @@ class DumperSupport : AllStatic {
   static hprofTag type2tag(BasicType type);
 
   // returns the size of the instance of the given class
-  static u4 instance_size(klassOop k);
+  static u4 instance_size(Klass* k);
 
   // dump a jfloat
   static void dump_float(DumpWriter* writer, jfloat f);
@@ -617,26 +618,26 @@ class DumperSupport : AllStatic {
   // dumps the raw value of the given field
   static void dump_field_value(DumpWriter* writer, char type, address addr);
   // dumps static fields of the given class
-  static void dump_static_fields(DumpWriter* writer, klassOop k);
+  static void dump_static_fields(DumpWriter* writer, Klass* k);
   // dump the raw values of the instance fields of the given object
   static void dump_instance_fields(DumpWriter* writer, oop o);
   // dumps the definition of the instance fields for a given class
-  static void dump_instance_field_descriptors(DumpWriter* writer, klassOop k);
+  static void dump_instance_field_descriptors(DumpWriter* writer, Klass* k);
   // creates HPROF_GC_INSTANCE_DUMP record for the given object
   static void dump_instance(DumpWriter* writer, oop o);
   // creates HPROF_GC_CLASS_DUMP record for the given class and each of its
   // array classes
-  static void dump_class_and_array_classes(DumpWriter* writer, klassOop k);
+  static void dump_class_and_array_classes(DumpWriter* writer, Klass* k);
   // creates HPROF_GC_CLASS_DUMP record for a given primitive array
   // class (and each multi-dimensional array class too)
-  static void dump_basic_type_array_class(DumpWriter* writer, klassOop k);
+  static void dump_basic_type_array_class(DumpWriter* writer, Klass* k);
 
   // creates HPROF_GC_OBJ_ARRAY_DUMP record for the given object array
   static void dump_object_array(DumpWriter* writer, objArrayOop array);
   // creates HPROF_GC_PRIM_ARRAY_DUMP record for the given type array
   static void dump_prim_array(DumpWriter* writer, typeArrayOop array);
   // create HPROF_FRAME record for the given method and bci
-  static void dump_stack_frame(DumpWriter* writer, int frame_serial_num, int class_serial_num, methodOop m, int bci);
+  static void dump_stack_frame(DumpWriter* writer, int frame_serial_num, int class_serial_num, Method* m, int bci);
 };
 
 // write a header of the given type
@@ -719,17 +720,8 @@ void DumperSupport::dump_field_value(DumpWriter* writer, char type, address addr
       }
 
       // reflection and sun.misc.Unsafe classes may have a reference to a
-      // klassOop so filter it out.
-      if (o != NULL && o->is_klass()) {
-        o = NULL;
-      }
-
-      // FIXME: When sharing is enabled we don't emit field references to objects
-      // in shared spaces. We can remove this once we write records for the classes
-      // and strings that are shared.
-      if (o != NULL && o->is_shared()) {
-        o = NULL;
-      }
+      // Klass* so filter it out.
+      assert(o->is_oop_or_null(), "should always be an oop");
       writer->write_objectID(o);
       break;
     }
@@ -778,7 +770,7 @@ void DumperSupport::dump_field_value(DumpWriter* writer, char type, address addr
 }
 
 // returns the size of the instance of the given class
-u4 DumperSupport::instance_size(klassOop k) {
+u4 DumperSupport::instance_size(Klass* k) {
   HandleMark hm;
   instanceKlassHandle ikh = instanceKlassHandle(Thread::current(), k);
 
@@ -811,7 +803,7 @@ u4 DumperSupport::instance_size(klassOop k) {
 }
 
 // dumps static fields of the given class
-void DumperSupport::dump_static_fields(DumpWriter* writer, klassOop k) {
+void DumperSupport::dump_static_fields(DumpWriter* writer, Klass* k) {
   HandleMark hm;
   instanceKlassHandle ikh = instanceKlassHandle(Thread::current(), k);
 
@@ -856,7 +848,7 @@ void DumperSupport::dump_instance_fields(DumpWriter* writer, oop o) {
 }
 
 // dumps the definition of the instance fields for a given class
-void DumperSupport::dump_instance_field_descriptors(DumpWriter* writer, klassOop k) {
+void DumperSupport::dump_instance_field_descriptors(DumpWriter* writer, Klass* k) {
   HandleMark hm;
   instanceKlassHandle ikh = instanceKlassHandle(Thread::current(), k);
 
@@ -881,14 +873,14 @@ void DumperSupport::dump_instance_field_descriptors(DumpWriter* writer, klassOop
 
 // creates HPROF_GC_INSTANCE_DUMP record for the given object
 void DumperSupport::dump_instance(DumpWriter* writer, oop o) {
-  klassOop k = o->klass();
+  Klass* k = o->klass();
 
   writer->write_u1(HPROF_GC_INSTANCE_DUMP);
   writer->write_objectID(o);
   writer->write_u4(STACK_TRACE_ID);
 
   // class ID
-  writer->write_classID(Klass::cast(k));
+  writer->write_classID(k);
 
   // number of bytes that follow
   writer->write_u4(instance_size(k) );
@@ -899,10 +891,10 @@ void DumperSupport::dump_instance(DumpWriter* writer, oop o) {
 
 // creates HPROF_GC_CLASS_DUMP record for the given class and each of
 // its array classes
-void DumperSupport::dump_class_and_array_classes(DumpWriter* writer, klassOop k) {
-  Klass* klass = Klass::cast(k);
-  assert(klass->oop_is_instance(), "not an instanceKlass");
-  instanceKlass* ik = (instanceKlass*)klass;
+void DumperSupport::dump_class_and_array_classes(DumpWriter* writer, Klass* k) {
+  Klass* klass = k;
+  assert(klass->oop_is_instance(), "not an InstanceKlass");
+  InstanceKlass* ik = (InstanceKlass*)klass;
 
   writer->write_u1(HPROF_GC_CLASS_DUMP);
 
@@ -911,11 +903,11 @@ void DumperSupport::dump_class_and_array_classes(DumpWriter* writer, klassOop k)
   writer->write_u4(STACK_TRACE_ID);
 
   // super class ID
-  klassOop java_super = ik->java_super();
+  Klass* java_super = ik->java_super();
   if (java_super == NULL) {
-    writer->write_objectID(NULL);
+    writer->write_objectID(oop(NULL));
   } else {
-    writer->write_classID(Klass::cast(java_super));
+    writer->write_classID(java_super);
   }
 
   writer->write_objectID(ik->class_loader());
@@ -923,8 +915,8 @@ void DumperSupport::dump_class_and_array_classes(DumpWriter* writer, klassOop k)
   writer->write_objectID(ik->protection_domain());
 
   // reserved
-  writer->write_objectID(NULL);
-  writer->write_objectID(NULL);
+  writer->write_objectID(oop(NULL));
+  writer->write_objectID(oop(NULL));
 
   // instance size
   writer->write_u4(DumperSupport::instance_size(k));
@@ -941,8 +933,8 @@ void DumperSupport::dump_class_and_array_classes(DumpWriter* writer, klassOop k)
   // array classes
   k = klass->array_klass_or_null();
   while (k != NULL) {
-    Klass* klass = Klass::cast(k);
-    assert(klass->oop_is_objArray(), "not an objArrayKlass");
+    Klass* klass = k;
+    assert(klass->oop_is_objArray(), "not an ObjArrayKlass");
 
     writer->write_u1(HPROF_GC_CLASS_DUMP);
     writer->write_classID(klass);
@@ -951,14 +943,14 @@ void DumperSupport::dump_class_and_array_classes(DumpWriter* writer, klassOop k)
     // super class of array classes is java.lang.Object
     java_super = klass->java_super();
     assert(java_super != NULL, "checking");
-    writer->write_classID(Klass::cast(java_super));
+    writer->write_classID(java_super);
 
     writer->write_objectID(ik->class_loader());
     writer->write_objectID(ik->signers());
     writer->write_objectID(ik->protection_domain());
 
-    writer->write_objectID(NULL);    // reserved
-    writer->write_objectID(NULL);
+    writer->write_objectID(oop(NULL));    // reserved
+    writer->write_objectID(oop(NULL));
     writer->write_u4(0);             // instance size
     writer->write_u2(0);             // constant pool
     writer->write_u2(0);             // static fields
@@ -971,26 +963,26 @@ void DumperSupport::dump_class_and_array_classes(DumpWriter* writer, klassOop k)
 
 // creates HPROF_GC_CLASS_DUMP record for a given primitive array
 // class (and each multi-dimensional array class too)
-void DumperSupport::dump_basic_type_array_class(DumpWriter* writer, klassOop k) {
+void DumperSupport::dump_basic_type_array_class(DumpWriter* writer, Klass* k) {
  // array classes
  while (k != NULL) {
-    Klass* klass = Klass::cast(k);
+    Klass* klass = k;
 
     writer->write_u1(HPROF_GC_CLASS_DUMP);
     writer->write_classID(klass);
     writer->write_u4(STACK_TRACE_ID);
 
     // super class of array classes is java.lang.Object
-    klassOop java_super = klass->java_super();
+    Klass* java_super = klass->java_super();
     assert(java_super != NULL, "checking");
-    writer->write_classID(Klass::cast(java_super));
+    writer->write_classID(java_super);
 
-    writer->write_objectID(NULL);    // loader
-    writer->write_objectID(NULL);    // signers
-    writer->write_objectID(NULL);    // protection domain
+    writer->write_objectID(oop(NULL));    // loader
+    writer->write_objectID(oop(NULL));    // signers
+    writer->write_objectID(oop(NULL));    // protection domain
 
-    writer->write_objectID(NULL);    // reserved
-    writer->write_objectID(NULL);
+    writer->write_objectID(oop(NULL));    // reserved
+    writer->write_objectID(oop(NULL));
     writer->write_u4(0);             // instance size
     writer->write_u2(0);             // constant pool
     writer->write_u2(0);             // static fields
@@ -1004,16 +996,13 @@ void DumperSupport::dump_basic_type_array_class(DumpWriter* writer, klassOop k) 
 // creates HPROF_GC_OBJ_ARRAY_DUMP record for the given object array
 void DumperSupport::dump_object_array(DumpWriter* writer, objArrayOop array) {
 
-  // filter this
-  if (array->klass() == Universe::systemObjArrayKlassObj()) return;
-
   writer->write_u1(HPROF_GC_OBJ_ARRAY_DUMP);
   writer->write_objectID(array);
   writer->write_u4(STACK_TRACE_ID);
   writer->write_u4((u4)array->length());
 
   // array class ID
-  writer->write_classID(Klass::cast(array->klass()));
+  writer->write_classID(array->klass());
 
   // [id]* elements
   for (int index=0; index<array->length(); index++) {
@@ -1028,7 +1017,7 @@ void DumperSupport::dump_object_array(DumpWriter* writer, objArrayOop array) {
 
 // creates HPROF_GC_PRIM_ARRAY_DUMP record for the given type array
 void DumperSupport::dump_prim_array(DumpWriter* writer, typeArrayOop array) {
-  BasicType type = typeArrayKlass::cast(array->klass())->element_type();
+  BasicType type = TypeArrayKlass::cast(array->klass())->element_type();
 
   writer->write_u1(HPROF_GC_PRIM_ARRAY_DUMP);
   writer->write_objectID(array);
@@ -1111,11 +1100,11 @@ void DumperSupport::dump_prim_array(DumpWriter* writer, typeArrayOop array) {
   }
 }
 
-// create a HPROF_FRAME record of the given methodOop and bci
+// create a HPROF_FRAME record of the given Method* and bci
 void DumperSupport::dump_stack_frame(DumpWriter* writer,
                                      int frame_serial_num,
                                      int class_serial_num,
-                                     methodOop m,
+                                     Method* m,
                                      int bci) {
   int line_number;
   if (m->is_native()) {
@@ -1129,8 +1118,8 @@ void DumperSupport::dump_stack_frame(DumpWriter* writer,
   writer->write_symbolID(m->name());                // method's name
   writer->write_symbolID(m->signature());           // method's signature
 
-  assert(Klass::cast(m->method_holder())->oop_is_instance(), "not instanceKlass");
-  writer->write_symbolID(instanceKlass::cast(m->method_holder())->source_file_name());  // source file name
+  assert(m->method_holder()->oop_is_instance(), "not InstanceKlass");
+  writer->write_symbolID(m->method_holder()->source_file_name());  // source file name
   writer->write_u4(class_serial_num);               // class serial number
   writer->write_u4((u4) line_number);               // line number
 }
@@ -1242,7 +1231,7 @@ class MonitorUsedDumper : public OopClosure {
 
 // Support class used to generate HPROF_GC_ROOT_STICKY_CLASS records
 
-class StickyClassDumper : public OopClosure {
+class StickyClassDumper : public KlassClosure {
  private:
   DumpWriter* _writer;
   DumpWriter* writer() const                { return _writer; }
@@ -1250,23 +1239,14 @@ class StickyClassDumper : public OopClosure {
   StickyClassDumper(DumpWriter* writer) {
     _writer = writer;
   }
-  void do_oop(oop* obj_p);
-  void do_oop(narrowOop* obj_p) { ShouldNotReachHere(); }
-};
-
-void StickyClassDumper::do_oop(oop* obj_p) {
-  if (*obj_p != NULL) {
-    oop o = *obj_p;
-    if (o->is_klass()) {
-      klassOop k = klassOop(o);
-      if (Klass::cast(k)->oop_is_instance()) {
-        instanceKlass* ik = instanceKlass::cast(k);
+  void do_klass(Klass* k) {
+    if (k->oop_is_instance()) {
+      InstanceKlass* ik = InstanceKlass::cast(k);
         writer()->write_u1(HPROF_GC_ROOT_STICKY_CLASS);
         writer()->write_classID(ik);
       }
     }
-  }
-}
+};
 
 
 class VM_HeapDumper;
@@ -1297,9 +1277,6 @@ class HeapObjectDumper : public ObjectClosure {
 void HeapObjectDumper::do_object(oop o) {
   // hide the sentinel for deleted handles
   if (o == JNIHandles::deleted_handle()) return;
-
-  // ignore KlassKlass objects
-  if (o->is_klass()) return;
 
   // skip classes as these emitted as HPROF_GC_CLASS_DUMP records
   if (o->klass() == SystemDictionary::Class_klass()) {
@@ -1334,7 +1311,7 @@ class VM_HeapDumper : public VM_GC_Operation {
   static DumpWriter*    _global_writer;
   DumpWriter*           _local_writer;
   JavaThread*           _oome_thread;
-  methodOop             _oome_constructor;
+  Method*               _oome_constructor;
   bool _gc_before_heap_dump;
   bool _is_segmented_dump;
   jlong _dump_start;
@@ -1364,15 +1341,15 @@ class VM_HeapDumper : public VM_GC_Operation {
   bool skip_operation() const;
 
   // writes a HPROF_LOAD_CLASS record
-  static void do_load_class(klassOop k);
+  static void do_load_class(Klass* k);
 
   // writes a HPROF_GC_CLASS_DUMP record for the given class
   // (and each array class too)
-  static void do_class_dump(klassOop k);
+  static void do_class_dump(Klass* k);
 
   // writes a HPROF_GC_CLASS_DUMP records for a given basic type
   // array (and each multi-dimensional array too)
-  static void do_basic_type_array_class_dump(klassOop k);
+  static void do_basic_type_array_class_dump(Klass* k);
 
   // HPROF_GC_ROOT_THREAD_OBJ records
   int do_thread(JavaThread* thread, u4 thread_serial_num);
@@ -1411,7 +1388,7 @@ class VM_HeapDumper : public VM_GC_Operation {
     if (oome) {
       assert(!Thread::current()->is_VM_thread(), "Dump from OutOfMemoryError cannot be called by the VMThread");
       // get OutOfMemoryError zero-parameter constructor
-      instanceKlass* oome_ik = instanceKlass::cast(SystemDictionary::OutOfMemoryError_klass());
+      InstanceKlass* oome_ik = InstanceKlass::cast(SystemDictionary::OutOfMemoryError_klass());
       _oome_constructor = oome_ik->find_method(vmSymbols::object_initializer_name(),
                                                           vmSymbols::void_method_signature());
       // get thread throwing OOME when generating the heap dump at OOME
@@ -1535,7 +1512,7 @@ void HeapObjectDumper::mark_end_of_record() {
 
 // writes a HPROF_LOAD_CLASS record for the class (and each of its
 // array classes)
-void VM_HeapDumper::do_load_class(klassOop k) {
+void VM_HeapDumper::do_load_class(Klass* k) {
   static u4 class_serial_num = 0;
 
   // len of HPROF_LOAD_CLASS record
@@ -1549,10 +1526,10 @@ void VM_HeapDumper::do_load_class(klassOop k) {
     writer()->write_u4(++class_serial_num);
 
     // class ID
-    Klass* klass = Klass::cast(k);
+    Klass* klass = k;
     writer()->write_classID(klass);
 
-    // add the klassOop and class serial number pair
+    // add the Klass* and class serial number pair
     dumper()->add_class_serial_number(klass, class_serial_num);
 
     writer()->write_u4(STACK_TRACE_ID);
@@ -1567,13 +1544,13 @@ void VM_HeapDumper::do_load_class(klassOop k) {
 }
 
 // writes a HPROF_GC_CLASS_DUMP record for the given class
-void VM_HeapDumper::do_class_dump(klassOop k) {
+void VM_HeapDumper::do_class_dump(Klass* k) {
   DumperSupport::dump_class_and_array_classes(writer(), k);
 }
 
 // writes a HPROF_GC_CLASS_DUMP records for a given basic type
 // array (and each multi-dimensional array too)
-void VM_HeapDumper::do_basic_type_array_class_dump(klassOop k) {
+void VM_HeapDumper::do_basic_type_array_class_dump(Klass* k) {
   DumperSupport::dump_basic_type_array_class(writer(), k);
 }
 
@@ -1785,7 +1762,7 @@ void VM_HeapDumper::doit() {
 
   // HPROF_GC_ROOT_STICKY_CLASS
   StickyClassDumper class_dumper(writer());
-  SystemDictionary::always_strong_oops_do(&class_dumper);
+  SystemDictionary::always_strong_classes_do(&class_dumper);
 
   // fixes up the length of the dump record. In the case of a segmented
   // heap then the HPROF_HEAP_DUMP_END record is also written.
@@ -1820,7 +1797,7 @@ void VM_HeapDumper::dump_stack_traces() {
       // write fake frame that makes it look like the thread, which caused OOME,
       // is in the OutOfMemoryError zero-parameter constructor
       if (thread == _oome_thread && _oome_constructor != NULL) {
-        int oome_serial_num = _klass_map->find(Klass::cast(_oome_constructor->method_holder()));
+        int oome_serial_num = _klass_map->find(_oome_constructor->method_holder());
         // the class serial number starts from 1
         assert(oome_serial_num > 0, "OutOfMemoryError class not found");
         DumperSupport::dump_stack_frame(writer(), ++frame_serial_num, oome_serial_num,
@@ -1829,8 +1806,8 @@ void VM_HeapDumper::dump_stack_traces() {
       }
       for (int j=0; j < depth; j++) {
         StackFrameInfo* frame = stack_trace->stack_frame_at(j);
-        methodOop m = frame->method();
-        int class_serial_num = _klass_map->find(Klass::cast(m->method_holder()));
+        Method* m = frame->method();
+        int class_serial_num = _klass_map->find(m->method_holder());
         // the class serial number starts from 1
         assert(class_serial_num > 0, "class not found");
         DumperSupport::dump_stack_frame(writer(), ++frame_serial_num, class_serial_num, m, frame->bci());
@@ -1890,7 +1867,7 @@ int HeapDumper::dump(const char* path) {
     if (error() == NULL) {
       char msg[256];
       sprintf(msg, "Heap dump file created [%s bytes in %3.3f secs]",
-        os::jlong_format_specifier(), timer()->seconds());
+        JLONG_FORMAT, timer()->seconds());
       tty->print_cr(msg, writer.bytes_written());
     } else {
       tty->print_cr("Dump file is incomplete: %s", writer.error());

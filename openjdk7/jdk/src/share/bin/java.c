@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -105,6 +105,7 @@ static jboolean InitializeJVM(JavaVM **pvm, JNIEnv **penv,
                               InvocationFunctions *ifn);
 static jstring NewPlatformString(JNIEnv *env, char *s);
 static jclass LoadMainClass(JNIEnv *env, int mode, char *name);
+static jclass GetApplicationClass(JNIEnv *env);
 
 static void TranslateApplicationArgs(int jargc, const char **jargv, int *pargc, char ***pargv);
 static jboolean AddApplicationOptions(int cpathc, const char **cpathv);
@@ -148,12 +149,15 @@ static int  KnownVMIndex(const char* name);
 static void FreeKnownVMs();
 static jboolean IsWildCardEnabled();
 
-#define ARG_CHECK(n, f, a) if (n < 1) { \
-    JLI_ReportErrorMessage(f, a); \
-    printUsage = JNI_TRUE; \
-    *pret = 1; \
-    return JNI_TRUE; \
-}
+#define ARG_CHECK(AC_arg_count, AC_failure_message, AC_questionable_arg) \
+    do { \
+        if (AC_arg_count < 1) { \
+            JLI_ReportErrorMessage(AC_failure_message, AC_questionable_arg); \
+            printUsage = JNI_TRUE; \
+            *pret = 1; \
+            return JNI_TRUE; \
+        } \
+    } while (JNI_FALSE)
 
 /*
  * Running Java code in primordial thread caused many problems. We will
@@ -309,29 +313,37 @@ JLI_Launch(int argc, char ** argv,              /* main argc, argc */
  * mainThread.isAlive() to work as expected.
  */
 #define LEAVE() \
-    if ((*vm)->DetachCurrentThread(vm) != 0) { \
-        JLI_ReportErrorMessage(JVM_ERROR2); \
-        ret = 1; \
-    } \
-    (*vm)->DestroyJavaVM(vm); \
-    return ret \
+    do { \
+        if ((*vm)->DetachCurrentThread(vm) != JNI_OK) { \
+            JLI_ReportErrorMessage(JVM_ERROR2); \
+            ret = 1; \
+        } \
+        if (JNI_TRUE) { \
+            (*vm)->DestroyJavaVM(vm); \
+            return ret; \
+        } \
+    } while (JNI_FALSE)
 
-#define CHECK_EXCEPTION_NULL_LEAVE(e) \
-    if ((*env)->ExceptionOccurred(env)) { \
-        JLI_ReportExceptionDescription(env); \
-        LEAVE(); \
-    } \
-    if ((e) == NULL) { \
-        JLI_ReportErrorMessage(JNI_ERROR); \
-        LEAVE(); \
-    }
+#define CHECK_EXCEPTION_NULL_LEAVE(CENL_exception) \
+    do { \
+        if ((*env)->ExceptionOccurred(env)) { \
+            JLI_ReportExceptionDescription(env); \
+            LEAVE(); \
+        } \
+        if ((CENL_exception) == NULL) { \
+            JLI_ReportErrorMessage(JNI_ERROR); \
+            LEAVE(); \
+        } \
+    } while (JNI_FALSE)
 
-#define CHECK_EXCEPTION_LEAVE(rv) \
-    if ((*env)->ExceptionOccurred(env)) { \
-        JLI_ReportExceptionDescription(env); \
-        ret = (rv); \
-        LEAVE(); \
-    }
+#define CHECK_EXCEPTION_LEAVE(CEL_return_value) \
+    do { \
+        if ((*env)->ExceptionOccurred(env)) { \
+            JLI_ReportExceptionDescription(env); \
+            ret = (CEL_return_value); \
+            LEAVE(); \
+        } \
+    } while (JNI_FALSE)
 
 int JNICALL
 JavaMain(void * _args)
@@ -346,6 +358,7 @@ JavaMain(void * _args)
     JavaVM *vm = 0;
     JNIEnv *env = 0;
     jclass mainClass = NULL;
+    jclass appClass = NULL; // actual application class being launched
     jmethodID mainID;
     jobjectArray mainArgs;
     int ret = 0;
@@ -419,10 +432,28 @@ JavaMain(void * _args)
      *          all environments,
      *     2)   Remove the vestages of maintaining main_class through
      *          the environment (and remove these comments).
+     *
+     * This method also correctly handles launching existing JavaFX
+     * applications that may or may not have a Main-Class manifest entry.
      */
     mainClass = LoadMainClass(env, mode, what);
     CHECK_EXCEPTION_NULL_LEAVE(mainClass);
-    PostJVMInit(env, mainClass, vm);
+    /*
+     * In some cases when launching an application that needs a helper, e.g., a
+     * JavaFX application with no main method, the mainClass will not be the
+     * applications own main class but rather a helper class. To keep things
+     * consistent in the UI we need to track and report the application main class.
+     */
+    appClass = GetApplicationClass(env);
+    NULL_CHECK_RETURN_VALUE(appClass, -1);
+    /*
+     * PostJVMInit uses the class name as the application name for GUI purposes,
+     * for example, on OSX this sets the application name in the menu bar for
+     * both SWT and JavaFX. So we'll pass the actual application class here
+     * instead of mainClass as that may be a launcher or helper class instead
+     * of the application class.
+     */
+    PostJVMInit(env, appClass, vm);
     /*
      * The LoadMainClass not only loads the main class, it will also ensure
      * that the main method's signature is correct, therefore further checking
@@ -1215,6 +1246,20 @@ LoadMainClass(JNIEnv *env, int mode, char *name)
     return (jclass)result;
 }
 
+static jclass
+GetApplicationClass(JNIEnv *env)
+{
+    jmethodID mid;
+    jobject result;
+    jclass cls = GetLauncherHelperClass(env);
+    NULL_CHECK0(cls);
+    NULL_CHECK0(mid = (*env)->GetStaticMethodID(env, cls,
+                "getApplicationClass",
+                "()Ljava/lang/Class;"));
+
+    return (*env)->CallStaticObjectMethod(env, cls, mid);
+}
+
 /*
  * For tools, convert command line args thus:
  *   javac -cp foo:foo/"*" -J-ms32m ...
@@ -1743,7 +1788,6 @@ FreeKnownVMs()
     }
     JLI_MemFree(knownVMs);
 }
-
 
 /*
  * Displays the splash screen according to the jar file name

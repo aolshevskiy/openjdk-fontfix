@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,10 +48,21 @@ public final class Version {
      */
     public final String MAJOR_VERSION;
 
-    private Version(String buildId, String buildVersion, String majorVersion) {
+    /**
+     * Represents the latest Subversion Reversion number.
+     */
+    public final String SVN_REVISION;
+
+    /**
+     * The Runtime Version.
+     */
+    public static final Version RUNTIME_VERSION = Version.create(Version.class.getResourceAsStream("version.properties"));
+
+    private Version(String buildId, String buildVersion, String majorVersion, String svnRev) {
         this.BUILD_ID = fixNull(buildId);
         this.BUILD_VERSION = fixNull(buildVersion);
         this.MAJOR_VERSION = fixNull(majorVersion);
+        this.SVN_REVISION = fixNull(svnRev);
     }
 
     public static Version create(InputStream is) {
@@ -67,7 +78,8 @@ public final class Version {
         return new Version(
             props.getProperty("build-id"),
             props.getProperty("build-version"),
-            props.getProperty("major-version"));
+            props.getProperty("major-version"),
+            props.getProperty("svn-revision"));
     }
 
     private String fixNull(String v) {
@@ -76,6 +88,6 @@ public final class Version {
     }
 
     public String toString() {
-        return BUILD_VERSION;
+        return BUILD_VERSION + " svn-revision#" + SVN_REVISION;
     }
 }

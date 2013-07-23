@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,22 +45,21 @@ import javax.xml.ws.WebServiceException;
 import javax.xml.ws.handler.MessageContext;
 import javax.xml.ws.handler.Handler;
 import java.util.*;
+import java.util.Map.Entry;
 
 /**
  * @author Rama Pulavarthi
  */
 public class ClientMessageHandlerTube extends HandlerTube {
     private SEIModel seiModel;
-    private WSBinding binding;
     private Set<String> roles;
 
     /**
      * Creates a new instance of MessageHandlerTube
      */
     public ClientMessageHandlerTube(@Nullable SEIModel seiModel, WSBinding binding, WSDLPort port, Tube next) {
-        super(next, port);
+        super(next, port, binding);
         this.seiModel = seiModel;
-        this.binding = binding;
     }
 
     /**
@@ -69,7 +68,6 @@ public class ClientMessageHandlerTube extends HandlerTube {
     private ClientMessageHandlerTube(ClientMessageHandlerTube that, TubeCloner cloner) {
         super(that, cloner);
         this.seiModel = that.seiModel;
-        this.binding = that.binding;
     }
 
     public AbstractFilterTubeImpl copy(TubeCloner cloner) {
@@ -94,8 +92,9 @@ public class ClientMessageHandlerTube extends HandlerTube {
 
         //Lets copy all the MessageContext.OUTBOUND_ATTACHMENT_PROPERTY to the message
         Map<String, DataHandler> atts = (Map<String, DataHandler>) context.get(MessageContext.OUTBOUND_MESSAGE_ATTACHMENTS);
-        AttachmentSet attSet = packet.getMessage().getAttachments();
-        for(String cid : atts.keySet()){
+        AttachmentSet attSet = context.packet.getMessage().getAttachments();
+        for (Entry<String, DataHandler> entry : atts.entrySet()) {
+            String cid = entry.getKey();
             if (attSet.get(cid) == null) {  // Otherwise we would be adding attachments twice
                 Attachment att = new DataHandlerAttachment(cid, atts.get(cid));
                 attSet.add(att);
@@ -127,23 +126,25 @@ public class ClientMessageHandlerTube extends HandlerTube {
     }
 
     void setUpProcessor() {
-       // Take a snapshot, User may change chain after invocation, Same chain
-        // should be used for the entire MEP
-        handlers = new ArrayList<Handler>();
-        HandlerConfiguration handlerConfig = ((BindingImpl) binding).getHandlerConfig();
-        List<MessageHandler> msgHandlersSnapShot= handlerConfig.getMessageHandlers();
-        if (!msgHandlersSnapShot.isEmpty()) {
-            handlers.addAll(msgHandlersSnapShot);
-            roles = new HashSet<String>();
-            roles.addAll(handlerConfig.getRoles());
-            processor = new SOAPHandlerProcessor(true, this, binding, handlers);
+        if (handlers == null) {
+                // Take a snapshot, User may change chain after invocation, Same chain
+                // should be used for the entire MEP
+                handlers = new ArrayList<Handler>();
+                HandlerConfiguration handlerConfig = ((BindingImpl) getBinding()).getHandlerConfig();
+                List<MessageHandler> msgHandlersSnapShot= handlerConfig.getMessageHandlers();
+                if (!msgHandlersSnapShot.isEmpty()) {
+                    handlers.addAll(msgHandlersSnapShot);
+                    roles = new HashSet<String>();
+                    roles.addAll(handlerConfig.getRoles());
+                    processor = new SOAPHandlerProcessor(true, this, getBinding(), handlers);
+                }
         }
     }
 
 
 
     MessageUpdatableContext getContext(Packet p) {
-        MessageHandlerContextImpl context = new MessageHandlerContextImpl(seiModel, binding, port, packet,roles);
+        MessageHandlerContextImpl context = new MessageHandlerContextImpl(seiModel, getBinding(), port, p, roles);
         return context;
     }
 

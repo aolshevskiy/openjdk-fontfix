@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,7 +37,7 @@ void *findFunction(JNIEnv *env, jlong jHandle, const char *functionName) {
     if (fAddress == NULL) {
         char errorMessage[256];
         _snprintf(errorMessage, sizeof(errorMessage), "Symbol not found: %s", functionName);
-        JNU_ThrowNullPointerException(env, errorMessage);
+        throwNullPointerException(env, errorMessage);
         return NULL;
     }
     return fAddress;
@@ -78,7 +78,7 @@ JNIEXPORT jlong JNICALL Java_sun_security_pkcs11_Secmod_nssLoadLibrary
             NULL
         );
         dprintf1("-error: %s\n", lpMsgBuf);
-        JNU_ThrowIOException(env, (char*)lpMsgBuf);
+        throwIOException(env, (char*)lpMsgBuf);
         LocalFree(lpMsgBuf);
         return 0;
     }

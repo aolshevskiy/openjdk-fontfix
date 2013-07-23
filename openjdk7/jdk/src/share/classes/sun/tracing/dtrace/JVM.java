@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,8 +35,13 @@ import java.lang.reflect.Method;
 class JVM {
 
     static {
-      java.security.AccessController.doPrivileged(
-              new sun.security.action.LoadLibraryAction("jsdt"));
+        java.security.AccessController.doPrivileged(
+            new java.security.PrivilegedAction<Void>() {
+                public Void run() {
+                    System.loadLibrary("jsdt");
+                    return null;
+                }
+            });
     }
 
     static long activate(String moduleName, DTraceProvider[] providers) {

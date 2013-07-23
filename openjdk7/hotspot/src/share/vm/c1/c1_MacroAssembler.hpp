@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,22 +25,8 @@
 #ifndef SHARE_VM_C1_C1_MACROASSEMBLER_HPP
 #define SHARE_VM_C1_C1_MACROASSEMBLER_HPP
 
-#include "asm/assembler.hpp"
-#ifdef TARGET_ARCH_x86
-# include "assembler_x86.inline.hpp"
-#endif
-#ifdef TARGET_ARCH_sparc
-# include "assembler_sparc.inline.hpp"
-#endif
-#ifdef TARGET_ARCH_zero
-# include "assembler_zero.inline.hpp"
-#endif
-#ifdef TARGET_ARCH_arm
-# include "assembler_arm.inline.hpp"
-#endif
-#ifdef TARGET_ARCH_ppc
-# include "assembler_ppc.inline.hpp"
-#endif
+#include "asm/macroAssembler.hpp"
+#include "asm/macroAssembler.inline.hpp"
 
 class CodeEmitInfo;
 
@@ -107,10 +93,10 @@ class StubAssembler: public C1_MacroAssembler {
   int stub_id() const                            { return _stub_id; }
 
   // runtime calls (return offset of call to be used by GC map)
-  int call_RT(Register oop_result1, Register oop_result2, address entry, int args_size = 0);
-  int call_RT(Register oop_result1, Register oop_result2, address entry, Register arg1);
-  int call_RT(Register oop_result1, Register oop_result2, address entry, Register arg1, Register arg2);
-  int call_RT(Register oop_result1, Register oop_result2, address entry, Register arg1, Register arg2, Register arg3);
+  int call_RT(Register oop_result1, Register metadata_result, address entry, int args_size = 0);
+  int call_RT(Register oop_result1, Register metadata_result, address entry, Register arg1);
+  int call_RT(Register oop_result1, Register metadata_result, address entry, Register arg1, Register arg2);
+  int call_RT(Register oop_result1, Register metadata_result, address entry, Register arg1, Register arg2, Register arg3);
 };
 
 #endif // SHARE_VM_C1_C1_MACROASSEMBLER_HPP

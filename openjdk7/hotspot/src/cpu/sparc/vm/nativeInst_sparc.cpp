@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
  */
 
 #include "precompiled.hpp"
-#include "assembler_sparc.inline.hpp"
+#include "asm/macroAssembler.hpp"
 #include "memory/resourceArea.hpp"
 #include "nativeInst_sparc.hpp"
 #include "oops/oop.inline.hpp"
@@ -162,7 +162,7 @@ void NativeCall::replace_mt_safe(address instr_addr, address code_buffer) {
    int i1 = ((int*)code_buffer)[1];
    int* contention_addr = (int*) n_call->addr_at(1*BytesPerInstWord);
    assert(inv_op(*contention_addr) == Assembler::arith_op ||
-          *contention_addr == nop_instruction() || !VM_Version::v9_instructions_work(),
+          *contention_addr == nop_instruction(),
           "must not interfere with original call");
    // The set_long_at calls do the ICacheInvalidate so we just need to do them in reverse order
    n_call->set_long_at(1*BytesPerInstWord, i1);
@@ -181,7 +181,7 @@ void NativeCall::replace_mt_safe(address instr_addr, address code_buffer) {
    // Make sure the first-patched instruction, which may co-exist
    // briefly with the call, will do something harmless.
    assert(inv_op(*contention_addr) == Assembler::arith_op ||
-          *contention_addr == nop_instruction() || !VM_Version::v9_instructions_work(),
+          *contention_addr == nop_instruction(),
           "must not interfere with original call");
 }
 
@@ -300,7 +300,7 @@ void NativeFarCall::test() {
 
 void NativeMovConstReg::verify() {
   NativeInstruction::verify();
-  // make sure code pattern is actually a "set_oop" synthetic instruction
+  // make sure code pattern is actually a "set_metadata" synthetic instruction
   // see MacroAssembler::set_oop()
   int i0 = long_at(sethi_offset);
   int i1 = long_at(add_offset);
@@ -312,11 +312,11 @@ void NativeMovConstReg::verify() {
         is_op3(i1, Assembler::add_op3, Assembler::arith_op) &&
         inv_immed(i1) && (unsigned)get_simm13(i1) < (1 << 10) &&
         rd == inv_rs1(i1) && rd == inv_rd(i1))) {
-    fatal("not a set_oop");
+    fatal("not a set_metadata");
   }
 #else
   if (!is_op2(i0, Assembler::sethi_op2) && rd != G0 ) {
-    fatal("not a set_oop");
+    fatal("not a set_metadata");
   }
 #endif
 }
@@ -352,6 +352,7 @@ void NativeMovConstReg::set_data(intptr_t x) {
   if (nm != NULL) {
     RelocIterator iter(nm, instruction_address(), next_instruction_address());
     oop* oop_addr = NULL;
+    Metadata** metadata_addr = NULL;
     while (iter.next()) {
       if (iter.type() == relocInfo::oop_type) {
         oop_Relocation *r = iter.oop_reloc();
@@ -360,6 +361,15 @@ void NativeMovConstReg::set_data(intptr_t x) {
           *oop_addr = (oop)x;
         } else {
           assert(oop_addr == r->oop_addr(), "must be only one set-oop here");
+        }
+      }
+      if (iter.type() == relocInfo::metadata_type) {
+        metadata_Relocation *r = iter.metadata_reloc();
+        if (metadata_addr == NULL) {
+          metadata_addr = r->metadata_addr();
+          *metadata_addr = (Metadata*)x;
+        } else {
+          assert(metadata_addr == r->metadata_addr(), "must be only one set-metadata here");
         }
       }
     }
@@ -429,7 +439,7 @@ void NativeMovConstRegPatching::verify() {
         is_op3(i2, Assembler::add_op3, Assembler::arith_op) &&
         inv_immed(i2) && (unsigned)get_simm13(i2) < (1 << 10) &&
         rd0 == inv_rs1(i2) && rd0 == inv_rd(i2))) {
-    fatal("not a set_oop");
+    fatal("not a set_metadata");
   }
 }
 
@@ -462,6 +472,7 @@ void NativeMovConstRegPatching::set_data(int x) {
   if (nm != NULL) {
     RelocIterator iter(nm, instruction_address(), next_instruction_address());
     oop* oop_addr = NULL;
+    Metadata** metadata_addr = NULL;
     while (iter.next()) {
       if (iter.type() == relocInfo::oop_type) {
         oop_Relocation *r = iter.oop_reloc();
@@ -470,6 +481,15 @@ void NativeMovConstRegPatching::set_data(int x) {
           *oop_addr = (oop)x;
         } else {
           assert(oop_addr == r->oop_addr(), "must be only one set-oop here");
+        }
+      }
+      if (iter.type() == relocInfo::metadata_type) {
+        metadata_Relocation *r = iter.metadata_reloc();
+        if (metadata_addr == NULL) {
+          metadata_addr = r->metadata_addr();
+          *metadata_addr = (Metadata*)x;
+        } else {
+          assert(metadata_addr == r->metadata_addr(), "must be only one set-metadata here");
         }
       }
     }
@@ -913,11 +933,7 @@ void NativeJump::patch_verified_entry(address entry, address verified_entry, add
   int code_size = 1 * BytesPerInstWord;
   CodeBuffer cb(verified_entry, code_size + 1);
   MacroAssembler* a = new MacroAssembler(&cb);
-  if (VM_Version::v9_instructions_work()) {
-    a->ldsw(G0, 0, O7); // "ld" must agree with code in the signal handler
-  } else {
-    a->lduw(G0, 0, O7); // "ld" must agree with code in the signal handler
-  }
+  a->ldsw(G0, 0, O7); // "ld" must agree with code in the signal handler
   ICache::invalidate_range(verified_entry, code_size);
 }
 
@@ -1004,7 +1020,7 @@ void NativeGeneralJump::replace_mt_safe(address instr_addr, address code_buffer)
    int i1 = ((int*)code_buffer)[1];
    int* contention_addr = (int*) h_jump->addr_at(1*BytesPerInstWord);
    assert(inv_op(*contention_addr) == Assembler::arith_op ||
-          *contention_addr == nop_instruction() || !VM_Version::v9_instructions_work(),
+          *contention_addr == nop_instruction(),
           "must not interfere with original call");
    // The set_long_at calls do the ICacheInvalidate so we just need to do them in reverse order
    h_jump->set_long_at(1*BytesPerInstWord, i1);
@@ -1023,6 +1039,6 @@ void NativeGeneralJump::replace_mt_safe(address instr_addr, address code_buffer)
    // Make sure the first-patched instruction, which may co-exist
    // briefly with the call, will do something harmless.
    assert(inv_op(*contention_addr) == Assembler::arith_op ||
-          *contention_addr == nop_instruction() || !VM_Version::v9_instructions_work(),
+          *contention_addr == nop_instruction(),
           "must not interfere with original call");
 }

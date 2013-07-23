@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2004, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -55,15 +55,15 @@ endif
 
 define make-all-launchers
 $(make-appletviewer)
-$(call make-launcher, apt, com.sun.tools.apt.Main, , )
 $(call make-launcher, extcheck, com.sun.tools.extcheck.Main, , )
 $(call make-launcher, idlj, com.sun.tools.corba.se.idl.toJavaPortable.Compile, , )
 $(call make-launcher, jar, sun.tools.jar.Main, , )
-$(call make-launcher, jarsigner, sun.security.tools.JarSigner, , )
+$(call make-launcher, jarsigner, sun.security.tools.jarsigner.Main, , )
 $(call make-launcher, javac, com.sun.tools.javac.Main, , )
 $(call make-launcher, javadoc, com.sun.tools.javadoc.Main, , )
 $(call make-launcher, javah, com.sun.tools.javah.Main, , )
 $(call make-launcher, javap, com.sun.tools.javap.Main, , )
+$(call make-launcher, jdeps, com.sun.tools.jdeps.Main, , )
 $(call make-launcher, jcmd, sun.tools.jcmd.JCmd, , )
 $(call make-launcher, jconsole, sun.tools.jconsole.JConsole, \
   -J-Djconsole.showOutputViewer, )
@@ -77,6 +77,7 @@ $(call make-launcher, jmap, sun.tools.jmap.JMap, \
   -J-Dsun.jvm.hotspot.debugger.useWindbgDebugger, )
 $(call make-launcher, jps, sun.tools.jps.Jps, , )
 $(call make-launcher, jrunscript, com.sun.tools.script.shell.Main, , )
+$(call make-launcher, jjs, jdk.nashorn.tools.Shell, , )
 $(call make-launcher, jsadebugd, sun.jvm.hotspot.jdi.SADebugServer, , )
 $(call make-launcher, jstack, sun.tools.jstack.JStack, \
   -J-Dsun.jvm.hotspot.debugger.useProcDebugger \

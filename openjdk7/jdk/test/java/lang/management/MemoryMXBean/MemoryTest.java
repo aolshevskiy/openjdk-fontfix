@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,16 +58,22 @@ public class MemoryTest {
     // They are: Copy/Scavenger + MSC + CodeCache manager
     // (or equivalent for other collectors)
     // Number of GC memory managers = 2
+
+    // Hotspot VM 1.8+ after perm gen removal is expected to have two or
+    // three non-heap memory pools:
+    // - Code cache
+    // - Metaspace
+    // - Compressed Class Space (if compressed class pointers are used)
     private static int[] expectedMinNumPools = {3, 2};
-    private static int[] expectedMaxNumPools = {3, 4};
+    private static int[] expectedMaxNumPools = {3, 3};
     private static int expectedNumGCMgrs = 2;
-    private static int expectedNumMgrs = expectedNumGCMgrs + 1;
+    private static int expectedNumMgrs = expectedNumGCMgrs + 2;
     private static String[] types = { "heap", "non-heap" };
 
     public static void main(String args[]) throws Exception {
         Integer value = new Integer(args[0]);
         expectedNumGCMgrs = value.intValue();
-        expectedNumMgrs = expectedNumGCMgrs + 1;
+        expectedNumMgrs = expectedNumGCMgrs + 2;
 
         checkMemoryPools();
         checkMemoryManagers();
@@ -80,6 +86,7 @@ public class MemoryTest {
 
     private static void checkMemoryPools() throws Exception {
         List pools = ManagementFactory.getMemoryPoolMXBeans();
+        boolean hasPerm = false;
 
         int[] numPools = new int[NUM_TYPES];
         for (ListIterator iter = pools.listIterator(); iter.hasNext();) {
@@ -90,6 +97,16 @@ public class MemoryTest {
             if (pool.getType() == MemoryType.NON_HEAP) {
                 numPools[NONHEAP]++;
             }
+            if (pool.getName().toLowerCase().contains("perm")) {
+                hasPerm = true;
+            }
+        }
+
+        if (hasPerm) {
+            // If the VM has perm gen there will be between 2 and 4 non heap
+            // pools (4 if class data sharing is used)
+            expectedMinNumPools[NONHEAP] = 2;
+            expectedMaxNumPools[NONHEAP] = 4;
         }
 
         // Check the number of Memory pools

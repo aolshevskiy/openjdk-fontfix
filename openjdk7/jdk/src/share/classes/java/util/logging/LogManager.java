@@ -31,8 +31,10 @@ import java.util.*;
 import java.security.*;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.beans.PropertyChangeListener;
-import java.beans.PropertyChangeSupport;
 import sun.misc.JavaAWTAccess;
 import sun.misc.SharedSecrets;
 
@@ -56,20 +58,14 @@ import sun.misc.SharedSecrets;
  * At startup the LogManager class is located using the
  * java.util.logging.manager system property.
  * <p>
- * By default, the LogManager reads its initial configuration from
- * a properties file "lib/logging.properties" in the JRE directory.
- * If you edit that property file you can change the default logging
- * configuration for all uses of that JRE.
- * <p>
- * In addition, the LogManager uses two optional system properties that
- * allow more control over reading the initial configuration:
+ * The LogManager defines two optional system properties that allow control over
+ * the initial configuration:
  * <ul>
  * <li>"java.util.logging.config.class"
  * <li>"java.util.logging.config.file"
  * </ul>
- * These two properties may be set via the Preferences API, or as
- * command line property definitions to the "java" command, or as
- * system property definitions passed to JNI_CreateJavaVM.
+ * These two properties may be specified on the command line to the "java"
+ * command, or as system property definitions passed to JNI_CreateJavaVM.
  * <p>
  * If the "java.util.logging.config.class" property is set, then the
  * property value is treated as a class name.  The given class will be
@@ -84,9 +80,10 @@ import sun.misc.SharedSecrets;
  * to specify a properties file (in java.util.Properties format). The
  * initial logging configuration will be read from this file.
  * <p>
- * If neither of these properties is defined then, as described
- * above, the LogManager will read its initial configuration from
- * a properties file "lib/logging.properties" in the JRE directory.
+ * If neither of these properties is defined then the LogManager uses its
+ * default configuration. The default configuration is typically loaded from the
+ * properties file "{@code lib/logging.properties}" in the Java installation
+ * directory.
  * <p>
  * The properties for loggers and Handlers will have names starting
  * with the dot-separated name for the handler or logger.
@@ -150,9 +147,11 @@ public class LogManager {
     private static LogManager manager;
 
     private Properties props = new Properties();
-    private PropertyChangeSupport changes
-                         = new PropertyChangeSupport(LogManager.class);
     private final static Level defaultLevel = Level.INFO;
+
+    // The map of the registered listeners. The map value is the registration
+    // count to allow for cases where the same listener is registered many times.
+    private final Map<Object,Integer> listenerMap = new HashMap<>();
 
     // LoggerContext for system loggers and user loggers
     private final LoggerContext systemContext = new SystemLoggerContext();
@@ -177,10 +176,10 @@ public class LogManager {
                         cname = System.getProperty("java.util.logging.manager");
                         if (cname != null) {
                             try {
-                                Class clz = ClassLoader.getSystemClassLoader().loadClass(cname);
+                                Class<?> clz = ClassLoader.getSystemClassLoader().loadClass(cname);
                                 manager = (LogManager) clz.newInstance();
                             } catch (ClassNotFoundException ex) {
-                                Class clz = Thread.currentThread().getContextClassLoader().loadClass(cname);
+                                Class<?> clz = Thread.currentThread().getContextClassLoader().loadClass(cname);
                                 manager = (LogManager) clz.newInstance();
                             }
                         }
@@ -194,13 +193,27 @@ public class LogManager {
 
                     // Create and retain Logger for the root of the namespace.
                     manager.rootLogger = manager.new RootLogger();
+                    // since by design the global manager's userContext and
+                    // systemContext don't have their requiresDefaultLoggers
+                    // flag set - we make sure to add the root logger to
+                    // the global manager's default contexts here.
                     manager.addLogger(manager.rootLogger);
-                    manager.systemContext.addLocalLogger(manager.rootLogger);
+                    manager.systemContext.addLocalLogger(manager.rootLogger, false);
+                    manager.userContext.addLocalLogger(manager.rootLogger, false);
 
                     // Adding the global Logger. Doing so in the Logger.<clinit>
                     // would deadlock with the LogManager.<clinit>.
-                    Logger.global.setLogManager(manager);
-                    manager.addLogger(Logger.global);
+                    // Do not call Logger.getGlobal() here as this might trigger
+                    // the deadlock too.
+                    @SuppressWarnings("deprecation")
+                    final Logger global = Logger.global;
+                    global.setLogManager(manager);
+
+                    // Make sure the global logger will be registered in the
+                    // global manager's default contexts.
+                    manager.addLogger(global);
+                    manager.systemContext.addLocalLogger(global, false);
+                    manager.userContext.addLocalLogger(global, false);
 
                     // We don't call readConfiguration() here, as we may be running
                     // very early in the JVM startup sequence.  Instead readConfiguration
@@ -245,7 +258,7 @@ public class LogManager {
      * Protected constructor.  This is protected so that container applications
      * (such as J2EE containers) can subclass the object.  It is non-public as
      * it is intended that there only be one LogManager object, whose value is
-     * retrieved by calling Logmanager.getLogManager.
+     * retrieved by calling LogManager.getLogManager.
      */
     protected LogManager() {
         // Add a shutdown hook to close the global handlers.
@@ -258,7 +271,8 @@ public class LogManager {
     }
 
     /**
-     * Return the global LogManager object.
+     * Returns the global LogManager object.
+     * @return the global LogManager object
      */
     public static LogManager getLogManager() {
         if (manager != null) {
@@ -304,17 +318,31 @@ public class LogManager {
      * the same event Listener results in multiple entries
      * in the property event listener table.
      *
+     * <p><b>WARNING:</b> This method is omitted from this class in all subset
+     * Profiles of Java SE that do not include the {@code java.beans} package.
+     * </p>
+     *
      * @param l  event listener
      * @exception  SecurityException  if a security manager exists and if
      *             the caller does not have LoggingPermission("control").
      * @exception NullPointerException if the PropertyChangeListener is null.
+     * @deprecated The dependency on {@code PropertyChangeListener} creates a
+     *             significant impediment to future modularization of the Java
+     *             platform. This method will be removed in a future release.
+     *             The global {@code LogManager} can detect changes to the
+     *             logging configuration by overridding the {@link
+     *             #readConfiguration readConfiguration} method.
      */
+    @Deprecated
     public void addPropertyChangeListener(PropertyChangeListener l) throws SecurityException {
-        if (l == null) {
-            throw new NullPointerException();
-        }
+        PropertyChangeListener listener = Objects.requireNonNull(l);
         checkPermission();
-        changes.addPropertyChangeListener(l);
+        synchronized (listenerMap) {
+            // increment the registration count if already registered
+            Integer value = listenerMap.get(listener);
+            value = (value == null) ? 1 : (value + 1);
+            listenerMap.put(listener, value);
+        }
     }
 
     /**
@@ -327,13 +355,40 @@ public class LogManager {
      * <P>
      * Returns silently if the given listener is not found.
      *
+     * <p><b>WARNING:</b> This method is omitted from this class in all subset
+     * Profiles of Java SE that do not include the {@code java.beans} package.
+     * </p>
+     *
      * @param l  event listener (can be null)
      * @exception  SecurityException  if a security manager exists and if
      *             the caller does not have LoggingPermission("control").
+     * @deprecated The dependency on {@code PropertyChangeListener} creates a
+     *             significant impediment to future modularization of the Java
+     *             platform. This method will be removed in a future release.
+     *             The global {@code LogManager} can detect changes to the
+     *             logging configuration by overridding the {@link
+     *             #readConfiguration readConfiguration} method.
      */
+    @Deprecated
     public void removePropertyChangeListener(PropertyChangeListener l) throws SecurityException {
         checkPermission();
-        changes.removePropertyChangeListener(l);
+        if (l != null) {
+            PropertyChangeListener listener = l;
+            synchronized (listenerMap) {
+                Integer value = listenerMap.get(listener);
+                if (value != null) {
+                    // remove from map if registration count is 1, otherwise
+                    // just decrement its count
+                    int i = value.intValue();
+                    if (i == 1) {
+                        listenerMap.remove(listener);
+                    } else {
+                        assert i > 1;
+                        listenerMap.put(listener, i - 1);
+                    }
+                }
+            }
+        }
     }
 
     // Returns the LoggerContext for the user code (i.e. application or AppContext).
@@ -351,27 +406,27 @@ public class LogManager {
                 // from the execution stack.
                 Object ecx = javaAwtAccess.getExecutionContext();
                 if (ecx == null) {
-                    // fall back to AppContext.getAppContext()
+                    // fall back to thread group seach of AppContext
                     ecx = javaAwtAccess.getContext();
                 }
-                context = (LoggerContext)javaAwtAccess.get(ecx, LoggerContext.class);
-                if (context == null) {
-                    if (javaAwtAccess.isMainAppContext()) {
-                        context = userContext;
-                    } else {
-                        context = new LoggerContext();
-                        // during initialization, rootLogger is null when
-                        // instantiating itself RootLogger
-                        if (manager.rootLogger != null)
-                            context.addLocalLogger(manager.rootLogger);
+                if (ecx != null) {
+                    context = (LoggerContext)javaAwtAccess.get(ecx, LoggerContext.class);
+                    if (context == null) {
+                        if (javaAwtAccess.isMainAppContext()) {
+                            context = userContext;
+                        } else {
+                            // Create a new LoggerContext for the applet.
+                            // The new logger context has its requiresDefaultLoggers
+                            // flag set to true - so that these loggers will be
+                            // lazily added when the context is firt accessed.
+                            context = new LoggerContext(true);
+                        }
+                        javaAwtAccess.put(ecx, LoggerContext.class, context);
                     }
-                    javaAwtAccess.put(ecx, LoggerContext.class, context);
                 }
             }
-        } else {
-            context = userContext;
         }
-        return context;
+        return context != null ? context : userContext;
     }
 
     private List<LoggerContext> contexts() {
@@ -393,11 +448,11 @@ public class LogManager {
     // add a new Logger or return the one that has been added previously
     // as a LogManager subclass may override the addLogger, getLogger,
     // readConfiguration, and other methods.
-    Logger demandLogger(String name, String resourceBundleName) {
+    Logger demandLogger(String name, String resourceBundleName, Class<?> caller) {
         Logger result = getLogger(name);
         if (result == null) {
             // only allocate the new logger once
-            Logger newLogger = new Logger(name, resourceBundleName);
+            Logger newLogger = new Logger(name, resourceBundleName, caller);
             do {
                 if (addLogger(newLogger)) {
                     // We successfully added the new Logger that we
@@ -471,18 +526,42 @@ public class LogManager {
         private final Hashtable<String,LoggerWeakRef> namedLoggers = new Hashtable<>();
         // Tree of named Loggers
         private final LogNode root;
-
+        private final boolean requiresDefaultLoggers;
         private LoggerContext() {
+            this(false);
+        }
+        private LoggerContext(boolean requiresDefaultLoggers) {
             this.root = new LogNode(null, this);
+            this.requiresDefaultLoggers = requiresDefaultLoggers;
         }
 
         Logger demandLogger(String name, String resourceBundleName) {
             // a LogManager subclass may have its own implementation to add and
             // get a Logger.  So delegate to the LogManager to do the work.
-            return manager.demandLogger(name, resourceBundleName);
+            return manager.demandLogger(name, resourceBundleName, null);
         }
 
+
+        // Due to subtle deadlock issues getUserContext() no longer
+        // calls addLocalLogger(rootLogger);
+        // Therefore - we need to add the default loggers later on.
+        // Checks that the context is properly initialized
+        // This is necessary before calling e.g. find(name)
+        // or getLoggerNames()
+        //
+        private void ensureInitialized() {
+            if (requiresDefaultLoggers) {
+                // Ensure that the root and global loggers are set.
+                ensureDefaultLogger(manager.rootLogger);
+                ensureDefaultLogger(Logger.global);
+            }
+        }
+
+
         synchronized Logger findLogger(String name) {
+            // ensure that this context is properly initialized before
+            // looking for loggers.
+            ensureInitialized();
             LoggerWeakRef ref = namedLoggers.get(name);
             if (ref == null) {
                 return null;
@@ -496,14 +575,81 @@ public class LogManager {
             return logger;
         }
 
+        // This method is called before adding a logger to the
+        // context.
+        // 'logger' is the context that will be added.
+        // This method will ensure that the defaults loggers are added
+        // before adding 'logger'.
+        //
+        private void ensureAllDefaultLoggers(Logger logger) {
+            if (requiresDefaultLoggers) {
+                final String name = logger.getName();
+                if (!name.isEmpty()) {
+                    ensureDefaultLogger(manager.rootLogger);
+                }
+                if (!Logger.GLOBAL_LOGGER_NAME.equals(name)) {
+                    ensureDefaultLogger(Logger.global);
+                }
+            }
+        }
+
+        private void ensureDefaultLogger(Logger logger) {
+            // Used for lazy addition of root logger and global logger
+            // to a LoggerContext.
+
+            // This check is simple sanity: we do not want that this
+            // method be called for anything else than Logger.global
+            // or owner.rootLogger.
+            if (!requiresDefaultLoggers || logger == null
+                    || logger != Logger.global && logger != manager.rootLogger) {
+
+                // the case where we have a non null logger which is neither
+                // Logger.global nor manager.rootLogger indicates a serious
+                // issue - as ensureDefaultLogger should never be called
+                // with any other loggers than one of these two (or null - if
+                // e.g manager.rootLogger is not yet initialized)...
+                assert logger == null;
+
+                return;
+            }
+
+            // Adds the logger if it's not already there.
+            if (!namedLoggers.containsKey(logger.getName())) {
+                // It is important to prevent addLocalLogger to
+                // call ensureAllDefaultLoggers when we're in the process
+                // off adding one of those default loggers - as this would
+                // immediately cause a stack overflow.
+                // Therefore we must pass addDefaultLoggersIfNeeded=false,
+                // even if requiresDefaultLoggers is true.
+                addLocalLogger(logger, false);
+            }
+        }
+
+        boolean addLocalLogger(Logger logger) {
+            // no need to add default loggers if it's not required
+            return addLocalLogger(logger, requiresDefaultLoggers);
+        }
+
         // Add a logger to this context.  This method will only set its level
         // and process parent loggers.  It doesn't set its handlers.
-        synchronized boolean addLocalLogger(Logger logger) {
+        synchronized boolean addLocalLogger(Logger logger, boolean addDefaultLoggersIfNeeded) {
+            // addDefaultLoggersIfNeeded serves to break recursion when adding
+            // default loggers. If we're adding one of the default loggers
+            // (we're being called from ensureDefaultLogger()) then
+            // addDefaultLoggersIfNeeded will be false: we don't want to
+            // call ensureAllDefaultLoggers again.
+            //
+            // Note: addDefaultLoggersIfNeeded can also be false when
+            //       requiresDefaultLoggers is false - since calling
+            //       ensureAllDefaultLoggers would have no effect in this case.
+            if (addDefaultLoggersIfNeeded) {
+                ensureAllDefaultLoggers(logger);
+            }
+
             final String name = logger.getName();
             if (name == null) {
                 throw new NullPointerException();
             }
-
             LoggerWeakRef ref = namedLoggers.get(name);
             if (ref != null) {
                 if (ref.get() == null) {
@@ -528,6 +674,9 @@ public class LogManager {
                 doSetLevel(logger, level);
             }
 
+            // instantiation of the handler is done in the LogManager.addLogger
+            // implementation as a handler class may be only visible to LogManager
+            // subclass for the custom log manager case
             processParentHandlers(logger, name);
 
             // Find the new node and its parent.
@@ -563,6 +712,9 @@ public class LogManager {
         }
 
         synchronized Enumeration<String> getLoggerNames() {
+            // ensure that this context is properly initialized before
+            // returning logger names.
+            ensureInitialized();
             return namedLoggers.keys();
         }
 
@@ -677,7 +829,7 @@ public class LogManager {
                 for (int i = 0; i < names.length; i++) {
                     String word = names[i];
                     try {
-                        Class clz = ClassLoader.getSystemClassLoader().loadClass(word);
+                        Class<?> clz = ClassLoader.getSystemClassLoader().loadClass(word);
                         Handler hdl = (Handler) clz.newInstance();
                         // Check if there is a property defining the
                         // this handler's level.
@@ -954,11 +1106,11 @@ public class LogManager {
                 // responsibility to initialize the logging configuration, by
                 // calling readConfiguration(InputStream) with a suitable stream.
                 try {
-                    Class clz = ClassLoader.getSystemClassLoader().loadClass(cname);
+                    Class<?> clz = ClassLoader.getSystemClassLoader().loadClass(cname);
                     clz.newInstance();
                     return;
                 } catch (ClassNotFoundException ex) {
-                    Class clz = Thread.currentThread().getContextClassLoader().loadClass(cname);
+                    Class<?> clz = Thread.currentThread().getContextClassLoader().loadClass(cname);
                     clz.newInstance();
                     return;
                 }
@@ -1099,7 +1251,7 @@ public class LogManager {
         for (int i = 0; i < names.length; i++) {
             String word = names[i];
             try {
-                Class clz = ClassLoader.getSystemClassLoader().loadClass(word);
+                Class<?> clz = ClassLoader.getSystemClassLoader().loadClass(word);
                 clz.newInstance();
             } catch (Exception ex) {
                 System.err.println("Can't load config class \"" + word + "\"");
@@ -1112,7 +1264,25 @@ public class LogManager {
         setLevelsOnExistingLoggers();
 
         // Notify any interested parties that our properties have changed.
-        changes.firePropertyChange(null, null, null);
+        // We first take a copy of the listener map so that we aren't holding any
+        // locks when calling the listeners.
+        Map<Object,Integer> listeners = null;
+        synchronized (listenerMap) {
+            if (!listenerMap.isEmpty())
+                listeners = new HashMap<>(listenerMap);
+        }
+        if (listeners != null) {
+            assert Beans.isBeansPresent();
+            Object ev = Beans.newPropertyChangeEvent(LogManager.class, null, null, null);
+            for (Map.Entry<Object,Integer> entry : listeners.entrySet()) {
+                Object listener = entry.getKey();
+                int count = entry.getValue().intValue();
+                for (int i = 0; i < count; i++) {
+                    Beans.invokePropertyChange(listener, ev);
+                }
+            }
+        }
+
 
         // Note that we need to reinitialize global handles when
         // they are first referenced.
@@ -1194,7 +1364,7 @@ public class LogManager {
         String val = getProperty(name);
         try {
             if (val != null) {
-                Class clz = ClassLoader.getSystemClassLoader().loadClass(val);
+                Class<?> clz = ClassLoader.getSystemClassLoader().loadClass(val);
                 return (Filter) clz.newInstance();
             }
         } catch (Exception ex) {
@@ -1215,7 +1385,7 @@ public class LogManager {
         String val = getProperty(name);
         try {
             if (val != null) {
-                Class clz = ClassLoader.getSystemClassLoader().loadClass(val);
+                Class<?> clz = ClassLoader.getSystemClassLoader().loadClass(val);
                 return (Formatter) clz.newInstance();
             }
         } catch (Exception ex) {
@@ -1396,4 +1566,100 @@ public class LogManager {
         return loggingMXBean;
     }
 
+    /**
+     * A class that provides access to the java.beans.PropertyChangeListener
+     * and java.beans.PropertyChangeEvent without creating a static dependency
+     * on java.beans. This class can be removed once the addPropertyChangeListener
+     * and removePropertyChangeListener methods are removed.
+     */
+    private static class Beans {
+        private static final Class<?> propertyChangeListenerClass =
+            getClass("java.beans.PropertyChangeListener");
+
+        private static final Class<?> propertyChangeEventClass =
+            getClass("java.beans.PropertyChangeEvent");
+
+        private static final Method propertyChangeMethod =
+            getMethod(propertyChangeListenerClass,
+                      "propertyChange",
+                      propertyChangeEventClass);
+
+        private static final Constructor<?> propertyEventCtor =
+            getConstructor(propertyChangeEventClass,
+                           Object.class,
+                           String.class,
+                           Object.class,
+                           Object.class);
+
+        private static Class<?> getClass(String name) {
+            try {
+                return Class.forName(name, true, Beans.class.getClassLoader());
+            } catch (ClassNotFoundException e) {
+                return null;
+            }
+        }
+        private static Constructor<?> getConstructor(Class<?> c, Class<?>... types) {
+            try {
+                return (c == null) ? null : c.getDeclaredConstructor(types);
+            } catch (NoSuchMethodException x) {
+                throw new AssertionError(x);
+            }
+        }
+
+        private static Method getMethod(Class<?> c, String name, Class<?>... types) {
+            try {
+                return (c == null) ? null : c.getMethod(name, types);
+            } catch (NoSuchMethodException e) {
+                throw new AssertionError(e);
+            }
+        }
+
+        /**
+         * Returns {@code true} if java.beans is present.
+         */
+        static boolean isBeansPresent() {
+            return propertyChangeListenerClass != null &&
+                   propertyChangeEventClass != null;
+        }
+
+        /**
+         * Returns a new PropertyChangeEvent with the given source, property
+         * name, old and new values.
+         */
+        static Object newPropertyChangeEvent(Object source, String prop,
+                                             Object oldValue, Object newValue)
+        {
+            try {
+                return propertyEventCtor.newInstance(source, prop, oldValue, newValue);
+            } catch (InstantiationException | IllegalAccessException x) {
+                throw new AssertionError(x);
+            } catch (InvocationTargetException x) {
+                Throwable cause = x.getCause();
+                if (cause instanceof Error)
+                    throw (Error)cause;
+                if (cause instanceof RuntimeException)
+                    throw (RuntimeException)cause;
+                throw new AssertionError(x);
+            }
+        }
+
+        /**
+         * Invokes the given PropertyChangeListener's propertyChange method
+         * with the given event.
+         */
+        static void invokePropertyChange(Object listener, Object ev) {
+            try {
+                propertyChangeMethod.invoke(listener, ev);
+            } catch (IllegalAccessException x) {
+                throw new AssertionError(x);
+            } catch (InvocationTargetException x) {
+                Throwable cause = x.getCause();
+                if (cause instanceof Error)
+                    throw (Error)cause;
+                if (cause instanceof RuntimeException)
+                    throw (RuntimeException)cause;
+                throw new AssertionError(x);
+            }
+        }
+    }
 }

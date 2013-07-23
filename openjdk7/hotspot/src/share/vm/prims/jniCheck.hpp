@@ -33,7 +33,7 @@ extern "C" {
   // within IN_VM macro), one to be called when in NATIVE state.
 
   // When in VM state:
-  static void ReportJNIFatalError(JavaThread* thr, const char *msg) {
+  static inline void ReportJNIFatalError(JavaThread* thr, const char *msg) {
     tty->print_cr("FATAL ERROR in native method: %s", msg);
     thr->print_stack();
     os::abort(true);
@@ -48,12 +48,12 @@ class jniCheck : public AllStatic {
  public:
   static oop validate_handle(JavaThread* thr, jobject obj);
   static oop validate_object(JavaThread* thr, jobject obj);
-  static klassOop validate_class(JavaThread* thr, jclass clazz, bool allow_primitive = false);
+  static Klass* validate_class(JavaThread* thr, jclass clazz, bool allow_primitive = false);
   static void validate_class_descriptor(JavaThread* thr, const char* name);
-  static void validate_throwable_klass(JavaThread* thr, klassOop klass);
+  static void validate_throwable_klass(JavaThread* thr, Klass* klass);
   static void validate_call_object(JavaThread* thr, jobject obj, jmethodID method_id);
   static void validate_call_class(JavaThread* thr, jclass clazz, jmethodID method_id);
-  static methodOop validate_jmethod_id(JavaThread* thr, jmethodID method_id);
+  static Method* validate_jmethod_id(JavaThread* thr, jmethodID method_id);
 };
 
 #endif // SHARE_VM_PRIMS_JNICHECK_HPP

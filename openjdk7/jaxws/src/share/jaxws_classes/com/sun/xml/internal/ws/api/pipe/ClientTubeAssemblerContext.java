@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -66,6 +66,7 @@ public class ClientTubeAssemblerContext {
     private final @NotNull EndpointAddress address;
     private final @Nullable WSDLPort wsdlModel;
     private final @Nullable SEIModel seiModel;
+    private final @Nullable Class    sei;
     private final @NotNull WSService rootOwner;
     private final @NotNull WSBinding binding;
     private final @NotNull Container container;
@@ -77,7 +78,7 @@ public class ClientTubeAssemblerContext {
     /**
      * This constructor should be used only by JAX-WS Runtime and is not meant for external consumption.
      * @deprecated
-     *      Use {@link #ClientTubeAssemblerContext(EndpointAddress, WSDLPort, WSBindingProvider, WSBinding, Container, Codec, SEIModel)}
+     *      Use {@link #ClientTubeAssemblerContext(EndpointAddress, WSDLPort, WSService, WSBindingProvider, WSBinding, Container, Codec, SEIModel, Class)}
      */
     public ClientTubeAssemblerContext(@NotNull EndpointAddress address, @Nullable WSDLPort wsdlModel, @NotNull WSService rootOwner, @NotNull WSBinding binding) {
         this(address, wsdlModel, rootOwner, binding, Container.NONE);
@@ -86,7 +87,7 @@ public class ClientTubeAssemblerContext {
     /**
      * This constructor should be used only by JAX-WS Runtime and is not meant for external consumption.
      * @deprecated
-     *      Use {@link #ClientTubeAssemblerContext(EndpointAddress, WSDLPort, WSBindingProvider, WSBinding, Container, Codec, SEIModel)}.
+     *      Use {@link #ClientTubeAssemblerContext(EndpointAddress, WSDLPort, WSService, WSBindingProvider, WSBinding, Container, Codec, SEIModel, Class)}
      */
     public ClientTubeAssemblerContext(@NotNull EndpointAddress address, @Nullable WSDLPort wsdlModel,
                                       @NotNull WSService rootOwner, @NotNull WSBinding binding,
@@ -98,23 +99,23 @@ public class ClientTubeAssemblerContext {
     /**
      * This constructor should be used only by JAX-WS Runtime and is not meant for external consumption.
      * @deprecated
-     *      Use {@link #ClientTubeAssemblerContext(EndpointAddress, WSDLPort, WSBindingProvider, WSBinding, Container, Codec,SEIModel)}.
+     *      Use {@link #ClientTubeAssemblerContext(EndpointAddress, WSDLPort, WSService, WSBindingProvider, WSBinding, Container, Codec, SEIModel, Class)}
      */
     public ClientTubeAssemblerContext(@NotNull EndpointAddress address, @Nullable WSDLPort wsdlModel,
                                       @NotNull WSService rootOwner, @NotNull WSBinding binding,
                                       @NotNull Container container, Codec codec) {
-        this(address, wsdlModel, rootOwner, binding, container, codec, null);
+        this(address, wsdlModel, rootOwner, binding, container, codec, null, null);
     }
 
     /**
      * This constructor should be used only by JAX-WS Runtime and is not meant for external consumption.
      * @deprecated
-     *      Use {@link #ClientTubeAssemblerContext(EndpointAddress, WSDLPort, WSBindingProvider, WSBinding, Container, Codec, SEIModel)}.
+     *      Use {@link #ClientTubeAssemblerContext(EndpointAddress, WSDLPort, WSService, WSBindingProvider, WSBinding, Container, Codec, SEIModel, Class)}
      */
     public ClientTubeAssemblerContext(@NotNull EndpointAddress address, @Nullable WSDLPort wsdlModel,
                                       @NotNull WSService rootOwner, @NotNull WSBinding binding,
-                                      @NotNull Container container, Codec codec, SEIModel seiModel) {
-        this(address, wsdlModel, rootOwner, null/* no info on which port it is, so pass null*/, binding, container, codec,seiModel);
+                                      @NotNull Container container, Codec codec, SEIModel seiModel, Class sei) {
+        this(address, wsdlModel, rootOwner, null/* no info on which port it is, so pass null*/, binding, container, codec, seiModel, sei);
     }
 
     /**
@@ -124,8 +125,8 @@ public class ClientTubeAssemblerContext {
      */
     public ClientTubeAssemblerContext(@NotNull EndpointAddress address, @Nullable WSDLPort wsdlModel,
                                       @NotNull WSBindingProvider bindingProvider, @NotNull WSBinding binding,
-                                      @NotNull Container container, Codec codec, SEIModel seiModel) {
-        this(address, wsdlModel, (bindingProvider==null? null: bindingProvider.getPortInfo().getOwner()), bindingProvider, binding, container, codec,seiModel);
+                                      @NotNull Container container, Codec codec, SEIModel seiModel, Class sei) {
+        this(address, wsdlModel, (bindingProvider==null? null: bindingProvider.getPortInfo().getOwner()), bindingProvider, binding, container, codec, seiModel, sei);
 
     }
 
@@ -133,7 +134,7 @@ public class ClientTubeAssemblerContext {
     //WSService is null, when ClientTubeAssemblerContext is created for sending non-anonymous responses.
     private ClientTubeAssemblerContext(@NotNull EndpointAddress address, @Nullable WSDLPort wsdlModel,
                                        @Nullable WSService rootOwner, @Nullable WSBindingProvider bindingProvider, @NotNull WSBinding binding,
-                                      @NotNull Container container, Codec codec, SEIModel seiModel) {
+                                      @NotNull Container container, Codec codec, SEIModel seiModel, Class sei) {
         this.address = address;
         this.wsdlModel = wsdlModel;
         this.rootOwner = rootOwner;
@@ -142,6 +143,7 @@ public class ClientTubeAssemblerContext {
         this.container = container;
         this.codec = codec;
         this.seiModel = seiModel;
+        this.sei = sei;
     }
 
     /**
@@ -203,6 +205,16 @@ public class ClientTubeAssemblerContext {
      */
     public @Nullable SEIModel getSEIModel() {
         return seiModel;
+    }
+
+    /**
+     * The SEI class for the endpoint
+     *
+     * @return Null if the service doesn't have SEI model e.g. Dispatch,
+     *         and otherwise non-null.
+     */
+    public @Nullable Class getSEI() {
+        return sei;
     }
 
     /**

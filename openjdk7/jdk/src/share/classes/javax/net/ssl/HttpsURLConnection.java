@@ -29,7 +29,6 @@ import java.net.URL;
 import java.net.HttpURLConnection;
 import java.security.Principal;
 import java.security.cert.X509Certificate;
-import javax.security.auth.x500.X500Principal;
 
 /**
  * <code>HttpsURLConnection</code> extends <code>HttpURLConnection</code>
@@ -144,8 +143,7 @@ class HttpsURLConnection extends HttpURLConnection
             throws SSLPeerUnverifiedException {
 
         java.security.cert.Certificate[] certs = getServerCertificates();
-        return ((X500Principal)
-                ((X509Certificate)certs[0]).getSubjectX500Principal());
+        return ((X509Certificate)certs[0]).getSubjectX500Principal();
     }
 
     /**
@@ -173,8 +171,7 @@ class HttpsURLConnection extends HttpURLConnection
 
         java.security.cert.Certificate[] certs = getLocalCertificates();
         if (certs != null) {
-            return ((X500Principal)
-                ((X509Certificate)certs[0]).getSubjectX500Principal());
+            return ((X509Certificate)certs[0]).getSubjectX500Principal();
         } else {
             return null;
         }
@@ -198,6 +195,7 @@ class HttpsURLConnection extends HttpURLConnection
      */
     private static class DefaultHostnameVerifier
             implements HostnameVerifier {
+        @Override
         public boolean verify(String hostname, SSLSession session) {
             return false;
         }
@@ -349,6 +347,9 @@ class HttpsURLConnection extends HttpURLConnection
      * @param sf the SSL socket factory
      * @throws IllegalArgumentException if the <code>SSLSocketFactory</code>
      *          parameter is null.
+     * @throws SecurityException if a security manager exists and its
+     *         <code>checkSetFactory</code> method does not allow
+     *         a socket factory to be specified.
      * @see #getSSLSocketFactory()
      */
     public void setSSLSocketFactory(SSLSocketFactory sf) {

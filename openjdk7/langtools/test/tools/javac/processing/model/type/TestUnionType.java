@@ -23,9 +23,9 @@
 
 /*
  * @test
- * @bug     7029150
+ * @bug     7029150 7025809
  * @summary Test support for union types
- * @library ../../../lib
+ * @library /tools/javac/lib
  */
 
 import java.net.URI;
@@ -38,7 +38,6 @@ import javax.tools.*;
 
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
-
 
 public class TestUnionType extends JavacTestingAbstractProcessor {
     enum TestKind {
@@ -194,7 +193,7 @@ public class TestUnionType extends JavacTestingAbstractProcessor {
         }
     }
 
-    class TypePrinter extends SimpleTypeVisitor7<String, Void> {
+    class TypePrinter extends SimpleTypeVisitor<String, Void> {
         @Override
         protected String defaultAction(TypeMirror tm, Void ignore) {
             return String.valueOf(tm.getKind());

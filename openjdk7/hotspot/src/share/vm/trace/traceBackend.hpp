@@ -24,18 +24,21 @@
 #ifndef SHARE_VM_TRACE_TRACEBACKEND_HPP
 #define SHARE_VM_TRACE_TRACEBACKEND_HPP
 
+#include "utilities/macros.hpp"
+
 #if INCLUDE_TRACE
 
-#include "trace/traceTime.hpp"
-#include "tracefiles/traceEventIds.hpp"
 #include "runtime/globals.hpp"
 #include "runtime/os.hpp"
+#include "trace/traceTime.hpp"
+#include "tracefiles/traceEventIds.hpp"
 
 class TraceBackend {
 public:
   static bool enabled(void) {
     return EnableTracing;
   }
+
   static bool is_event_enabled(TraceEventId id) {
     return enabled();
   }
@@ -48,7 +51,7 @@ public:
     return time;
   }
 
-  static void on_unloading_classes(BoolObjectClosure* is_alive, int no_of_classes_unloading) {
+  static void on_unloading_classes(void) {
   }
 };
 

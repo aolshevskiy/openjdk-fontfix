@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,8 +40,6 @@
 #import "ThreadUtilities.h"
 #import "OSVersion.h"
 
-static const float GROW_BOX_SIZE = 12.f;
-
 #define MASK(KEY) \
     (sun_lwawt_macosx_CPlatformWindow_ ## KEY)
 
@@ -53,22 +51,13 @@ static const float GROW_BOX_SIZE = 12.f;
 
 static JNF_CLASS_CACHE(jc_CPlatformWindow, "sun/lwawt/macosx/CPlatformWindow");
 
-@interface JavaResizeGrowBoxOverlayWindow : NSWindow { }
-
-@end
-
-@implementation JavaResizeGrowBoxOverlayWindow
-
-- (BOOL) accessibilityIsIgnored
-{
-    return YES;
-}
-
-- (NSArray *)accessibilityChildrenAttribute
-{
-    return nil;
-}
-@end
+// Cocoa windowDidBecomeKey/windowDidResignKey notifications
+// doesn't provide information about "opposite" window, so we
+// have to do a bit of tracking. This variable points to a window
+// which had been the key window just before a new key window
+// was set. It would be nil if the new key window isn't an AWT 
+// window or the app currently has no key window.
+static AWTWindow* lastKeyWindow = nil;
 
 // --------------------------------------------------------------
 // NSWindow/NSPanel descendants implementation
@@ -127,7 +116,6 @@ AWT_NS_WINDOW_IMPLEMENTATION
 @synthesize nsWindow;
 @synthesize javaPlatformWindow;
 @synthesize javaMenuBar;
-@synthesize growBoxWindow;
 @synthesize javaMinSize;
 @synthesize javaMaxSize;
 @synthesize styleBits;
@@ -172,6 +160,10 @@ AWT_NS_WINDOW_IMPLEMENTATION
         BOOL resizable = IS(bits, RESIZABLE);
         [self updateMinMaxSize:resizable];
         [self.nsWindow setShowsResizeIndicator:resizable];
+        // Zoom button should be disabled, if the window is not resizable,
+        // otherwise button should be restored to initial state.
+        BOOL zoom = resizable && IS(bits, ZOOMABLE);
+        [[self.nsWindow standardWindowButton:NSWindowZoomButton] setEnabled:zoom];
     }
 
     if (IS(mask, HAS_SHADOW)) {
@@ -206,24 +198,6 @@ AWT_NS_WINDOW_IMPLEMENTATION
         }
     }
 
-}
-
-- (BOOL) shouldShowGrowBox {
-    return isSnowLeopardOrLower() && IS(self.styleBits, RESIZABLE);
-}
-
-- (NSImage *) createGrowBoxImage {
-    NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(GROW_BOX_SIZE, GROW_BOX_SIZE)];
-    JRSUIControlRef growBoxWidget = JRSUIControlCreate(FALSE);
-    JRSUIControlSetWidget(growBoxWidget, kJRSUI_Widget_growBoxTextured);
-    JRSUIControlSetWindowType(growBoxWidget, kJRSUI_WindowType_utility);
-    JRSUIRendererRef renderer = JRSUIRendererCreate();
-    [image lockFocus]; // sets current graphics context to that of the image
-    JRSUIControlDraw(renderer, growBoxWidget, [[NSGraphicsContext currentContext] graphicsPort], CGRectMake(0, 1, GROW_BOX_SIZE - 1, GROW_BOX_SIZE - 1));
-    [image unlockFocus];
-    JRSUIRendererRelease(renderer);
-    JRSUIControlRelease(growBoxWidget);
-    return image;
 }
 
 - (id) initWithPlatformWindow:(JNFWeakJObjectWrapper *)platformWindow
@@ -273,35 +247,15 @@ AWT_ASSERT_APPKIT_THREAD;
     self.styleBits = bits;
     [self setPropertiesForStyleBits:styleBits mask:MASK(_METHOD_PROP_BITMASK)];
 
-    if ([self shouldShowGrowBox]) {
-        NSImage *growBoxImage = [self createGrowBoxImage];
-        growBoxWindow = [[JavaResizeGrowBoxOverlayWindow alloc] initWithContentRect:NSMakeRect(0, 0, [growBoxImage size].width, [growBoxImage size].height) styleMask:NSBorderlessWindowMask backing:NSBackingStoreBuffered defer:NO];
-        [self.growBoxWindow setIgnoresMouseEvents:YES];
-        [self.growBoxWindow setOpaque:NO];
-        [self.growBoxWindow setBackgroundColor:[NSColor clearColor]];
-        [self.growBoxWindow setHasShadow:NO];
-        [self.growBoxWindow setReleasedWhenClosed:NO];
-
-        NSImageView *imageView = [[NSImageView alloc] initWithFrame:[self.growBoxWindow frame]];
-        [imageView setEditable:NO];
-        [imageView setAnimates:NO];
-        [imageView setAllowsCutCopyPaste:NO];
-        [self.growBoxWindow setContentView:imageView];
-        [imageView setImage:growBoxImage];
-        [growBoxImage release];
-        [imageView release];
-
-        [self.nsWindow addChildWindow:self.growBoxWindow ordered:NSWindowAbove];
-        [self adjustGrowBoxWindow];
-    } else growBoxWindow = nil;
-
     return self;
 }
 
-// checks that this window is under the mouse cursor and this point is not overlapped by others windows
-- (BOOL) isTopmostWindowUnderMouse {
++ (BOOL) isAWTWindow:(NSWindow *)window {
+    return [window isKindOfClass: [AWTWindow_Panel class]] || [window isKindOfClass: [AWTWindow_Normal class]];
+}
 
-    int currentWinID = [self.nsWindow windowNumber];
+// returns id for the topmost window under mouse
++ (NSInteger) getTopmostWindowUnderMouseID {
 
     NSRect screenRect = [[NSScreen mainScreen] frame];
     NSPoint nsMouseLocation = [NSEvent mouseLocation];
@@ -309,53 +263,77 @@ AWT_ASSERT_APPKIT_THREAD;
 
     NSMutableArray *windows = (NSMutableArray *)CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
 
-
     for (NSDictionary *window in windows) {
-        int layer = [[window objectForKey:(id)kCGWindowLayer] intValue];
+        NSInteger layer = [[window objectForKey:(id)kCGWindowLayer] integerValue];
         if (layer == 0) {
-            int winID = [[window objectForKey:(id)kCGWindowNumber] intValue];
             CGRect rect;
             CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)[window objectForKey:(id)kCGWindowBounds], &rect);
             if (CGRectContainsPoint(rect, cgMouseLocation)) {
-                return currentWinID == winID;
-            } else if (currentWinID == winID) {
-                return NO;
+                return [[window objectForKey:(id)kCGWindowNumber] integerValue];
             }
         }
     }
-    return NO;
+    return -1;
 }
 
-- (void) synthesizeMouseEnteredExitedEvents {
+// checks that this window is under the mouse cursor and this point is not overlapped by others windows
+- (BOOL) isTopmostWindowUnderMouse {
+    return [self.nsWindow windowNumber] == [AWTWindow getTopmostWindowUnderMouseID];
+}
 
-    int eventType = 0;
-    BOOL isUnderMouse = [self isTopmostWindowUnderMouse];
-    BOOL mouseIsOver = [[self.nsWindow contentView] mouseIsOver];
++ (AWTWindow *) getTopmostWindowUnderMouse {
+    NSEnumerator *windowEnumerator = [[NSApp windows] objectEnumerator];
+    NSWindow *window;
 
-    if (isUnderMouse && !mouseIsOver) {
-        eventType = NSMouseEntered;
-    } else if (!isUnderMouse && mouseIsOver) {
-        eventType = NSMouseExited;
-    } else {
-        return;
+    NSInteger topmostWindowUnderMouseID = [AWTWindow getTopmostWindowUnderMouseID];
+
+    while ((window = [windowEnumerator nextObject]) != nil) {
+        if ([window windowNumber] == topmostWindowUnderMouseID) {
+            BOOL isAWTWindow = [AWTWindow isAWTWindow: window];
+            return isAWTWindow ? (AWTWindow *) [window delegate] : nil;
+        }
     }
+    return nil;
+}
+
++ (void) synthesizeMouseEnteredExitedEvents:(NSWindow*)window withType:(NSEventType)eventType {
 
     NSPoint screenLocation = [NSEvent mouseLocation];
-    NSPoint windowLocation = [self.nsWindow convertScreenToBase: screenLocation];
+    NSPoint windowLocation = [window convertScreenToBase: screenLocation];
     int modifierFlags = (eventType == NSMouseEntered) ? NSMouseEnteredMask : NSMouseExitedMask;
 
     NSEvent *mouseEvent = [NSEvent enterExitEventWithType: eventType
                                                  location: windowLocation
                                             modifierFlags: modifierFlags
                                                 timestamp: 0
-                                             windowNumber: [self.nsWindow windowNumber]
+                                             windowNumber: [window windowNumber]
                                                   context: nil
                                               eventNumber: 0
                                            trackingNumber: 0
                                                  userData: nil
                            ];
 
-    [[self.nsWindow contentView] deliverJavaMouseEvent: mouseEvent];
+    [[window contentView] deliverJavaMouseEvent: mouseEvent];
+}
+
++ (void) synthesizeMouseEnteredExitedEventsForAllWindows {
+
+    NSInteger topmostWindowUnderMouseID = [AWTWindow getTopmostWindowUnderMouseID];
+    NSArray *windows = [NSApp windows];
+    NSWindow *window;
+
+    NSEnumerator *windowEnumerator = [windows objectEnumerator];
+    while ((window = [windowEnumerator nextObject]) != nil) {
+        if ([AWTWindow isAWTWindow: window]) {
+            BOOL isUnderMouse = ([window windowNumber] == topmostWindowUnderMouseID);
+            BOOL mouseIsOver = [[window contentView] mouseIsOver];
+            if (isUnderMouse && !mouseIsOver) {
+                [AWTWindow synthesizeMouseEnteredExitedEvents:window withType:NSMouseEntered];
+            } else if (!isUnderMouse && mouseIsOver) {
+                [AWTWindow synthesizeMouseEnteredExitedEvents:window withType:NSMouseExited];
+            }
+        }
+    }
 }
 
 + (NSNumber *) getNSWindowDisplayID_AppKitThread:(NSWindow *)window {
@@ -370,7 +348,6 @@ AWT_ASSERT_APPKIT_THREAD;
 
     JNIEnv *env = [ThreadUtilities getJNIEnv];
     [self.javaPlatformWindow setJObject:nil withEnv:env];
-    self.growBoxWindow = nil;
 
     self.nsWindow = nil;
 
@@ -457,14 +434,6 @@ AWT_ASSERT_APPKIT_THREAD;
 
 // NSWindowDelegate methods
 
-- (void) adjustGrowBoxWindow {
-    if (self.growBoxWindow != nil) {
-        NSRect parentRect = [self.nsWindow frame];
-        parentRect.origin.x += (parentRect.size.width - [self.growBoxWindow frame].size.width);
-        [self.growBoxWindow setFrameOrigin:parentRect.origin];
-    }
-}
-
 - (void) _deliverMoveResizeEvent {
 AWT_ASSERT_APPKIT_THREAD;
 
@@ -478,7 +447,7 @@ AWT_ASSERT_APPKIT_THREAD;
         // TODO: create generic AWT assert
     }
 
-    [self adjustGrowBoxWindow];
+    [AWTWindow synthesizeMouseEnteredExitedEventsForAllWindows];
 
     NSRect frame = ConvertNSScreenRect(env, [self.nsWindow frame]);
 
@@ -551,15 +520,17 @@ AWT_ASSERT_APPKIT_THREAD;
     [self _deliverIconify:JNI_FALSE];
 }
 
-- (void) _deliverWindowFocusEvent:(BOOL)focused {
+- (void) _deliverWindowFocusEvent:(BOOL)focused oppositeWindow:(AWTWindow *)opposite {
 //AWT_ASSERT_APPKIT_THREAD;
-
     JNIEnv *env = [ThreadUtilities getJNIEnvUncached];
     jobject platformWindow = [self.javaPlatformWindow jObjectWithEnv:env];
     if (platformWindow != NULL) {
-        static JNF_MEMBER_CACHE(jm_deliverWindowFocusEvent, jc_CPlatformWindow, "deliverWindowFocusEvent", "(Z)V");
-        JNFCallVoidMethod(env, platformWindow, jm_deliverWindowFocusEvent, (jboolean)focused);
+        jobject oppositeWindow = [opposite.javaPlatformWindow jObjectWithEnv:env];
+
+        static JNF_MEMBER_CACHE(jm_deliverWindowFocusEvent, jc_CPlatformWindow, "deliverWindowFocusEvent", "(ZLsun/lwawt/macosx/CPlatformWindow;)V");
+        JNFCallVoidMethod(env, platformWindow, jm_deliverWindowFocusEvent, (jboolean)focused, oppositeWindow);
         (*env)->DeleteLocalRef(env, platformWindow);
+        (*env)->DeleteLocalRef(env, oppositeWindow);
     }
 }
 
@@ -567,8 +538,15 @@ AWT_ASSERT_APPKIT_THREAD;
 - (void) windowDidBecomeKey: (NSNotification *) notification {
 AWT_ASSERT_APPKIT_THREAD;
     [AWTToolkit eventCountPlusPlus];
-    [CMenuBar activate:self.javaMenuBar modallyDisabled:NO];
-    [self _deliverWindowFocusEvent:YES];
+    AWTWindow *opposite = [AWTWindow lastKeyWindow];
+    if (!IS(self.styleBits, IS_DIALOG)) {
+        [CMenuBar activate:self.javaMenuBar modallyDisabled:NO];
+    } else if ((opposite != NULL) && IS(self.styleBits, IS_MODAL)) {
+        [CMenuBar activate:opposite->javaMenuBar modallyDisabled:YES];        
+    }
+    [AWTWindow setLastKeyWindow:nil];
+
+    [self _deliverWindowFocusEvent:YES oppositeWindow: opposite];
 }
 
 - (void) windowDidResignKey: (NSNotification *) notification {
@@ -576,7 +554,18 @@ AWT_ASSERT_APPKIT_THREAD;
 AWT_ASSERT_APPKIT_THREAD;
     [AWTToolkit eventCountPlusPlus];
     [self.javaMenuBar deactivate];
-    [self _deliverWindowFocusEvent:NO];
+
+    // the new key window
+    NSWindow *keyWindow = [NSApp keyWindow];
+    AWTWindow *opposite = nil;
+    if ([AWTWindow isAWTWindow: keyWindow]) {
+        opposite = (AWTWindow *)[keyWindow delegate];
+        [AWTWindow setLastKeyWindow: self];
+    } else {
+        [AWTWindow setLastKeyWindow: nil];
+    }
+
+    [self _deliverWindowFocusEvent:NO oppositeWindow: opposite];
 }
 
 - (void) windowDidBecomeMain: (NSNotification *) notification {
@@ -643,6 +632,7 @@ AWT_ASSERT_APPKIT_THREAD;
         [self _notifyFullScreenOp:com_apple_eawt_FullScreenHandler_FULLSCREEN_DID_ENTER withEnv:env];
         (*env)->DeleteLocalRef(env, platformWindow);
     }
+    [AWTWindow synthesizeMouseEnteredExitedEventsForAllWindows];
 }
 
 - (void)windowWillExitFullScreen:(NSNotification *)notification {
@@ -665,6 +655,7 @@ AWT_ASSERT_APPKIT_THREAD;
         [self _notifyFullScreenOp:com_apple_eawt_FullScreenHandler_FULLSCREEN_DID_EXIT withEnv:env];
         (*env)->DeleteLocalRef(env, platformWindow);
     }
+    [AWTWindow synthesizeMouseEnteredExitedEventsForAllWindows];
 }
 
 - (void)sendEvent:(NSEvent *)event {
@@ -702,11 +693,6 @@ AWT_ASSERT_APPKIT_THREAD;
         minHeight += top + bottom;
     }
 
-    if ([self shouldShowGrowBox]) {
-        minWidth = MAX(minWidth, GROW_BOX_SIZE);
-        minHeight += GROW_BOX_SIZE;
-    }
-
     minWidth = MAX(1.f, minWidth);
     minHeight = MAX(1.f, minHeight);
 
@@ -734,6 +720,17 @@ AWT_ASSERT_APPKIT_THREAD;
         [self.nsWindow setShowsResizeIndicator:flag];
     }
 }
+
++ (void) setLastKeyWindow:(AWTWindow *)window {
+    [window retain];
+    [lastKeyWindow release];
+    lastKeyWindow = window;
+}
+
++ (AWTWindow *) lastKeyWindow {
+    return lastKeyWindow;
+}
+
 
 @end // AWTWindow
 
@@ -796,7 +793,7 @@ JNF_COCOA_ENTER(env);
 
         // calls methods on NSWindow to change other properties, based on the mask
         if (mask & MASK(_METHOD_PROP_BITMASK)) {
-            [window setPropertiesForStyleBits:bits mask:mask];
+            [window setPropertiesForStyleBits:newBits mask:mask];
         }
 
         window.styleBits = newBits;
@@ -898,8 +895,6 @@ JNF_COCOA_ENTER(env);
         // ensure we repaint the whole window after the resize operation
         // (this will also re-enable screen updates, which were disabled above)
         // TODO: send PaintEvent
-
-        [window synthesizeMouseEnteredExitedEvents];
     }];
 
 JNF_COCOA_EXIT(env);
@@ -1078,19 +1073,40 @@ JNF_COCOA_EXIT(env);
 
 /*
  * Class:     sun_lwawt_macosx_CPlatformWindow
+ * Method:    nativeGetTopmostPlatformWindowUnderMouse
+ * Signature: (J)V
+ */
+JNIEXPORT jobject
+JNICALL Java_sun_lwawt_macosx_CPlatformWindow_nativeGetTopmostPlatformWindowUnderMouse
+(JNIEnv *env, jclass clazz)
+{
+    jobject topmostWindowUnderMouse = nil;
+
+    JNF_COCOA_ENTER(env);
+    AWT_ASSERT_APPKIT_THREAD;
+
+    AWTWindow *awtWindow = [AWTWindow getTopmostWindowUnderMouse];
+    if (awtWindow != nil) {
+        topmostWindowUnderMouse = [awtWindow.javaPlatformWindow jObject];
+    }
+
+    JNF_COCOA_EXIT(env);
+
+    return topmostWindowUnderMouse;
+}
+
+/*
+ * Class:     sun_lwawt_macosx_CPlatformWindow
  * Method:    nativeSynthesizeMouseEnteredExitedEvents
  * Signature: (J)V
  */
 JNIEXPORT void JNICALL Java_sun_lwawt_macosx_CPlatformWindow_nativeSynthesizeMouseEnteredExitedEvents
-(JNIEnv *env, jclass clazz, jlong windowPtr)
+(JNIEnv *env, jclass clazz)
 {
     JNF_COCOA_ENTER(env);
 
-    NSWindow *nsWindow = OBJC(windowPtr);
     [ThreadUtilities performOnMainThreadWaiting:NO block:^(){
-        AWTWindow *window = (AWTWindow*)[nsWindow delegate];
-
-        [window synthesizeMouseEnteredExitedEvents];
+        [AWTWindow synthesizeMouseEnteredExitedEventsForAllWindows];
     }];
 
     JNF_COCOA_EXIT(env);
@@ -1140,6 +1156,10 @@ JNF_COCOA_ENTER(env);
     NSWindow *nsWindow = OBJC(windowPtr);
     [ThreadUtilities performOnMainThreadWaiting:NO block:^(){
         AWTWindow *window = (AWTWindow*)[nsWindow delegate];
+
+        if ([AWTWindow lastKeyWindow] == window) {
+            [AWTWindow setLastKeyWindow: nil];
+        }
 
         // AWTWindow holds a reference to the NSWindow in its nsWindow
         // property. Unsetting the delegate allows it to be deallocated

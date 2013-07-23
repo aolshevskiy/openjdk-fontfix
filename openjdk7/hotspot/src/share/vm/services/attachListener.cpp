@@ -44,8 +44,8 @@ volatile bool AttachListener::_initialized;
 // Invokes sun.misc.VMSupport.serializePropertiesToByteArray to serialize
 // the system properties into a byte array.
 
-static klassOop load_and_initialize_klass(Symbol* sh, TRAPS) {
-  klassOop k = SystemDictionary::resolve_or_fail(sh, true, CHECK_NULL);
+static Klass* load_and_initialize_klass(Symbol* sh, TRAPS) {
+  Klass* k = SystemDictionary::resolve_or_fail(sh, true, CHECK_NULL);
   instanceKlassHandle ik (THREAD, k);
   if (ik->should_be_initialized()) {
     ik->initialize(CHECK_NULL);
@@ -59,7 +59,7 @@ static jint get_properties(AttachOperation* op, outputStream* out, Symbol* seria
 
   // load sun.misc.VMSupport
   Symbol* klass = vmSymbols::sun_misc_VMSupport();
-  klassOop k = load_and_initialize_klass(klass, THREAD);
+  Klass* k = load_and_initialize_klass(klass, THREAD);
   if (HAS_PENDING_EXCEPTION) {
     java_lang_Throwable::print(PENDING_EXCEPTION, out);
     CLEAR_PENDING_EXCEPTION;
@@ -88,7 +88,7 @@ static jint get_properties(AttachOperation* op, outputStream* out, Symbol* seria
   // The result should be a [B
   oop res = (oop)result.get_jobject();
   assert(res->is_typeArray(), "just checking");
-  assert(typeArrayKlass::cast(res->klass())->element_type() == T_BYTE, "just checking");
+  assert(TypeArrayKlass::cast(res->klass())->element_type() == T_BYTE, "just checking");
 
   // copy the bytes to the output stream
   typeArrayOop ba = typeArrayOop(res);
@@ -157,7 +157,7 @@ static jint jcmd(AttachOperation* op, outputStream* out) {
   Thread* THREAD = Thread::current();
   // All the supplied jcmd arguments are stored as a single
   // string (op->arg(0)). This is parsed by the Dcmd framework.
-  DCmd::parse_and_execute(out, op->arg(0), ' ', THREAD);
+  DCmd::parse_and_execute(DCmd_Source_AttachAPI, out, op->arg(0), ' ', THREAD);
   if (HAS_PENDING_EXCEPTION) {
     java_lang_Throwable::print(PENDING_EXCEPTION, out);
     out->cr();
@@ -227,7 +227,7 @@ static jint heap_inspection(AttachOperation* op, outputStream* out) {
     }
     live_objects_only = strcmp(arg0, "-live") == 0;
   }
-  VM_GC_HeapInspection heapop(out, live_objects_only /* request full gc */, true /* need_prologue */);
+  VM_GC_HeapInspection heapop(out, live_objects_only /* request full gc */);
   VMThread::execute(&heapop);
   return JNI_OK;
 }
@@ -454,7 +454,7 @@ static void attach_listener_thread_entry(JavaThread* thread, TRAPS) {
 // Starts the Attach Listener thread
 void AttachListener::init() {
   EXCEPTION_MARK;
-  klassOop k = SystemDictionary::resolve_or_fail(vmSymbols::java_lang_Thread(), true, CHECK);
+  Klass* k = SystemDictionary::resolve_or_fail(vmSymbols::java_lang_Thread(), true, CHECK);
   instanceKlassHandle klass (THREAD, k);
   instanceHandle thread_oop = klass->allocate_instance_handle(CHECK);
 

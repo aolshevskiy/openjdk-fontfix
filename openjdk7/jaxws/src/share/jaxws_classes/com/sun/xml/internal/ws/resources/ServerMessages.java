@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.xml.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -119,18 +118,6 @@ public final class ServerMessages {
      */
     public static String SOAPDECODER_ERR() {
         return localizer.localize(localizableSOAPDECODER_ERR());
-    }
-
-    public static Localizable localizableRUNTIME_PARSER_INVALID_READER_STATE(Object arg0) {
-        return messageFactory.getMessage("runtime.parser.invalidReaderState", arg0);
-    }
-
-    /**
-     * error parsing runtime descriptor: {0}
-     *
-     */
-    public static String RUNTIME_PARSER_INVALID_READER_STATE(Object arg0) {
-        return localizer.localize(localizableRUNTIME_PARSER_INVALID_READER_STATE(arg0));
     }
 
     public static Localizable localizableGENERATE_NON_STANDARD_WSDL() {
@@ -445,7 +432,7 @@ public final class ServerMessages {
     }
 
     /**
-     * There is already a HTTP server at : {0}
+     * There is already a HTTP server at : {0}# {0} - probably URL/port of a server
      *
      */
     public static String ALREADY_HTTP_SERVER(Object arg0) {
@@ -493,23 +480,11 @@ public final class ServerMessages {
     }
 
     /**
-     * Invalid annotation: {0} on endpoint implementation class "{1}" - will be ignored. "{1}" is annotated with @WebService(endpointInterface="{2}"}, it MUST NOT be annotated with {0}, to fix it - put this annotation on the SEI {2}.
+     * Invalid annotation: {0} on endpoint implementation class "{1}" - will be ignored. "{1}" is annotated with @WebService(endpointInterface="{2}"}, it must not be annotated with {0}, to fix it - put this annotation on the SEI {2}.
      *
      */
     public static String RUNTIMEMODELER_INVALIDANNOTATION_ON_IMPL(Object arg0, Object arg1, Object arg2) {
         return localizer.localize(localizableRUNTIMEMODELER_INVALIDANNOTATION_ON_IMPL(arg0, arg1, arg2));
-    }
-
-    public static Localizable localizableRUNTIME_PARSER_WSDL_NOSERVICE() {
-        return messageFactory.getMessage("runtime.parser.wsdl.noservice");
-    }
-
-    /**
-     * can't apply binding! service {0} not found in the WSDL {1}
-     *
-     */
-    public static String RUNTIME_PARSER_WSDL_NOSERVICE() {
-        return localizer.localize(localizableRUNTIME_PARSER_WSDL_NOSERVICE());
     }
 
     public static Localizable localizableSERVICE_NAME_REQUIRED() {
@@ -561,18 +536,6 @@ public final class ServerMessages {
         return localizer.localize(localizableRUNTIME_SAXPARSER_EXCEPTION(arg0, arg1));
     }
 
-    public static Localizable localizableRUNTIME_PARSER_WSDL_NOT_FOUND(Object arg0) {
-        return messageFactory.getMessage("runtime.parser.wsdl.not.found", arg0);
-    }
-
-    /**
-     * {0} is not found in the WAR file. Package it in the WAR file or correct it in sun-jaxws.xml.
-     *
-     */
-    public static String RUNTIME_PARSER_WSDL_NOT_FOUND(Object arg0) {
-        return localizer.localize(localizableRUNTIME_PARSER_WSDL_NOT_FOUND(arg0));
-    }
-
     public static Localizable localizableWRONG_PARAMETER_TYPE(Object arg0) {
         return messageFactory.getMessage("wrong.parameter.type", arg0);
     }
@@ -583,6 +546,18 @@ public final class ServerMessages {
      */
     public static String WRONG_PARAMETER_TYPE(Object arg0) {
         return localizer.localize(localizableWRONG_PARAMETER_TYPE(arg0));
+    }
+
+    public static Localizable localizableRUNTIME_PARSER_WSDL_NOT_FOUND(Object arg0) {
+        return messageFactory.getMessage("runtime.parser.wsdl.not.found", arg0);
+    }
+
+    /**
+     * {0} is not found in the WAR file. Package it in the WAR file or correct it in sun-jaxws.xml.
+     *
+     */
+    public static String RUNTIME_PARSER_WSDL_NOT_FOUND(Object arg0) {
+        return localizer.localize(localizableRUNTIME_PARSER_WSDL_NOT_FOUND(arg0));
     }
 
     public static Localizable localizableRUNTIME_PARSER_CLASS_NOT_FOUND(Object arg0) {
@@ -638,7 +613,7 @@ public final class ServerMessages {
     }
 
     /**
-     * Metadata has more than one WSDL that has Service definiton for the endpoint. WSDL={0} is one such WSDL.
+     * Metadata has more than one WSDL that has Service definition for the endpoint. WSDL={0} is one such WSDL.
      *
      */
     public static String DUPLICATE_PRIMARY_WSDL(Object arg0) {
@@ -650,7 +625,7 @@ public final class ServerMessages {
     }
 
     /**
-     * Metadata has more than one WSDL that has PortType definiton for the endpoint. WSDL={0} is one such WSDL.
+     * Metadata has more than one WSDL that has PortType definition for the endpoint. WSDL={0} is one such WSDL.
      *
      */
     public static String DUPLICATE_ABSTRACT_WSDL(Object arg0) {
@@ -667,18 +642,6 @@ public final class ServerMessages {
      */
     public static String STATEFUL_INVALID_WEBSERVICE_CONTEXT(Object arg0) {
         return localizer.localize(localizableSTATEFUL_INVALID_WEBSERVICE_CONTEXT(arg0));
-    }
-
-    public static Localizable localizableRUNTIME_PARSER_WSDL_NOBINDING() {
-        return messageFactory.getMessage("runtime.parser.wsdl.nobinding");
-    }
-
-    /**
-     * can't apply binding! no binding found for binding ID {0] for service {1} in WSDL {2}
-     *
-     */
-    public static String RUNTIME_PARSER_WSDL_NOBINDING() {
-        return localizer.localize(localizableRUNTIME_PARSER_WSDL_NOBINDING());
     }
 
     public static Localizable localizableRUNTIME_PARSER_INVALID_ELEMENT(Object arg0, Object arg1) {

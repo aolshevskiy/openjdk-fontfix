@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -70,8 +70,8 @@ public class ArrayReferenceImpl extends ObjectReferenceImpl
     }
 
     public Value getValue(int index) {
-        List list = getValues(index, 1);
-        return (Value)list.get(0);
+        List<Value> list = getValues(index, 1);
+        return list.get(0);
     }
 
     public List<Value> getValues() {

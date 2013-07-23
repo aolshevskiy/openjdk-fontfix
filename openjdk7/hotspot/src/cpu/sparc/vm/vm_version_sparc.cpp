@@ -23,7 +23,7 @@
  */
 
 #include "precompiled.hpp"
-#include "assembler_sparc.inline.hpp"
+#include "asm/macroAssembler.inline.hpp"
 #include "memory/resourceArea.hpp"
 #include "runtime/java.hpp"
 #include "runtime/stubCodeGenerator.hpp"
@@ -75,23 +75,14 @@ void VM_Version::initialize() {
     FLAG_SET_DEFAULT(AllocatePrefetchStyle, 1);
   }
 
-  if (has_v9()) {
-    assert(ArraycopySrcPrefetchDistance < 4096, "invalid value");
-    if (ArraycopySrcPrefetchDistance >= 4096)
-      ArraycopySrcPrefetchDistance = 4064;
-    assert(ArraycopyDstPrefetchDistance < 4096, "invalid value");
-    if (ArraycopyDstPrefetchDistance >= 4096)
-      ArraycopyDstPrefetchDistance = 4064;
-  } else {
-    if (ArraycopySrcPrefetchDistance > 0) {
-      warning("prefetch instructions are not available on this CPU");
-      FLAG_SET_DEFAULT(ArraycopySrcPrefetchDistance, 0);
-    }
-    if (ArraycopyDstPrefetchDistance > 0) {
-      warning("prefetch instructions are not available on this CPU");
-      FLAG_SET_DEFAULT(ArraycopyDstPrefetchDistance, 0);
-    }
-  }
+  guarantee(VM_Version::has_v9(), "only SPARC v9 is supported");
+
+  assert(ArraycopySrcPrefetchDistance < 4096, "invalid value");
+  if (ArraycopySrcPrefetchDistance >= 4096)
+    ArraycopySrcPrefetchDistance = 4064;
+  assert(ArraycopyDstPrefetchDistance < 4096, "invalid value");
+  if (ArraycopyDstPrefetchDistance >= 4096)
+    ArraycopyDstPrefetchDistance = 4064;
 
   UseSSE = 0; // Only on x86 and x64
 
@@ -117,6 +108,7 @@ void VM_Version::initialize() {
     // 32-bit oops don't make sense for the 64-bit VM on sparc
     // since the 32-bit VM has the same registers and smaller objects.
     Universe::set_narrow_oop_shift(LogMinObjAlignmentInBytes);
+    Universe::set_narrow_klass_shift(LogKlassAlignmentInBytes);
 #endif // _LP64
 #ifdef COMPILER2
     // Indirect branch is the same cost as direct
@@ -258,6 +250,10 @@ void VM_Version::initialize() {
   if (!has_vis1()) // Drop to 0 if no VIS1 support
     UseVIS = 0;
 
+  if (FLAG_IS_DEFAULT(ContendedPaddingWidth) &&
+    (cache_line_size > ContendedPaddingWidth))
+    ContendedPaddingWidth = cache_line_size;
+
 #ifndef PRODUCT
   if (PrintMiscellaneous && Verbose) {
     tty->print("Allocation");
@@ -284,6 +280,9 @@ void VM_Version::initialize() {
     }
     if (PrefetchFieldsAhead > 0) {
       tty->print_cr("PrefetchFieldsAhead %d", PrefetchFieldsAhead);
+    }
+    if (ContendedPaddingWidth > 0) {
+      tty->print_cr("ContendedPaddingWidth %d", ContendedPaddingWidth);
     }
   }
 #endif // PRODUCT

@@ -84,7 +84,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
      *
      * Map: String(keyType) -> String[](alias)
      */
-    private Map<String,String[]> serverAliasCache;
+    private final Map<String,String[]> serverAliasCache;
 
     /*
      * Basic container for credentials implemented as an inner class.
@@ -113,11 +113,13 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
         }
     }
 
-    SunX509KeyManagerImpl(KeyStore ks, char[] password) throws KeyStoreException,
+    SunX509KeyManagerImpl(KeyStore ks, char[] password)
+            throws KeyStoreException,
             NoSuchAlgorithmException, UnrecoverableKeyException {
 
         credentialsMap = new HashMap<String,X509Credentials>();
-        serverAliasCache = new HashMap<String,String[]>();
+        serverAliasCache = Collections.synchronizedMap(
+                            new HashMap<String,String[]>());
         if (ks == null) {
             return;
         }
@@ -164,6 +166,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
      * @return the certificate chain (ordered with the user's certificate first
      * and the root certificate authority last)
      */
+    @Override
     public X509Certificate[] getCertificateChain(String alias) {
         if (alias == null) {
             return null;
@@ -179,6 +182,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
     /*
      * Returns the key associated with the given alias
      */
+    @Override
     public PrivateKey getPrivateKey(String alias) {
         if (alias == null) {
             return null;
@@ -196,6 +200,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
      * socket given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String chooseClientAlias(String[] keyTypes, Principal[] issuers,
             Socket socket) {
         /*
@@ -226,6 +231,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
      *
      * @since 1.5
      */
+    @Override
     public String chooseEngineClientAlias(String[] keyType,
             Principal[] issuers, SSLEngine engine) {
         /*
@@ -240,6 +246,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
      * socket given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String chooseServerAlias(String keyType,
             Principal[] issuers, Socket socket) {
         /*
@@ -281,6 +288,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
      *
      * @since 1.5
      */
+    @Override
     public String chooseEngineServerAlias(String keyType,
             Principal[] issuers, SSLEngine engine) {
         /*
@@ -295,6 +303,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
      * socket given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String[] getClientAliases(String keyType, Principal[] issuers) {
         return getAliases(keyType, issuers);
     }
@@ -304,6 +313,7 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
      * socket given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String[] getServerAliases(String keyType, Principal[] issuers) {
         return getAliases(keyType, issuers);
     }
@@ -352,15 +362,17 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
             if (sigType != null) {
                 if (certs.length > 1) {
                     // if possible, check the public key in the issuer cert
-                    if (!sigType.equals(certs[1].getPublicKey().getAlgorithm())) {
+                    if (!sigType.equals(
+                            certs[1].getPublicKey().getAlgorithm())) {
                         continue;
                     }
                 } else {
                     // Check the signature algorithm of the certificate itself.
                     // Look for the "withRSA" in "SHA1withRSA", etc.
                     String sigAlgName =
-                            certs[0].getSigAlgName().toUpperCase(Locale.ENGLISH);
-                    String pattern = "WITH" + sigType.toUpperCase(Locale.ENGLISH);
+                        certs[0].getSigAlgName().toUpperCase(Locale.ENGLISH);
+                    String pattern = "WITH" +
+                        sigType.toUpperCase(Locale.ENGLISH);
                     if (sigAlgName.contains(pattern) == false) {
                         continue;
                     }
@@ -412,5 +424,4 @@ final class SunX509KeyManagerImpl extends X509ExtendedKeyManager {
         }
         return list.toArray(new X500Principal[list.size()]);
     }
-
 }

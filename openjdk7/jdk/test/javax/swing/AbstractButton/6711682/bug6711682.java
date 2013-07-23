@@ -61,38 +61,30 @@ public class bug6711682 {
             robot.mousePress(InputEvent.BUTTON1_MASK);
             robot.mouseRelease(InputEvent.BUTTON1_MASK);
         }
-        toolkit.realSync();
+        // Without pressing F2 the last table's cell
+        // reported <code>false</code> value
+        // note that I can't press it inside the for loop
+        // because it doesn't reproduce the bug
+        robot.keyPress(KeyEvent.VK_F2);
+        robot.keyRelease(KeyEvent.VK_F2);
 
-        SwingUtilities.invokeAndWait(new Runnable() {
-            @Override
-            public void run() {
-                table.getCellEditor().stopCellEditing();
-                for (int i = 0; i < 3; i++) {
-                    if (!Boolean.TRUE.equals(table.getValueAt(i, 0))) {
-                        throw new RuntimeException("Row #" + i + " checkbox is not selected");
-                    }
-                }
+        for (int i = 0; i < 3; i++) {
+            if (!Boolean.TRUE.equals(table.getValueAt(i, 0))) {
+                throw new RuntimeException("Row #" + i + " checkbox is not selected");
             }
-        });
-
+        }
         for (int i = 2; i >= 0; i--) {
             robot.mouseMove(l.x + 5, l.y + 5 + i * h);
             robot.mousePress(InputEvent.BUTTON1_MASK);
             robot.mouseRelease(InputEvent.BUTTON1_MASK);
         }
-        toolkit.realSync();
-
-        SwingUtilities.invokeAndWait(new Runnable() {
-            @Override
-            public void run() {
-                table.getCellEditor().stopCellEditing();
-                for (int i = 0; i < 3; i++) {
-                    if (Boolean.TRUE.equals(table.getValueAt(i, 0))) {
-                        throw new RuntimeException("Row #" + i + " checkbox is selected");
-                    }
-                }
+        robot.keyPress(KeyEvent.VK_F2);
+        robot.keyRelease(KeyEvent.VK_F2);
+        for (int i = 0; i < 3; i++) {
+            if (Boolean.TRUE.equals(table.getValueAt(i, 0))) {
+                throw new RuntimeException("Row #" + i + " checkbox is selected");
             }
-        });
+        }
     }
 
     private static void createAndShowGUI() {

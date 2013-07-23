@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,7 +34,11 @@
 
 // Note that MemRegions are passed by value, not by reference.
 // The intent is that they remain very small and contain no
-// objects.
+// objects. _ValueObj should never be allocated in heap but we do
+// create MemRegions (in CardTableModRefBS) in heap so operator
+// new and operator new [] added for this special case.
+
+class MetaWord;
 
 class MemRegion VALUE_OBJ_CLASS_SPEC {
   friend class VMStructs;
@@ -48,6 +52,10 @@ public:
     _start(start), _word_size(word_size) {};
   MemRegion(HeapWord* start, HeapWord* end) :
     _start(start), _word_size(pointer_delta(end, start)) {
+    assert(end >= start, "incorrect constructor arguments");
+  }
+  MemRegion(MetaWord* start, MetaWord* end) :
+    _start((HeapWord*)start), _word_size(pointer_delta(end, start)) {
     assert(end >= start, "incorrect constructor arguments");
   }
 
@@ -86,6 +94,10 @@ public:
   size_t word_size() const { return _word_size; }
 
   bool is_empty() const { return word_size() == 0; }
+  void* operator new(size_t size);
+  void* operator new [](size_t size);
+  void  operator delete(void* p);
+  void  operator delete [](void* p);
 };
 
 // For iteration over MemRegion's.

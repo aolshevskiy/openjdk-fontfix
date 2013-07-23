@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,7 @@ import java.util.List;
 /*
  * @test
  * @bug 7184145
- * @summary tests repacking of an orphaned jarfile
+ * @summary tests repacking of a simple named jarfile.
  * @compile -XDignore.symbol.file Utils.java RepackTest.java
  * @run main RepackTest
  * @author ksrini
@@ -36,6 +36,7 @@ public class RepackTest {
 
     public static void main(String... args) throws Exception {
         testRepack();
+        Utils.cleanup();
     }
 
     /*
@@ -47,7 +48,7 @@ public class RepackTest {
      */
     static void testRepack() throws IOException {
 
-        // make a copy of the test speciment to local directory
+        // make a copy of the test specimen to local directory
         File testFile = new File("src_tools.jar");
         Utils.copyFile(Utils.locateJar("golden.jar"), testFile);
         List<String> cmdsList = new ArrayList<>();

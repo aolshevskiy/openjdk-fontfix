@@ -28,9 +28,10 @@ package sun.awt;
 import java.awt.IllegalComponentStateException;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.HashMap;
 import java.util.WeakHashMap;
 
 import sun.util.logging.PlatformLogger;
@@ -54,12 +55,14 @@ import sun.util.logging.PlatformLogger;
  * screen to another on a system equipped with multiple displays.
  */
 public class SunDisplayChanger {
+
     private static final PlatformLogger log = PlatformLogger.getLogger("sun.awt.multiscreen.SunDisplayChanger");
 
-    // Create a new synchronizedMap with initial capacity of one listener.
+    // Create a new synchronized map with initial capacity of one listener.
     // It is asserted that the most common case is to have one GraphicsDevice
     // and one top-level Window.
-    private Map listeners = Collections.synchronizedMap(new WeakHashMap(1));
+    private Map<DisplayChangedListener, Void> listeners =
+        Collections.synchronizedMap(new WeakHashMap<DisplayChangedListener, Void>(1));
 
     public SunDisplayChanger() {}
 
@@ -68,12 +71,12 @@ public class SunDisplayChanger {
      * notified when the display is changed.
      */
     public void add(DisplayChangedListener theListener) {
-        if (log.isLoggable(PlatformLogger.FINE)) {
+        if (log.isLoggable(PlatformLogger.Level.FINE)) {
             if (theListener == null) {
                 log.fine("Assertion (theListener != null) failed");
             }
         }
-        if (log.isLoggable(PlatformLogger.FINER)) {
+        if (log.isLoggable(PlatformLogger.Level.FINER)) {
             log.finer("Adding listener: " + theListener);
         }
         listeners.put(theListener, null);
@@ -83,12 +86,12 @@ public class SunDisplayChanger {
      * Remove the given DisplayChangeListener from this SunDisplayChanger.
      */
     public void remove(DisplayChangedListener theListener) {
-        if (log.isLoggable(PlatformLogger.FINE)) {
+        if (log.isLoggable(PlatformLogger.Level.FINE)) {
             if (theListener == null) {
                 log.fine("Assertion (theListener != null) failed");
             }
         }
-        if (log.isLoggable(PlatformLogger.FINER)) {
+        if (log.isLoggable(PlatformLogger.Level.FINER)) {
             log.finer("Removing listener: " + theListener);
         }
         listeners.remove(theListener);
@@ -99,7 +102,7 @@ public class SunDisplayChanger {
      * taken place by calling their displayChanged() methods.
      */
     public void notifyListeners() {
-        if (log.isLoggable(PlatformLogger.FINEST)) {
+        if (log.isLoggable(PlatformLogger.Level.FINEST)) {
             log.finest("notifyListeners");
         }
     // This method is implemented by making a clone of the set of listeners,
@@ -113,20 +116,17 @@ public class SunDisplayChanger {
     // synchronization provides no protection against modifying the listener
     // list while in the middle of iterating over it.  -bchristi 7/10/2001
 
-        HashMap listClone;
-        Set cloneSet;
+        Set<DisplayChangedListener> cloneSet;
 
         synchronized(listeners) {
-            listClone = new HashMap(listeners);
+            cloneSet = new HashSet<DisplayChangedListener>(listeners.keySet());
         }
 
-        cloneSet = listClone.keySet();
-        Iterator itr = cloneSet.iterator();
+        Iterator<DisplayChangedListener> itr = cloneSet.iterator();
         while (itr.hasNext()) {
-            DisplayChangedListener current =
-             (DisplayChangedListener) itr.next();
+            DisplayChangedListener current = itr.next();
             try {
-                if (log.isLoggable(PlatformLogger.FINEST)) {
+                if (log.isLoggable(PlatformLogger.Level.FINEST)) {
                     log.finest("displayChanged for listener: " + current);
                 }
                 current.displayChanged();
@@ -146,7 +146,7 @@ public class SunDisplayChanger {
      * taken place by calling their paletteChanged() methods.
      */
     public void notifyPaletteChanged() {
-        if (log.isLoggable(PlatformLogger.FINEST)) {
+        if (log.isLoggable(PlatformLogger.Level.FINEST)) {
             log.finest("notifyPaletteChanged");
         }
     // This method is implemented by making a clone of the set of listeners,
@@ -160,19 +160,16 @@ public class SunDisplayChanger {
     // synchronization provides no protection against modifying the listener
     // list while in the middle of iterating over it.  -bchristi 7/10/2001
 
-        HashMap listClone;
-        Set cloneSet;
+        Set<DisplayChangedListener> cloneSet;
 
         synchronized (listeners) {
-            listClone = new HashMap(listeners);
+            cloneSet = new HashSet<DisplayChangedListener>(listeners.keySet());
         }
-        cloneSet = listClone.keySet();
-        Iterator itr = cloneSet.iterator();
+        Iterator<DisplayChangedListener> itr = cloneSet.iterator();
         while (itr.hasNext()) {
-            DisplayChangedListener current =
-             (DisplayChangedListener) itr.next();
+            DisplayChangedListener current = itr.next();
             try {
-                if (log.isLoggable(PlatformLogger.FINEST)) {
+                if (log.isLoggable(PlatformLogger.Level.FINEST)) {
                     log.finest("paletteChanged for listener: " + current);
                 }
                 current.paletteChanged();

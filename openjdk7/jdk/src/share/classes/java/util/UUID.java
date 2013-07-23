@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -164,7 +164,7 @@ public final class UUID implements java.io.Serializable, Comparable<UUID> {
         try {
             md = MessageDigest.getInstance("MD5");
         } catch (NoSuchAlgorithmException nsae) {
-            throw new InternalError("MD5 not supported");
+            throw new InternalError("MD5 not supported", nsae);
         }
         byte[] md5Bytes = md.digest(name);
         md5Bytes[6]  &= 0x0f;  /* clear version        */

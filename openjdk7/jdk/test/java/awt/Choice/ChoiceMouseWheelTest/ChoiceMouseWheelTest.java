@@ -29,14 +29,16 @@
   @run main ChoiceMouseWheelTest
 */
 
+import test.java.awt.regtesthelpers.Util;
+
 import java.awt.*;
 import java.awt.event.*;
 
 public class ChoiceMouseWheelTest extends Frame {
 
-    private boolean itemChanged = false;
-    private boolean wheelMoved = false;
-    private boolean frameExited = false;
+    private volatile boolean itemChanged = false;
+    private volatile boolean wheelMoved = false;
+    private volatile boolean frameExited = false;
 
     public static void main(String[] args) {
         new ChoiceMouseWheelTest();
@@ -84,8 +86,8 @@ public class ChoiceMouseWheelTest extends Frame {
 
         try {
             Robot robot = new Robot();
-            robot.setAutoDelay(100);
-            robot.waitForIdle();
+            robot.setAutoDelay(20);
+            Util.waitForIdle(robot);
 
             Point pt = choice.getLocationOnScreen();
             Dimension size = choice.getSize();
@@ -99,7 +101,7 @@ public class ChoiceMouseWheelTest extends Frame {
             if(!name.equals("sun.awt.X11.XToolkit")
                && !name.equals("sun.lwawt.macosx.LWCToolkit")) {
                 robot.mouseWheel(1);
-                robot.waitForIdle();
+                Util.waitForIdle(robot);
 
                 if(!wheelMoved || !itemChanged) {
                     throw new RuntimeException("Mouse Wheel over the choice failed!");
@@ -108,14 +110,14 @@ public class ChoiceMouseWheelTest extends Frame {
 
             // Test mouse wheel over the drop-down list
             robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
-            robot.waitForIdle();
+            Util.waitForIdle(robot);
             robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
-            robot.waitForIdle();
+            Util.waitForIdle(robot);
 
             int y = getLocationOnScreen().y + getSize().height;
             while(!frameExited && y >= 0) { // move to the bottom of drop-down list
                 robot.mouseMove(x, --y);
-                robot.waitForIdle();
+                Util.waitForIdle(robot);
             }
 
             if(x < 0) {
@@ -124,17 +126,17 @@ public class ChoiceMouseWheelTest extends Frame {
 
             y -= choice.getHeight() / 2;
             robot.mouseMove(x, y); // move to the last visible item in the drop-down list
-            robot.waitForIdle();
+            Util.waitForIdle(robot);
 
             robot.mouseWheel(choice.getItemCount()); // wheel to the last item
-            robot.waitForIdle();
+            Util.waitForIdle(robot);
 
             // click the last item
             itemChanged = false;
             robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
-            robot.waitForIdle();
+            Util.waitForIdle(robot);
             robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
-            robot.waitForIdle();
+            Util.waitForIdle(robot);
 
             if(!itemChanged || choice.getSelectedIndex() != choice.getItemCount() - 1) {
                 throw new RuntimeException("Mouse Wheel scroll position error!");

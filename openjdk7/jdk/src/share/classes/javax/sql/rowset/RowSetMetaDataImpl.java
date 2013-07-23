@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -97,7 +97,7 @@ public class RowSetMetaDataImpl implements RowSetMetaData,  Serializable {
      */
     private void checkColType(int SQLType) throws SQLException {
         try {
-            Class c = java.sql.Types.class;
+            Class<?> c = java.sql.Types.class;
             Field[] publicFields = c.getFields();
             int fieldValue = 0;
             for (int i = 0; i < publicFields.length; i++) {
@@ -159,7 +159,7 @@ public class RowSetMetaDataImpl implements RowSetMetaData,  Serializable {
      * @param property <code>true</code> if the given column is
      *                 automatically incremented; <code>false</code>
      *                 otherwise
-     * @throws <code>SQLException</code> if a database access error occurs or
+     * @throws SQLException if a database access error occurs or
      *         the given index is out of bounds
      */
     public void setAutoIncrement(int columnIndex, boolean property) throws SQLException {
@@ -195,7 +195,7 @@ public class RowSetMetaDataImpl implements RowSetMetaData,  Serializable {
      *                 value can be used in a <code>WHERE</code> clause;
      *                 <code>false</code> otherwise
      *
-     * @throws <code>SQLException</code> if a database access error occurs or
+     * @throws SQLException if a database access error occurs or
      *         the given column number is out of bounds
      */
     public void setSearchable(int columnIndex, boolean property)
@@ -212,7 +212,7 @@ public class RowSetMetaDataImpl implements RowSetMetaData,  Serializable {
      * must be between <code>1</code> and the number of columns,
      * inclusive between <code>1</code> and the number of columns, inclusive
      * @param property true if the value is a cash value; false otherwise.
-     * @throws <code>SQLException</code> if a database access error occurs
+     * @throws SQLException if a database access error occurs
      *         or the given column number is out of bounds
      */
     public void setCurrency(int columnIndex, boolean property)
@@ -233,7 +233,7 @@ public class RowSetMetaDataImpl implements RowSetMetaData,  Serializable {
      *                 <code>columnNullable</code>, or
      *                 <code>columnNullableUnknown</code>
      *
-     * @throws <code>SQLException</code> if a database access error occurs,
+     * @throws SQLException if a database access error occurs,
      *         the given column number is out of bounds, or the value supplied
      *         for the <i>property</i> parameter is not one of the following
      *         constants:
@@ -1091,5 +1091,7 @@ public class RowSetMetaDataImpl implements RowSetMetaData,  Serializable {
          *@serial
          */
         public boolean writable = true;
+
+        static final long serialVersionUID = 5490834817919311283L;
     }
 }

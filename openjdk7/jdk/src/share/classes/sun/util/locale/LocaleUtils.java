@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -196,7 +196,7 @@ public final class LocaleUtils {
         return isAlpha(c) || isNumeric(c);
     }
 
-    static boolean isAlphaNumericString(String s) {
+    public static boolean isAlphaNumericString(String s) {
         int len = s.length();
         for (int i = 0; i < len; i++) {
             if (!isAlphaNumeric(s.charAt(i))) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -730,7 +730,7 @@ void ciTypeFlow::StateVector::do_ldc(ciBytecodeStream* str) {
     if (obj->is_null_object()) {
       push_null();
     } else {
-      assert(!obj->is_klass(), "must be java_mirror of klass");
+      assert(obj->is_instance(), "must be java_mirror of klass");
       push_object(obj->klass());
     }
   } else {
@@ -2540,7 +2540,7 @@ void ciTypeFlow::build_loop_tree(Block* blk) {
   } else if (innermost->head() == blk) {
     // If loop header, complete the tree pointers
     if (blk->loop() != innermost) {
-#if ASSERT
+#ifdef ASSERT
       assert(blk->loop()->head() == innermost->head(), "same head");
       Loop* dl;
       for (dl = innermost; dl != NULL && dl != blk->loop(); dl = dl->parent());

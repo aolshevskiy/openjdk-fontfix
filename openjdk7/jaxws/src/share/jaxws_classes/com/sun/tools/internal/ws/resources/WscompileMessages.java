@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.tools.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -46,7 +45,7 @@ public final class WscompileMessages {
 
     /**
      *
-     * Archiving the generated artifacts in to {0}.
+     * Archiving the generated artifacts into {0}.
      *
      *
      */
@@ -64,6 +63,18 @@ public final class WscompileMessages {
      */
     public static String WSGEN_CLASS_MUST_BE_IMPLEMENTATION_CLASS(Object arg0) {
         return localizer.localize(localizableWSGEN_CLASS_MUST_BE_IMPLEMENTATION_CLASS(arg0));
+    }
+
+    public static Localizable localizableWSGEN_FULLVERSION(Object arg0) {
+        return messageFactory.getMessage("wsgen.fullversion", arg0);
+    }
+
+    /**
+     * wsgen full version "{0}"
+     *
+     */
+    public static String WSGEN_FULLVERSION(Object arg0) {
+        return localizer.localize(localizableWSGEN_FULLVERSION(arg0));
     }
 
     public static Localizable localizableWRAPPER_TASK_LOADING_INCORRECT_API(Object arg0, Object arg1, Object arg2) {
@@ -88,6 +99,18 @@ public final class WscompileMessages {
      */
     public static String WSIMPORT_WSDLLOCATION_CLIENTJAR() {
         return localizer.localize(localizableWSIMPORT_WSDLLOCATION_CLIENTJAR());
+    }
+
+    public static Localizable localizableWSIMPORT_VERSION(Object arg0) {
+        return messageFactory.getMessage("wsimport.version", arg0);
+    }
+
+    /**
+     * wsimport version "{0}"
+     *
+     */
+    public static String WSIMPORT_VERSION(Object arg0) {
+        return localizer.localize(localizableWSIMPORT_VERSION(arg0));
     }
 
     public static Localizable localizableWSGEN_CLASS_NOT_FOUND(Object arg0) {
@@ -189,7 +212,7 @@ public final class WscompileMessages {
     }
 
     /**
-     * You are running on JDK6 which comes with JAX-WS {0} API, but this tool requires JAX-WS {1} API. Use the endorsed standards override mechanism (http://java.sun.com/javase/6/docs/technotes/guides/standards/), or use -Xendorsed option.
+     * You are running on JDK6 which comes with JAX-WS {0} API, but this tool requires JAX-WS {1} API. Use the endorsed standards override mechanism (http://docs.oracle.com/javase/6/docs/technotes/guides/standards/), or use -Xendorsed option.
      *
      */
     public static String INVOKER_NEED_ENDORSED(Object arg0, Object arg1) {
@@ -222,6 +245,8 @@ public final class WscompileMessages {
      *   -Xdebug                          print debug information
      *   -Xno-addressing-databinding      enable binding of W3C EndpointReferenceType to Java
      *   -Xnocompile                      do not compile generated Java files
+     *   -XdisableAuthenticator           disable Authenticator used by JAX-WS RI,
+     *                                    -Xauthfile option will be ignored if set
      *   -XdisableSSLHostnameVerification disable the SSL Hostname verification while fetching
      *                                    wsdls
      *
@@ -299,12 +324,14 @@ public final class WscompileMessages {
      *   -catalog <file>           specify catalog file to resolve external entity references
      *                             supports TR9401, XCatalog, and OASIS XML Catalog format.
      *   -d <directory>            specify where to place generated output files
+     *   -encoding <encoding>      specify character encoding used by source files
      *   -extension                allow vendor extensions - functionality not specified
      *                             by the specification.  Use of extensions may
      *                             result in applications that are not portable or
      *                             may not interoperate with other implementations
      *   -help                     display help
-     *   -httpproxy:<host>:<port>  specify a HTTP proxy server (port defaults to 8080)
+     *   -httpproxy:<proxy>        set a HTTP proxy. Format is [user[:password]@]proxyHost:proxyPort
+     *                             (port defaults to 8080)
      *   -keep                     keep generated files
      *   -p <pkg>                  specifies the target package
      *   -quiet                    suppress wsimport output
@@ -314,9 +341,14 @@ public final class WscompileMessages {
      *                             e.g. 2.0 will generate compliant code for JAXWS 2.0 spec
      *   -verbose                  output messages about what the compiler is doing
      *   -version                  print version information
+     *   -fullversion              print full version information
      *   -wsdllocation <location>  @WebServiceClient.wsdlLocation value
      *   -clientjar <jarfile>      Creates the jar file of the generated artifacts along with the
      *                             WSDL metadata required for invoking the web service.
+     *   -generateJWS              generate stubbed JWS implementation file
+     *   -implDestDir <directory>  specify where to generate JWS implementation file
+     *   -implServiceName <name>   local portion of service name for generated JWS implementation
+     *   -implPortName <name>      local portion of port name for generated JWS implementation
      *
      */
     public static String WSIMPORT_HELP(Object arg0) {
@@ -371,6 +403,18 @@ public final class WscompileMessages {
      */
     public static String WSIMPORT_READING_AUTH_FILE(Object arg0) {
         return localizer.localize(localizableWSIMPORT_READING_AUTH_FILE(arg0));
+    }
+
+    public static Localizable localizableWSCOMPILE_UNSUPPORTED_ENCODING(Object arg0) {
+        return messageFactory.getMessage("wscompile.unsupportedEncoding", arg0);
+    }
+
+    /**
+     * unsupported encoding: {0}
+     *
+     */
+    public static String WSCOMPILE_UNSUPPORTED_ENCODING(Object arg0) {
+        return localizer.localize(localizableWSCOMPILE_UNSUPPORTED_ENCODING(arg0));
     }
 
     public static Localizable localizableWSGEN_NO_WEBSERVICES_CLASS(Object arg0) {
@@ -524,7 +568,7 @@ public final class WscompileMessages {
     }
 
     /**
-     * You are running on JDK6 which comes with JAX-WS {0} API, but this tool requires JAX-WS {1} API. Use the endorsed standards override mechanism (http://java.sun.com/javase/6/docs/technotes/guides/standards/), or set xendorsed="true" on <{2}>.
+     * You are running on JDK6 which comes with JAX-WS {0} API, but this tool requires JAX-WS {1} API. Use the endorsed standards override mechanism (http://docs.oracle.com/javase/6/docs/technotes/guides/standards/), or set xendorsed="true" on <{2}>.
      *
      */
     public static String WRAPPER_TASK_NEED_ENDORSED(Object arg0, Object arg1, Object arg2) {
@@ -541,6 +585,18 @@ public final class WscompileMessages {
      */
     public static String WSIMPORT_NO_SUCH_JAXB_OPTION(Object arg0) {
         return localizer.localize(localizableWSIMPORT_NO_SUCH_JAXB_OPTION(arg0));
+    }
+
+    public static Localizable localizableWSGEN_VERSION(Object arg0) {
+        return messageFactory.getMessage("wsgen.version", arg0);
+    }
+
+    /**
+     * wsgen version "{0}"
+     *
+     */
+    public static String WSGEN_VERSION(Object arg0) {
+        return localizer.localize(localizableWSGEN_VERSION(arg0));
     }
 
     public static Localizable localizableWSIMPORT_AUTH_FILE_NOT_FOUND(Object arg0, Object arg1) {
@@ -603,6 +659,7 @@ public final class WscompileMessages {
      *   -classpath <path>          specify where to find input class files
      *   -cp <path>                 same as -classpath <path>
      *   -d <directory>             specify where to place generated output files
+     *   -encoding <encoding>       specify character encoding used by source files
      *   -extension                 allow vendor extensions - functionality not specified
      *                              by the specification.  Use of extensions may
      *                              result in applications that are not portable or
@@ -614,6 +671,7 @@ public final class WscompileMessages {
      *   -s <directory>             specify where to place generated source files
      *   -verbose                   output messages about what the compiler is doing
      *   -version                   print version information
+     *   -fullversion               print full version information
      *   -wsdl[:protocol]           generate a WSDL file. The protocol is optional.
      *                              Valid protocols are {1},
      *                              the default is soap1.1.
@@ -820,7 +878,7 @@ public final class WscompileMessages {
     }
 
     /**
-     * "{0}" is not a supported transport.  Supported transport include: {1}.
+     * "{0}" is not a supported transport.  Supported transport includes: {1}.
      *
      */
     public static String WSGEN_INVALID_TRANSPORT(Object arg0, Object arg1) {
@@ -852,6 +910,18 @@ public final class WscompileMessages {
         return localizer.localize(localizableWSIMPORT_ILLEGAL_TARGET_VERSION(arg0));
     }
 
+    public static Localizable localizableWSIMPORT_ILLEGAL_PROXY(Object arg0) {
+        return messageFactory.getMessage("wsimport.ILLEGAL_PROXY", arg0);
+    }
+
+    /**
+     * "{0}" is not a valid proxy format. The format is [user[:password]@]proxyHost:proxyPort
+     *
+     */
+    public static String WSIMPORT_ILLEGAL_PROXY(Object arg0) {
+        return localizer.localize(localizableWSIMPORT_ILLEGAL_PROXY(arg0));
+    }
+
     public static Localizable localizableWSGEN_PORTNAME_MISSING_LOCALNAME(Object arg0) {
         return messageFactory.getMessage("wsgen.portname.missing.localname", arg0);
     }
@@ -874,6 +944,18 @@ public final class WscompileMessages {
      */
     public static String WSGEN_PORTNAME_MISSING_NAMESPACE(Object arg0) {
         return localizer.localize(localizableWSGEN_PORTNAME_MISSING_NAMESPACE(arg0));
+    }
+
+    public static Localizable localizableWSIMPORT_FULLVERSION(Object arg0) {
+        return messageFactory.getMessage("wsimport.fullversion", arg0);
+    }
+
+    /**
+     * wsimport full version "{0}"
+     *
+     */
+    public static String WSIMPORT_FULLVERSION(Object arg0) {
+        return localizer.localize(localizableWSIMPORT_FULLVERSION(arg0));
     }
 
 }

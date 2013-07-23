@@ -99,7 +99,7 @@ Declares a structure type that can be used in other events.
       <value type="JAVALANGTHREAD" field="previousOwner" label="Previous Monitor Owner"/>
       <value type="ADDRESS" field="address" label="Monitor Address" relation="JAVA_MONITOR_ADDRESS"/>
     </event>
-    
+
     <event id="JavaMonitorWait" path="java/monitor_wait" label="Java Monitor Wait" description="Waiting on a Java monitor"
             has_thread="true" has_stacktrace="true" is_instant="false">
       <value type="CLASS" field="klass" label="Monitor Class" description="Class of object waited on"/>
@@ -144,14 +144,21 @@ Declares a structure type that can be used in other events.
       <value type="BYTES64" field="heapUsed" label="Heap Used" description="Bytes allocated by objects in the heap"/>
     </event>
 
-    <event id="PermGenSummary" path="vm/gc/heap/perm_gen_summary" label="Perm Gen Summary" is_instant="true">
+    <struct id="MetaspaceSizes">
+      <value type="BYTES64" field="capacity" label="Capacity" description="Total available memory to allocate in" />
+      <value type="BYTES64" field="used" label="Used" description="Bytes allocated by objects in the space" />
+      <value type="BYTES64" field="reserved" label="Reserved" description="Reserved memory for this space" />
+    </struct>
+
+    <event id="MetaspaceSummary" path="vm/gc/heap/metaspace_summary" label="Metaspace Summary" is_instant="true">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
       <value type="GCWHEN" field="when" label="When" />
-      <structvalue type="VirtualSpace" field="permSpace" label="PermGen Space"/>
-      <structvalue type="ObjectSpace" field="objectSpace" label="Object Space"/>
+      <structvalue type="MetaspaceSizes" field="metaspace" label="Total"/>
+      <structvalue type="MetaspaceSizes" field="dataSpace" label="Data"/>
+      <structvalue type="MetaspaceSizes" field="classSpace" label="Class"/>
     </event>
 
-    <event id="PSHeapSummary" path="vm/gc/heap/ps_summary" label="ParallelScavengeHeap Summary" is_instant="true">
+    <event id="PSHeapSummary" path="vm/gc/heap/ps_summary" label="Parallel Scavenge Heap Summary" is_instant="true">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
       <value type="GCWHEN" field="when" label="When" />
 
@@ -196,7 +203,7 @@ Declares a structure type that can be used in other events.
       <value type="G1YCTYPE" field="type" label="Type" />
     </event>
 
-    <event id="EvacuationInfo" path="vm/gc/detailed/evacuation_info" label="Evacuation Info" is_instant="true">
+    <event id="EvacuationInfo" path="vm/gc/detailed/evacuation_info" label="Evacuation Information" is_instant="true">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
       <value type="UINT" field="cSetRegions" label="Collection Set Regions"/>
       <value type="BYTES64" field="cSetUsedBefore" label="Collection Set Before" description="Memory usage before GC in the collection set regions"/>
@@ -204,23 +211,16 @@ Declares a structure type that can be used in other events.
       <value type="UINT" field="allocationRegions" label="Allocation Regions" description="Regions chosen as allocation regions during evacuation (includes survivors and old space regions)"/>
       <value type="BYTES64" field="allocRegionsUsedBefore" label="Alloc Regions Before" description="Memory usage before GC in allocation regions"/>
       <value type="BYTES64" field="allocRegionsUsedAfter" label="Alloc Regions After" description="Memory usage after GC in allocation regions"/>
-      <value type="BYTES64" field="bytesCopied" label="BytesCopied"/>
+      <value type="BYTES64" field="bytesCopied" label="Bytes Copied"/>
       <value type="UINT" field="regionsFreed" label="Regions Freed"/>
     </event>
 
     <event id="GCReferenceStatistics" path="vm/gc/reference/statistics"
-           label="GC Reference Processing" is_instant="true"
+           label="GC Reference Statistics" is_instant="true"
            description="Total count of processed references during GC">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
       <value type="REFERENCETYPE" field="type" label="Type" />
       <value type="ULONG" field="count" label="Total Count" />
-    </event>
-
-    <event id="ObjectCountAfterGC" path="vm/gc/detailed/object_count_after_gc" is_instant="true" label="Object Count After GC">
-      <value type="UINT" field="gcId"  label="GC ID" relation="GC_ID" />
-      <value type="CLASS" field="class" label="Class" />
-      <value type="LONG" field="count" label="Count" />
-      <value type="BYTES64" field="totalSize" label="Total Size" />
     </event>
 
     <struct id="CopyFailed">
@@ -230,17 +230,24 @@ Declares a structure type that can be used in other events.
       <value type="BYTES64" field="totalSize" label="Total Object Size"/>
     </struct>
 
+    <event id="ObjectCountAfterGC" path="vm/gc/detailed/object_count_after_gc" is_instant="true" label="Object Count after GC">
+      <value type="UINT" field="gcId"  label="GC ID" relation="GC_ID" />
+      <value type="CLASS" field="class" label="Class" />
+      <value type="LONG" field="count" label="Count" />
+      <value type="BYTES64" field="totalSize" label="Total Size" />
+    </event>
+
     <event id="PromotionFailed" path="vm/gc/detailed/promotion_failed" label="Promotion Failed" is_instant="true"
            description="Promotion of an object failed">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
-      <structvalue type="CopyFailed" field="data" label="data"/>
+      <structvalue type="CopyFailed" field="data" label="Data"/>
       <value type="OSTHREAD" field="thread" label="Running thread"/>
     </event>
 
     <event id="EvacuationFailed" path="vm/gc/detailed/evacuation_failed" label="Evacuation Failed" is_instant="true"
            description="Evacuation of an object failed">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
-      <structvalue type="CopyFailed" field="data" label="data"/>
+      <structvalue type="CopyFailed" field="data" label="Data"/>
     </event>
 
     <event id="ConcurrentModeFailure" path="vm/gc/detailed/concurrent_mode_failure" label="Concurrent Mode Failure"
@@ -252,24 +259,24 @@ Declares a structure type that can be used in other events.
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
       <value type="UTF8" field="name" label="Name" />
     </event>
-    
+
     <event id="GCPhasePauseLevel1" path="vm/gc/phases/pause_level_1" label="GC Phase Pause Level 1">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
       <value type="UTF8" field="name" label="Name" />
     </event>
-    
+
     <event id="GCPhasePauseLevel2" path="vm/gc/phases/pause_level_2" label="GC Phase Pause Level 2">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
       <value type="UTF8" field="name" label="Name" />
     </event>
-    
+
     <event id="GCPhasePauseLevel3" path="vm/gc/phases/pause_level_3" label="GC Phase Pause Level 3">
       <value type="UINT" field="gcId" label="GC ID" relation="GC_ID"/>
       <value type="UTF8" field="name" label="Name" />
     </event>
-    
+
     <!-- Compiler events -->
-    
+
     <event id="Compilation" path="vm/compiler/compilation" label="Compilation"
          has_thread="true" is_requestable="false" is_constant="false">
       <value type="METHOD" field="method" label="Java Method"/>
@@ -280,14 +287,14 @@ Declares a structure type that can be used in other events.
       <value type="BYTES" field="codeSize" label="Compiled Code Size"/>
       <value type="BYTES" field="inlinedBytes" label="Inlined Code Size"/>
     </event>
-    
+
     <event id="CompilerPhase" path="vm/compiler/phase" label="Compiler Phase"
             has_thread="true" is_requestable="false" is_constant="false">
       <value type="COMPILERPHASETYPE" field="phase" label="Compile Phase"/>
       <value type="UINT" field="compileID" label="Compilation ID" relation="COMP_ID"/>
       <value type="USHORT" field="phaseLevel" label="Phase Level"/>
     </event>
-    
+
     <event id="CompilerFailure" path="vm/compiler/failure" label="Compilation Failure"
             has_thread="true" is_requestable="false" is_constant="false" is_instant="true">
       <value type="UTF8" field="failure" label="Message"/>
@@ -295,17 +302,17 @@ Declares a structure type that can be used in other events.
     </event>
 
     <!-- Code sweeper events -->
-    
+
     <event id="SweepCodeCache" path="vm/code_sweeper/sweep" label="Sweep Code Cache"
        has_thread="true" is_requestable="false" is_constant="false">
       <value type="INTEGER" field="sweepIndex" label="Sweep Index" relation="SWEEP_ID"/>
       <value type="USHORT" field="sweepFractionIndex" label="Fraction Index"/>
       <value type="UINT" field="sweptCount" label="Methods Swept"/>
       <value type="UINT" field="flushedCount" label="Methods Flushed"/>
-      <value type="UINT" field="markedCount" label="Methods Reclaim"/>
+      <value type="UINT" field="markedCount" label="Methods Reclaimed"/>
       <value type="UINT" field="zombifiedCount" label="Methods Zombified"/>
     </event>
-    
+
     <event id="CleanCodeCache" path="vm/code_sweeper/clean" label="Clean Code Cache"
              description="Clean code cache from oldest methods"
              has_thread="true" is_requestable="false" is_constant="false">
@@ -314,7 +321,7 @@ Declares a structure type that can be used in other events.
     </event>
 
     <!-- Code cache events -->
-    
+
     <event id="CodeCacheFull" path="vm/code_cache/full" label="Code Cache Full"
          has_thread="true" is_requestable="false" is_constant="false" is_instant="true">
       <value type="ADDRESS" field="startAddress" label="Start Address"/>
@@ -324,7 +331,6 @@ Declares a structure type that can be used in other events.
       <value type="INTEGER" field="methodCount" label="Methods"/>
       <value type="INTEGER" field="adaptorCount" label="Adaptors"/>
       <value type="BYTES64" field="unallocatedCapacity" label="Unallocated"/>
-      <value type="BYTES64" field="largestFreeBlock" label="Largest Free Block"/>
       <value type="INTEGER" field="fullCount" label="Full Count"/>
     </event>
 
@@ -335,7 +341,7 @@ Declares a structure type that can be used in other events.
       <value type="BOOLEAN" field="blocking" label="Caller Blocked" description="If the calling thread was blocked until the operation was complete."/>
       <value type="OSTHREAD" field="caller" label="Caller" transition="FROM" description="Thread requesting operation. If non-blocking, will be set to 0 indicating thread is unknown."/>
     </event>
-    
+
     <!-- Allocation events -->
     <event id="AllocObjectInNewTLAB" path="java/object_alloc_in_new_TLAB" label="Allocation in new TLAB"
         description="Allocation in new Thread Local Allocation Buffer" has_thread="true" has_stacktrace="true" is_instant="true">
@@ -350,7 +356,7 @@ Declares a structure type that can be used in other events.
       <value type="BYTES64" field="allocationSize" label="Allocation Size"/>
     </event>
   </events>
-  
+
   <xi:include href="../../../closed/share/vm/trace/traceeventtypes.xml" xmlns:xi="http://www.w3.org/2001/XInclude">
     <xi:fallback/>
   </xi:include>

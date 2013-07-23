@@ -76,10 +76,10 @@ typedef struct {
 } VMStructEntry;
 
 typedef struct {
-  const char* typeName;            // Type name (example: "methodOopDesc")
+  const char* typeName;            // Type name (example: "Method")
   const char* superclassName;      // Superclass name, or null if none (example: "oopDesc")
-  int32_t isOopType;               // Does this type represent an oop typedef? (i.e., "methodOop" or
-                                   // "klassOop", but NOT "methodOopDesc")
+  int32_t isOopType;               // Does this type represent an oop typedef? (i.e., "Method*" or
+                                   // "Klass*", but NOT "Method")
   int32_t isIntegerType;           // Does this type represent an integer type (of arbitrary size)?
   int32_t isUnsigned;              // If so, is it unsigned?
   uint64_t size;                   // Size, in bytes, of the type
@@ -120,6 +120,11 @@ public:
   // This is used to run any checking code necessary for validation of
   // the data structure (debug build only)
   static void init();
+
+#ifndef PRODUCT
+  // Execute unit tests
+  static void test();
+#endif
 
 private:
   // Look up a type in localHotSpotVMTypes using strcmp() (debug build only).

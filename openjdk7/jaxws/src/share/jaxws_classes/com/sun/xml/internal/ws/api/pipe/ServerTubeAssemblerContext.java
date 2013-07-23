@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -105,7 +105,7 @@ public class ServerTubeAssemblerContext {
      * {@link com.sun.xml.internal.ws.api.pipe.Pipe}s.
      *  @return Always non-null.
      */
-    public @NotNull WSEndpoint getEndpoint() {
+    public @NotNull WSEndpoint<?> getEndpoint() {
         return endpoint;
     }
 
@@ -225,7 +225,7 @@ public class ServerTubeAssemblerContext {
      * encode/decode entire MIME messages in SOAP binding)
      *
      * @return codec to be used for web service requests
-     * @see {@link Codecs}
+     * @see Codecs
      */
     public @NotNull Codec getCodec() {
         return codec;
@@ -247,7 +247,7 @@ public class ServerTubeAssemblerContext {
      * serving requests concurrently.
      *
      * @param codec codec to be used for web service requests
-     * @see {@link Codecs}
+     * @see Codecs
      */
     public void setCodec(@NotNull Codec codec) {
         this.codec = codec;

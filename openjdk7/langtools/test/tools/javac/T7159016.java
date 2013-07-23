@@ -28,7 +28,7 @@
  * @library lib
  * @build JavacTestingAbstractProcessor
  * @run main T7159016
- * @author Jesse Glick
+ * @author Jessie Glick
  */
 
 import java.io.File;

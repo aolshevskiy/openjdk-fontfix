@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,7 @@
 #include "classfile/verificationType.hpp"
 #include "memory/gcLocker.hpp"
 #include "oops/klass.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "runtime/handles.hpp"
 #include "utilities/exceptions.hpp"
 
@@ -36,8 +36,10 @@
 class Verifier : AllStatic {
  public:
   enum {
+    STRICTER_ACCESS_CTRL_CHECK_VERSION  = 49,
     STACKMAP_ATTRIBUTE_MAJOR_VERSION    = 50,
-    INVOKEDYNAMIC_MAJOR_VERSION         = 51
+    INVOKEDYNAMIC_MAJOR_VERSION         = 51,
+    NO_RELAX_ACCESS_CTRL_CHECK_VERSION  = 52
   };
   typedef enum { ThrowException, NoException } Mode;
 
@@ -84,9 +86,9 @@ class StackMapTable;
 // These macros are used similarly to CHECK macros but also check
 // the status of the verifier and return if that has an error.
 #define CHECK_VERIFY(verifier) \
-  CHECK); if ((verifier)->has_error()) return; (0
+  CHECK); if ((verifier)->has_error()) return; ((void)0
 #define CHECK_VERIFY_(verifier, result) \
-  CHECK_(result)); if ((verifier)->has_error()) return (result); (0
+  CHECK_(result)); if ((verifier)->has_error()) return (result); ((void)0
 
 class TypeOrigin VALUE_OBJ_CLASS_SPEC {
  private:
@@ -224,7 +226,7 @@ class ErrorContext VALUE_OBJ_CLASS_SPEC {
     _expected.reset_frame();
   }
 
-  void details(outputStream* ss, methodOop method) const;
+  void details(outputStream* ss, const Method* method) const;
 
 #ifdef ASSERT
   void print_on(outputStream* str) const {
@@ -237,12 +239,12 @@ class ErrorContext VALUE_OBJ_CLASS_SPEC {
 #endif
 
  private:
-  void location_details(outputStream* ss, methodOop method) const;
+  void location_details(outputStream* ss, const Method* method) const;
   void reason_details(outputStream* ss) const;
   void frame_details(outputStream* ss) const;
-  void bytecode_details(outputStream* ss, methodOop method) const;
-  void handler_details(outputStream* ss, methodOop method) const;
-  void stackmap_details(outputStream* ss, methodOop method) const;
+  void bytecode_details(outputStream* ss, const Method* method) const;
+  void handler_details(outputStream* ss, const Method* method) const;
+  void stackmap_details(outputStream* ss, const Method* method) const;
 };
 
 // A new instance of this class is created for each class being verified
@@ -268,7 +270,7 @@ class ClassVerifier : public StackObj {
   }
 
   bool is_protected_access(
-    instanceKlassHandle this_class, klassOop target_class,
+    instanceKlassHandle this_class, Klass* target_class,
     Symbol* field_name, Symbol* field_sig, bool is_method);
 
   void verify_cp_index(u2 bci, constantPoolHandle cp, int index, TRAPS);
@@ -380,7 +382,7 @@ class ClassVerifier : public StackObj {
   void verify_error(ErrorContext ctx, const char* fmt, ...);
   void class_format_error(const char* fmt, ...);
 
-  klassOop load_class(Symbol* name, TRAPS);
+  Klass* load_class(Symbol* name, TRAPS);
 
   int change_sig_to_verificationType(
     SignatureStream* sig_type, VerificationType* inference_type, TRAPS);

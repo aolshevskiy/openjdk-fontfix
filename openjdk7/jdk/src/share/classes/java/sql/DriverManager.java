@@ -30,11 +30,13 @@ import java.util.ServiceLoader;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.concurrent.CopyOnWriteArrayList;
+import sun.reflect.CallerSensitive;
+import sun.reflect.Reflection;
 
 
 /**
  * <P>The basic service for managing a set of JDBC drivers.<br>
- * <B>NOTE:</B> The {@link <code>DataSource</code>} interface, new in the
+ * <B>NOTE:</B> The {@link javax.sql.DataSource} interface, new in the
  * JDBC 2.0 API, provides another way to connect to a data source.
  * The use of a <code>DataSource</code> object is the preferred means of
  * connecting to a data source.
@@ -80,7 +82,7 @@ public class DriverManager {
 
 
     // List of registered JDBC drivers
-    private final static CopyOnWriteArrayList<DriverInfo> registeredDrivers = new CopyOnWriteArrayList<DriverInfo>();
+    private final static CopyOnWriteArrayList<DriverInfo> registeredDrivers = new CopyOnWriteArrayList<>();
     private static volatile int loginTimeout = 0;
     private static volatile java.io.PrintWriter logWriter = null;
     private static volatile java.io.PrintStream logStream = null;
@@ -107,6 +109,14 @@ public class DriverManager {
      */
     final static SQLPermission SET_LOG_PERMISSION =
         new SQLPermission("setLog");
+
+    /**
+     * The {@code SQLPermission} constant that allows the
+     * un-register a registered JDBC driver.
+     * @since 1.8
+     */
+    final static SQLPermission DEREGISTER_DRIVER_PERMISSION =
+        new SQLPermission("deregisterDriver");
 
     //--------------------------JDBC 2.0-----------------------------
 
@@ -171,6 +181,12 @@ public class DriverManager {
      * Attempts to establish a connection to the given database URL.
      * The <code>DriverManager</code> attempts to select an appropriate driver from
      * the set of registered JDBC drivers.
+     *<p>
+     * <B>Note:</B> If a property is specified as part of the {@code url} and
+     * is also specified in the {@code Properties} object, it is
+     * implementation-defined as to which value will take precedence.
+     * For maximum portability, an application should only specify a
+     * property once.
      *
      * @param url a database url of the form
      * <code> jdbc:<em>subprotocol</em>:<em>subname</em></code>
@@ -178,22 +194,30 @@ public class DriverManager {
      * connection arguments; normally at least a "user" and
      * "password" property should be included
      * @return a Connection to the URL
-     * @exception SQLException if a database access error occurs
+     * @exception SQLException if a database access error occurs or the url is
+     * {@code null}
+     * @throws SQLTimeoutException  when the driver has determined that the
+     * timeout value specified by the {@code setLoginTimeout} method
+     * has been exceeded and has at least tried to cancel the
+     * current database connection attempt
      */
+    @CallerSensitive
     public static Connection getConnection(String url,
         java.util.Properties info) throws SQLException {
 
-        // Gets the classloader of the code that called this method, may
-        // be null.
-        ClassLoader callerCL = DriverManager.getCallerClassLoader();
-
-        return (getConnection(url, info, callerCL));
+        return (getConnection(url, info, Reflection.getCallerClass()));
     }
 
     /**
      * Attempts to establish a connection to the given database URL.
      * The <code>DriverManager</code> attempts to select an appropriate driver from
      * the set of registered JDBC drivers.
+     *<p>
+     * <B>Note:</B> If a property is specified as part of the {@code url} and
+     * is also specified in the {@code Properties} object, it is
+     * implementation-defined as to which value will take precedence.
+     * For maximum portability, an application should only specify a
+     * property once.
      *
      * @param url a database url of the form
      * <code>jdbc:<em>subprotocol</em>:<em>subname</em></code>
@@ -201,15 +225,17 @@ public class DriverManager {
      *   made
      * @param password the user's password
      * @return a connection to the URL
-     * @exception SQLException if a database access error occurs
+     * @exception SQLException if a database access error occurs or the url is
+     * {@code null}
+     * @throws SQLTimeoutException  when the driver has determined that the
+     * timeout value specified by the {@code setLoginTimeout} method
+     * has been exceeded and has at least tried to cancel the
+     * current database connection attempt
      */
+    @CallerSensitive
     public static Connection getConnection(String url,
         String user, String password) throws SQLException {
         java.util.Properties info = new java.util.Properties();
-
-        // Gets the classloader of the code that called this method, may
-        // be null.
-        ClassLoader callerCL = DriverManager.getCallerClassLoader();
 
         if (user != null) {
             info.put("user", user);
@@ -218,7 +244,7 @@ public class DriverManager {
             info.put("password", password);
         }
 
-        return (getConnection(url, info, callerCL));
+        return (getConnection(url, info, Reflection.getCallerClass()));
     }
 
     /**
@@ -229,18 +255,19 @@ public class DriverManager {
      * @param url a database url of the form
      *  <code> jdbc:<em>subprotocol</em>:<em>subname</em></code>
      * @return a connection to the URL
-     * @exception SQLException if a database access error occurs
+     * @exception SQLException if a database access error occurs or the url is
+     * {@code null}
+     * @throws SQLTimeoutException  when the driver has determined that the
+     * timeout value specified by the {@code setLoginTimeout} method
+     * has been exceeded and has at least tried to cancel the
+     * current database connection attempt
      */
+    @CallerSensitive
     public static Connection getConnection(String url)
         throws SQLException {
 
         java.util.Properties info = new java.util.Properties();
-
-        // Gets the classloader of the code that called this method, may
-        // be null.
-        ClassLoader callerCL = DriverManager.getCallerClassLoader();
-
-        return (getConnection(url, info, callerCL));
+        return (getConnection(url, info, Reflection.getCallerClass()));
     }
 
     /**
@@ -254,21 +281,20 @@ public class DriverManager {
      * that can connect to the given URL
      * @exception SQLException if a database access error occurs
      */
+    @CallerSensitive
     public static Driver getDriver(String url)
         throws SQLException {
 
         println("DriverManager.getDriver(\"" + url + "\")");
 
-        // Gets the classloader of the code that called this method, may
-        // be null.
-        ClassLoader callerCL = DriverManager.getCallerClassLoader();
+        Class<?> callerClass = Reflection.getCallerClass();
 
         // Walk through the loaded registeredDrivers attempting to locate someone
         // who understands the given URL.
         for (DriverInfo aDriver : registeredDrivers) {
             // If the caller does not have permission to load the driver then
             // skip it.
-            if(isDriverAllowed(aDriver.driver, callerCL)) {
+            if(isDriverAllowed(aDriver.driver, callerClass)) {
                 try {
                     if(aDriver.driver.acceptsURL(url)) {
                         // Success!
@@ -291,21 +317,42 @@ public class DriverManager {
 
 
     /**
-     * Registers the given driver with the <code>DriverManager</code>.
+     * Registers the given driver with the {@code DriverManager}.
      * A newly-loaded driver class should call
-     * the method <code>registerDriver</code> to make itself
-     * known to the <code>DriverManager</code>.
+     * the method {@code registerDriver} to make itself
+     * known to the {@code DriverManager}. If the driver had previously been
+     * registered, no action is taken.
      *
      * @param driver the new JDBC Driver that is to be registered with the
-     *               <code>DriverManager</code>
+     *               {@code DriverManager}
      * @exception SQLException if a database access error occurs
      */
     public static synchronized void registerDriver(java.sql.Driver driver)
         throws SQLException {
 
+        registerDriver(driver, null);
+    }
+
+    /**
+     * Registers the given driver with the {@code DriverManager}.
+     * A newly-loaded driver class should call
+     * the method {@code registerDriver} to make itself
+     * known to the {@code DriverManager}. If the driver had previously been
+     * registered, no action is taken.
+     *
+     * @param driver the new JDBC Driver that is to be registered with the
+     *               {@code DriverManager}
+     * @param da     the {@code DriverAction} implementation to be used when
+     *               {@code DriverManager#deregisterDriver} is called
+     * @exception SQLException if a database access error occurs
+     */
+    public static synchronized void registerDriver(java.sql.Driver driver,
+            DriverAction da)
+        throws SQLException {
+
         /* Register the driver if it has not already been added to our list */
         if(driver != null) {
-            registeredDrivers.addIfAbsent(new DriverInfo(driver));
+            registeredDrivers.addIfAbsent(new DriverInfo(driver, da));
         } else {
             // This is for compatibility with the original DriverManager
             throw new NullPointerException();
@@ -316,26 +363,53 @@ public class DriverManager {
     }
 
     /**
-     * Drops a driver from the <code>DriverManager</code>'s list.
-     *  Applets can only deregister drivers from their own classloaders.
+     * Removes the specified driver from the {@code DriverManager}'s list of
+     * registered drivers.
+     * <p>
+     * If a {@code null} value is specified for the driver to be removed, then no
+     * action is taken.
+     * <p>
+     * If a security manager exists and its {@code checkPermission} denies
+     * permission, then a {@code SecurityException} will be thrown.
+     * <p>
+     * If the specified driver is not found in the list of registered drivers,
+     * then no action is taken.  If the driver was found, it will be removed
+     * from the list of registered drivers.
+     * <p>
+     * If a {@code DriverAction} instance was specified when the JDBC driver was
+     * registered, its deregister method will be called
+     * prior to the driver being removed from the list of registered drivers.
      *
-     * @param driver the JDBC Driver to drop
+     * @param driver the JDBC Driver to remove
      * @exception SQLException if a database access error occurs
+     * @throws SecurityException if a security manager exists and its
+     * {@code checkPermission} method denies permission to deregister a driver.
+     *
+     * @see SecurityManager#checkPermission
      */
+    @CallerSensitive
     public static synchronized void deregisterDriver(Driver driver)
         throws SQLException {
         if (driver == null) {
             return;
         }
 
-        // Gets the classloader of the code that called this method,
-        // may be null.
-        ClassLoader callerCL = DriverManager.getCallerClassLoader();
+        SecurityManager sec = System.getSecurityManager();
+        if (sec != null) {
+            sec.checkPermission(DEREGISTER_DRIVER_PERMISSION);
+        }
+
         println("DriverManager.deregisterDriver: " + driver);
 
-        DriverInfo aDriver = new DriverInfo(driver);
+        DriverInfo aDriver = new DriverInfo(driver, null);
         if(registeredDrivers.contains(aDriver)) {
-            if (isDriverAllowed(driver, callerCL)) {
+            if (isDriverAllowed(driver, Reflection.getCallerClass())) {
+                DriverInfo di = registeredDrivers.get(registeredDrivers.indexOf(aDriver));
+                 // If a DriverAction was specified, Call it to notify the
+                 // driver that it has been deregistered
+                 if(di.action() != null) {
+                     di.action().deregister();
+                 }
                  registeredDrivers.remove(aDriver);
             } else {
                 // If the caller does not have permission to load the driver then
@@ -356,18 +430,17 @@ public class DriverManager {
      *
      * @return the list of JDBC Drivers loaded by the caller's class loader
      */
+    @CallerSensitive
     public static java.util.Enumeration<Driver> getDrivers() {
-        java.util.Vector<Driver> result = new java.util.Vector<Driver>();
+        java.util.Vector<Driver> result = new java.util.Vector<>();
 
-        // Gets the classloader of the code that called this method, may
-        // be null.
-        ClassLoader callerCL = DriverManager.getCallerClassLoader();
+        Class<?> callerClass = Reflection.getCallerClass();
 
         // Walk through the loaded registeredDrivers.
         for(DriverInfo aDriver : registeredDrivers) {
             // If the caller does not have permission to load the driver then
             // skip it.
-            if(isDriverAllowed(aDriver.driver, callerCL)) {
+            if(isDriverAllowed(aDriver.driver, callerClass)) {
                 result.addElement(aDriver.driver);
             } else {
                 println("    skipping: " + aDriver.getClass().getName());
@@ -379,7 +452,8 @@ public class DriverManager {
 
     /**
      * Sets the maximum time in seconds that a driver will wait
-     * while attempting to connect to a database.
+     * while attempting to connect to a database once the driver has
+     * been identified.
      *
      * @param seconds the login time limit in seconds; zero means there is no limit
      * @see #getLoginTimeout
@@ -411,13 +485,14 @@ public class DriverManager {
      * method throws a <code>java.lang.SecurityException</code>.
      *
      * @param out the new logging/tracing PrintStream; to disable, set to <code>null</code>
-     * @deprecated
+     * @deprecated Use {@code setLogWriter}
      * @throws SecurityException if a security manager exists and its
      *    <code>checkPermission</code> method denies setting the log stream
      *
      * @see SecurityManager#checkPermission
      * @see #getLogStream
      */
+    @Deprecated
     public static void setLogStream(java.io.PrintStream out) {
 
         SecurityManager sec = System.getSecurityManager();
@@ -437,9 +512,10 @@ public class DriverManager {
      * and all drivers.
      *
      * @return the logging/tracing PrintStream; if disabled, is <code>null</code>
-     * @deprecated
+     * @deprecated  Use {@code getLogWriter}
      * @see #setLogStream
      */
+    @Deprecated
     public static java.io.PrintStream getLogStream() {
         return logStream;
     }
@@ -464,6 +540,11 @@ public class DriverManager {
 
     // Indicates whether the class object that would be created if the code calling
     // DriverManager is accessible.
+    private static boolean isDriverAllowed(Driver driver, Class<?> caller) {
+        ClassLoader callerCL = caller != null ? caller.getClassLoader() : null;
+        return isDriverAllowed(driver, callerCL);
+    }
+
     private static boolean isDriverAllowed(Driver driver, ClassLoader classLoader) {
         boolean result = false;
         if(driver != null) {
@@ -500,7 +581,7 @@ public class DriverManager {
             public Void run() {
 
                 ServiceLoader<Driver> loadedDrivers = ServiceLoader.load(Driver.class);
-                Iterator driversIterator = loadedDrivers.iterator();
+                Iterator<Driver> driversIterator = loadedDrivers.iterator();
 
                 /* Load these drivers, so that they can be instantiated.
                  * It may be the case that the driver class may not be there
@@ -546,18 +627,19 @@ public class DriverManager {
 
     //  Worker method called by the public getConnection() methods.
     private static Connection getConnection(
-        String url, java.util.Properties info, ClassLoader callerCL) throws SQLException {
+        String url, java.util.Properties info, Class<?> caller) throws SQLException {
         /*
          * When callerCl is null, we should check the application's
          * (which is invoking this class indirectly)
          * classloader, so that the JDBC driver class outside rt.jar
          * can be loaded from here.
          */
+        ClassLoader callerCL = caller != null ? caller.getClassLoader() : null;
         synchronized(DriverManager.class) {
-          // synchronize loading of the correct classloader.
-          if(callerCL == null) {
-              callerCL = Thread.currentThread().getContextClassLoader();
-           }
+            // synchronize loading of the correct classloader.
+            if (callerCL == null) {
+                callerCL = Thread.currentThread().getContextClassLoader();
+            }
         }
 
         if(url == null) {
@@ -604,8 +686,6 @@ public class DriverManager {
         throw new SQLException("No suitable driver found for "+ url, "08001");
     }
 
-    /* Returns the caller's class loader, or null if none */
-    private static native ClassLoader getCallerClassLoader();
 
 }
 
@@ -617,20 +697,29 @@ public class DriverManager {
 class DriverInfo {
 
     final Driver driver;
-    DriverInfo(Driver driver) {
+    DriverAction da;
+    DriverInfo(Driver driver, DriverAction action) {
         this.driver = driver;
+        da = action;
     }
 
+    @Override
     public boolean equals(Object other) {
         return (other instanceof DriverInfo)
                 && this.driver == ((DriverInfo) other).driver;
     }
 
+    @Override
     public int hashCode() {
         return driver.hashCode();
     }
 
+    @Override
     public String toString() {
         return ("driver[className="  + driver + "]");
+    }
+
+    DriverAction action() {
+        return da;
     }
 }

@@ -312,14 +312,15 @@ AWT_ASSERT_APPKIT_THREAD;
         if (verbose) AWT_DEBUG_LOG(@"got out of the AppKit startup mutex");
     }
 
-    if (!headless) {
-        // Don't set the delegate until the NSApplication has been created and
-        // its finishLaunching has initialized it.
-        //  ApplicationDelegate is the support code for com.apple.eawt.
-        [ThreadUtilities performOnMainThreadWaiting:YES block:^(){
-            OSXAPP_SetApplicationDelegate([ApplicationDelegate sharedDelegate]);
-        }];        
-    }
+    // Don't set the delegate until the NSApplication has been created and
+    // its finishLaunching has initialized it.
+    //  ApplicationDelegate is the support code for com.apple.eawt.
+    [ThreadUtilities performOnMainThreadWaiting:YES block:^(){
+        id<NSApplicationDelegate> delegate = [ApplicationDelegate sharedDelegate];
+        if (delegate != nil) {
+            OSXAPP_SetApplicationDelegate(delegate);
+        }        
+    }];
 }
 
 - (void)starter:(NSArray*)args {

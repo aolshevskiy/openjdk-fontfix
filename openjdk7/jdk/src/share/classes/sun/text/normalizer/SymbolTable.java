@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -65,6 +65,7 @@ import java.text.ParsePosition;
  * @draft ICU 2.8
  * @deprecated This is a draft API and might change in a future release of ICU.
  */
+@Deprecated
 public interface SymbolTable {
 
     /**
@@ -72,6 +73,7 @@ public interface SymbolTable {
      * @draft ICU 2.8
      * @deprecated This is a draft API and might change in a future release of ICU.
      */
+    @Deprecated
     static final char SYMBOL_REF = '$';
 
     /**
@@ -84,6 +86,7 @@ public interface SymbolTable {
      * @draft ICU 2.8
      * @deprecated This is a draft API and might change in a future release of ICU.
      */
+    @Deprecated
     char[] lookup(String s);
 
     /**
@@ -95,6 +98,7 @@ public interface SymbolTable {
      * @draft ICU 2.8
      * @deprecated This is a draft API and might change in a future release of ICU.
      */
+    @Deprecated
     UnicodeMatcher lookupMatcher(int ch);
 
     /**
@@ -115,5 +119,6 @@ public interface SymbolTable {
      * @draft ICU 2.8
      * @deprecated This is a draft API and might change in a future release of ICU.
      */
+    @Deprecated
     String parseReference(String text, ParsePosition pos, int limit);
 }

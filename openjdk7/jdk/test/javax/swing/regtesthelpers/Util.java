@@ -162,6 +162,75 @@ public class Util {
         }
     }
 
+     /**
+     * Hits keys by robot.
+     */
+    public static void hitKeys(Robot robot, int... keys) {
+        for (int i = 0; i < keys.length; i++) {
+            robot.keyPress(keys[i]);
+        }
+
+        for (int i = keys.length - 1; i >= 0; i--) {
+            robot.keyRelease(keys[i]);
+        }
+    }
+
+    /**
+     * Moves mouse smoothly from (x0, y0) to (x1, y1).
+     */
+    public static void glide(Robot robot, int x0, int y0, int x1, int y1) throws AWTException {
+        float dmax = (float) Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+        float dx = (x1 - x0) / dmax;
+        float dy = (y1 - y0) / dmax;
+
+        for (int i = 0; i <= dmax; i += 10) {
+            robot.mouseMove((int) (x0 + dx * i), (int) (y0 + dy * i));
+        }
+    }
+
+    /**
+     * Gets component center point
+     *
+     * @return center point of the <code>component</code>
+     */
+    public static Point getCenterPoint(final Component component) throws Exception {
+        return Util.invokeOnEDT(new Callable<Point>() {
+
+            @Override
+            public Point call() throws Exception {
+                Point p = component.getLocationOnScreen();
+                Dimension size = component.getSize();
+                return new Point(p.x + size.width / 2, p.y + size.height / 2);
+            }
+        });
+    }
+
+    /**
+     * Invokes the <code>task</code> on the EDT thread.
+     *
+     * @return result of the <code>task</code>
+     */
+    public static <T> T invokeOnEDT(final Callable<T> task) throws Exception {
+        final List<T> result = new ArrayList<>(1);
+        final Exception[] exception = new Exception[1];
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    result.add(task.call());
+                } catch (Exception e) {
+                    exception[0] = e;
+                }
+            }
+        });
+
+        if (exception[0] != null) {
+            throw exception[0];
+        }
+
+        return result.get(0);
+    }
     /**
      * Gets key codes from system mnemonic key mask
      * @return key codes list
@@ -190,45 +259,5 @@ public class Util {
             result.add(KeyEvent.VK_META);
         }
         return result;
-    }
-
-     /**
-     * Hits keys by robot.
-     */
-    public static void hitKeys(Robot robot, int... keys) {
-        for (int i = 0; i < keys.length; i++) {
-            robot.keyPress(keys[i]);
-        }
-
-        for (int i = keys.length - 1; i >= 0; i--) {
-            robot.keyRelease(keys[i]);
-        }
-    }
-
-    /**
-     * Invokes the <code>task</code> on the EDT thread.
-     *
-     * @return result of the <code>task</code>
-     */
-    public static <T> T invokeOnEDT(final Callable<T> task) throws Exception {
-        final List<T> result = new ArrayList<>(1);
-        final Exception[] exception = new Exception[1];
-
-        SwingUtilities.invokeAndWait(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    result.add(task.call());
-                } catch (Exception e) {
-                    exception[0] = e;
-                }
-            }
-        });
-
-        if (exception[0] != null) {
-            throw exception[0];
-        }
-
-        return result.get(0);
     }
 }

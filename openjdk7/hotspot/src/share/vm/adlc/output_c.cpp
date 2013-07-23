@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -463,8 +463,9 @@ static int pipeline_res_mask_initializer(
   uint resources_used_exclusively = 0;
 
   for (pipeclass->_resUsage.reset();
-       (piperesource = (const PipeClassResourceForm *)pipeclass->_resUsage.iter()) != NULL; )
+       (piperesource = (const PipeClassResourceForm*)pipeclass->_resUsage.iter()) != NULL; ) {
     element_count++;
+  }
 
   // Pre-compute the string length
   int templen;
@@ -482,8 +483,8 @@ static int pipeline_res_mask_initializer(
   for (i = rescount; i > 0; i /= 10)
     maskdigit++;
 
-  static const char * pipeline_use_cycle_mask = "Pipeline_Use_Cycle_Mask";
-  static const char * pipeline_use_element    = "Pipeline_Use_Element";
+  static const char* pipeline_use_cycle_mask = "Pipeline_Use_Cycle_Mask";
+  static const char* pipeline_use_element    = "Pipeline_Use_Element";
 
   templen = 1 +
     (int)(strlen(pipeline_use_cycle_mask) + (int)strlen(pipeline_use_element) +
@@ -496,11 +497,12 @@ static int pipeline_res_mask_initializer(
   templen = 0;
 
   for (pipeclass->_resUsage.reset();
-       (piperesource = (const PipeClassResourceForm *)pipeclass->_resUsage.iter()) != NULL; ) {
+       (piperesource = (const PipeClassResourceForm*)pipeclass->_resUsage.iter()) != NULL; ) {
     int used_mask = pipeline->_resdict[piperesource->_resource]->is_resource()->mask();
 
-    if (!used_mask)
+    if (!used_mask) {
       fprintf(stderr, "*** used_mask is 0 ***\n");
+    }
 
     resources_used |= used_mask;
 
@@ -509,8 +511,9 @@ static int pipeline_res_mask_initializer(
     for (lb =  0; (used_mask & (1 << lb)) == 0; lb++);
     for (ub = 31; (used_mask & (1 << ub)) == 0; ub--);
 
-    if (lb == ub)
+    if (lb == ub) {
       resources_used_exclusively |= used_mask;
+    }
 
     int formatlen =
       sprintf(&resource_mask[templen], "  %s(0x%0*x, %*d, %*d, %s %s(",
@@ -526,7 +529,7 @@ static int pipeline_res_mask_initializer(
 
     int cycles = piperesource->_cycles;
     uint stage          = pipeline->_stages.index(piperesource->_stage);
-    if (NameList::Not_in_list == stage) {
+    if ((uint)NameList::Not_in_list == stage) {
       fprintf(stderr,
               "pipeline_res_mask_initializer: "
               "semantic error: "
@@ -534,8 +537,8 @@ static int pipeline_res_mask_initializer(
               piperesource->_stage);
       exit(1);
     }
-    uint upper_limit    = stage+cycles-1;
-    uint lower_limit    = stage-1;
+    uint upper_limit    = stage + cycles - 1;
+    uint lower_limit    = stage - 1;
     uint upper_idx      = upper_limit >> 5;
     uint lower_idx      = lower_limit >> 5;
     uint upper_position = upper_limit & 0x1f;
@@ -543,7 +546,7 @@ static int pipeline_res_mask_initializer(
 
     uint mask = (((uint)1) << upper_position) - 1;
 
-    while ( upper_idx > lower_idx ) {
+    while (upper_idx > lower_idx) {
       res_mask[upper_idx--] |= mask;
       mask = (uint)-1;
     }
@@ -565,8 +568,9 @@ static int pipeline_res_mask_initializer(
   }
 
   resource_mask[templen] = 0;
-  if (last_comma)
+  if (last_comma) {
     last_comma[0] = ' ';
+  }
 
   // See if the same string is in the table
   int ndx = pipeline_res_mask.index(resource_mask);
@@ -580,7 +584,7 @@ static int pipeline_res_mask_initializer(
       fprintf(fp_cpp, "static const Pipeline_Use_Element pipeline_res_mask_%03d[%d] = {\n%s};\n\n",
         ndx+1, element_count, resource_mask);
 
-    char * args = new char [9 + 2*masklen + maskdigit];
+    char* args = new char [9 + 2*masklen + maskdigit];
 
     sprintf(args, "0x%0*x, 0x%0*x, %*d",
       masklen, resources_used,
@@ -589,8 +593,9 @@ static int pipeline_res_mask_initializer(
 
     pipeline_res_args.addName(args);
   }
-  else
+  else {
     delete [] resource_mask;
+  }
 
   delete [] res_mask;
 //delete [] res_masks;
@@ -1787,7 +1792,7 @@ void ArchDesc::defineExpand(FILE *fp, InstructForm *node) {
       // Skip first unique operands.
       for( i = 1; i < cur_num_opnds; i++ ) {
         comp = node->_components.iter();
-        if( (int)i != node->unique_opnds_idx(i) ) {
+        if (i != node->unique_opnds_idx(i)) {
           break;
         }
         new_num_opnds++;
@@ -1795,7 +1800,7 @@ void ArchDesc::defineExpand(FILE *fp, InstructForm *node) {
       // Replace not unique operands with next unique operands.
       for( ; i < cur_num_opnds; i++ ) {
         comp = node->_components.iter();
-        int j = node->unique_opnds_idx(i);
+        uint j = node->unique_opnds_idx(i);
         // unique_opnds_idx(i) is unique if unique_opnds_idx(j) is not unique.
         if( j != node->unique_opnds_idx(j) ) {
           fprintf(fp,"  set_opnd_array(%d, opnd_array(%d)->clone(C)); // %s\n",
@@ -1874,7 +1879,6 @@ private:
   bool          _doing_emit_hi;
   bool          _doing_emit_lo;
   bool          _may_reloc;
-  bool          _must_reloc;
   reloc_format  _reloc_form;
   const char *  _reloc_type;
   bool          _processing_noninput;
@@ -1913,7 +1917,6 @@ public:
     _doing_emit_hi = false;
     _doing_emit_lo = false;
     _may_reloc     = false;
-    _must_reloc    = false;
     _reloc_form    = RELOC_NONE;
     _reloc_type    = AdlcVMDeps::none_reloc_type();
     _strings_to_emit.clear();
@@ -2187,7 +2190,7 @@ public:
 
           _reg_status = LITERAL_ACCESSED;
           emit_rep_var( rep_var );
-          fprintf(_fp,"->disp_is_oop())");
+          fprintf(_fp,"->disp_reloc())");
 
           // skip trailing $Address
           _strings_to_emit.iter();
@@ -2224,14 +2227,6 @@ public:
   }
 
 
-  void gen_emit_x_reloc(const char *d32_lo_hi ) {
-    fprintf(_fp,"emit_%s_reloc(cbuf, ", d32_lo_hi );
-    emit_replacement();             fprintf(_fp,", ");
-    emit_reloc_type( _reloc_type ); fprintf(_fp,", ");
-    fprintf(_fp, "%d", _reloc_form);fprintf(_fp, ");");
-  }
-
-
   void emit() {
     //
     //   "emit_d32_reloc(" or "emit_hi_reloc" or "emit_lo_reloc"
@@ -2246,10 +2241,6 @@ public:
         fprintf( _fp, "emit_%s(cbuf, ", d32_hi_lo );
         emit_replacement(); fprintf(_fp, ")");
       }
-      else if ( _must_reloc ) {
-        // Must emit relocation information
-        gen_emit_x_reloc( d32_hi_lo );
-      }
       else {
         // Emit RUNTIME CHECK to see if value needs relocation info
         // If emitting a relocatable address, use 'emit_d32_reloc'
@@ -2258,10 +2249,15 @@ public:
                 && !(_doing_disp && _doing_constant),
                 "Must be emitting either a displacement or a constant");
         fprintf(_fp,"\n");
-        fprintf(_fp,"if ( opnd_array(%d)->%s_is_oop() ) {\n",
+        fprintf(_fp,"if ( opnd_array(%d)->%s_reloc() != relocInfo::none ) {\n",
                 _operand_idx, disp_constant);
         fprintf(_fp,"  ");
-        gen_emit_x_reloc( d32_hi_lo ); fprintf(_fp,"\n");
+        fprintf(_fp,"emit_%s_reloc(cbuf, ", d32_hi_lo );
+        emit_replacement();             fprintf(_fp,", ");
+        fprintf(_fp,"opnd_array(%d)->%s_reloc(), ",
+                _operand_idx, disp_constant);
+        fprintf(_fp, "%d", _reloc_form);fprintf(_fp, ");");
+        fprintf(_fp,"\n");
         fprintf(_fp,"} else {\n");
         fprintf(_fp,"  emit_%s(cbuf, ", d32_hi_lo);
         emit_replacement(); fprintf(_fp, ");\n"); fprintf(_fp,"}");
@@ -3637,6 +3633,8 @@ static void path_to_constant(FILE *fp, FormDict &globals,
       fprintf(fp, "_leaf->bottom_type()->is_ptr()");
     } else if ( (strcmp(optype,"ConN") == 0) ) {
       fprintf(fp, "_leaf->bottom_type()->is_narrowoop()");
+    } else if ( (strcmp(optype,"ConNKlass") == 0) ) {
+      fprintf(fp, "_leaf->bottom_type()->is_narrowklass()");
     } else if ( (strcmp(optype,"ConF") == 0) ) {
       fprintf(fp, "_leaf->getf()");
     } else if ( (strcmp(optype,"ConD") == 0) ) {

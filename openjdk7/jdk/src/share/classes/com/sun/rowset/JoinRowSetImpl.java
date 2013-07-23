@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -233,7 +233,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
               }
               int[] indexes = new int[indices.size()];
               for(int i=0; i<indices.size();i++)
-                  indexes[i] = ((Integer)indices.get(i)).intValue();
+                  indexes[i] = indices.get(i);
               cRowset.setMatchColumn(indexes);
               // Set the match column here because join will be
               // based on columnId,
@@ -413,6 +413,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
      * @throws SQLException if an error occours generating a collection
      * of the originating RowSets contained within the JOIN.
      */
+    @SuppressWarnings("rawtypes")
     public Collection getRowSets() throws SQLException {
         return vecRowSetsInJOIN;
     }
@@ -893,7 +894,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
 
        sz = vecRowSetsInJOIN.size();
        for(int i=0;i<sz; i++) {
-          crs = (CachedRowSetImpl)vecRowSetsInJOIN.get(i);
+          crs = vecRowSetsInJOIN.get(i);
           cols = crs.getMetaData().getColumnCount();
           tabName = tabName.concat(crs.getTableName());
           strTabName = strTabName.concat(tabName+", ");
@@ -928,7 +929,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
         // rowset1.getMatchColumnName() == rowset2.getMatchColumnName()
          for(int i=0;i<sz; i++) {
              strWhereClause = strWhereClause.concat(
-               ((CachedRowSetImpl)vecRowSetsInJOIN.get(i)).getMatchColumnNames()[0]);
+               vecRowSetsInJOIN.get(i).getMatchColumnNames()[0]);
              if(i%2!=0) {
                strWhereClause = strWhereClause.concat("=");
              }  else {
@@ -1152,6 +1153,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
      *            the cursor is not on a valid row, or this method fails
      * @deprecated
      */
+    @Deprecated
     public BigDecimal getBigDecimal(int columnIndex, int scale) throws SQLException {
         return crsInternal.getBigDecimal(columnIndex);
     }
@@ -1263,6 +1265,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
      * @throws SQLException if an error occurs
      * @deprecated
      */
+    @Deprecated
     public java.io.InputStream getUnicodeStream(int columnIndex) throws SQLException {
         return crsInternal.getUnicodeStream(columnIndex);
     }
@@ -1435,6 +1438,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
      * @deprecated use the method <code>getBigDecimal(String columnName)</code>
      *             instead
      */
+    @Deprecated
     public BigDecimal getBigDecimal(String columnName, int scale) throws SQLException {
         return crsInternal.getBigDecimal(columnName);
     }
@@ -1551,6 +1555,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
      *            this rowset's rows or its insert row
      * @deprecated use the method <code>getCharacterStream</code> instead
      */
+    @Deprecated
     public java.io.InputStream getUnicodeStream(String columnName) throws SQLException {
         return crsInternal.getUnicodeStream(columnName);
     }
@@ -4175,7 +4180,7 @@ public class JoinRowSetImpl extends WebRowSetImpl implements JoinRowSet {
             // Default JoinRowSet type
             this.setJoinType(JoinRowSet.INNER_JOIN);
         }
-        Integer i = (Integer)(vecJoinType.get(vecJoinType.size()-1));
+        Integer i = vecJoinType.get(vecJoinType.size()-1);
         return i.intValue();
     }
 

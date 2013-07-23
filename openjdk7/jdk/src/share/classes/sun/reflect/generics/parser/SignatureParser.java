@@ -120,10 +120,8 @@ public class SignatureParser {
     // Currently throws a GenericSignatureFormatError.
 
     private Error error(String errorMsg) {
-        if (DEBUG)
-            System.out.println("Signature Parse error: " + errorMsg +
-                               "\n\tRemaining input: " + remainder());
-        return new GenericSignatureFormatError();
+        return new GenericSignatureFormatError("Signature Parse error: " + errorMsg +
+                                               "\n\tRemaining input: " + remainder());
     }
 
     /**

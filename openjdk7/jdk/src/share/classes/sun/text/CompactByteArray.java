@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -264,12 +264,12 @@ public final class CompactByteArray implements Cloneable {
     {
         try {
             CompactByteArray other = (CompactByteArray) super.clone();
-            other.values = (byte[])values.clone();
-            other.indices = (short[])indices.clone();
-            if (hashes != null) other.hashes = (int[])hashes.clone();
+            other.values = values.clone();
+            other.indices = indices.clone();
+            if (hashes != null) other.hashes = hashes.clone();
             return other;
         } catch (CloneNotSupportedException e) {
-            throw new InternalError();
+            throw new InternalError(e);
         }
     }
 

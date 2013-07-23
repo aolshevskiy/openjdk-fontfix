@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,8 +29,6 @@ import javax.security.sasl.*;
 import java.io.*;
 import java.util.Map;
 import java.util.StringTokenizer;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 
 import java.util.logging.Logger;
 import java.util.logging.Level;
@@ -63,7 +61,8 @@ public abstract class AbstractSaslImpl {
 
     protected String myClassName;
 
-    protected AbstractSaslImpl(Map props, String className) throws SaslException {
+    protected AbstractSaslImpl(Map<String, ?> props, String className)
+            throws SaslException {
         myClassName = className;
 
         // Parse properties  to set desired context options
@@ -150,29 +149,30 @@ public abstract class AbstractSaslImpl {
 
     /**
      * Retrieves the negotiated property.
-     * @exception SaslException if this authentication exchange has not completed
+     * @exception IllegalStateException if this authentication exchange has
+     * not completed
      */
     public Object getNegotiatedProperty(String propName) {
         if (!completed) {
             throw new IllegalStateException("SASL authentication not completed");
         }
-
-        if (propName.equals(Sasl.QOP)) {
-            if (privacy) {
-                return "auth-conf";
-            } else if (integrity) {
-                return "auth-int";
-            } else {
-                return "auth";
-            }
-        } else if (propName.equals(Sasl.MAX_BUFFER)) {
-            return Integer.toString(recvMaxBufSize);
-        } else if (propName.equals(Sasl.RAW_SEND_SIZE)) {
-            return Integer.toString(rawSendSize);
-        } else if (propName.equals(MAX_SEND_BUF)) {
-            return Integer.toString(sendMaxBufSize);
-        } else {
-            return null;
+        switch (propName) {
+            case Sasl.QOP:
+                if (privacy) {
+                    return "auth-conf";
+                } else if (integrity) {
+                    return "auth-int";
+                } else {
+                    return "auth";
+                }
+            case Sasl.MAX_BUFFER:
+                return Integer.toString(recvMaxBufSize);
+            case Sasl.RAW_SEND_SIZE:
+                return Integer.toString(rawSendSize);
+            case MAX_SEND_BUF:
+                return Integer.toString(sendMaxBufSize);
+            default:
+                return null;
         }
     }
 
@@ -252,11 +252,12 @@ public abstract class AbstractSaslImpl {
 
 
     /**
-     * Outputs a byte array and converts
+     * Outputs a byte array. Can be null.
      */
     protected static final void traceOutput(String srcClass, String srcMethod,
         String traceTag, byte[] output) {
-        traceOutput(srcClass, srcMethod, traceTag, output, 0, output.length);
+        traceOutput(srcClass, srcMethod, traceTag, output, 0,
+                output == null ? 0 : output.length);
     }
 
     protected static final void traceOutput(String srcClass, String srcMethod,
@@ -272,13 +273,20 @@ public abstract class AbstractSaslImpl {
                 lev = Level.FINEST;
             }
 
-            ByteArrayOutputStream out = new ByteArrayOutputStream(len);
-            new HexDumpEncoder().encodeBuffer(
-                new ByteArrayInputStream(output, offset, len), out);
+            String content;
+
+            if (output != null) {
+                ByteArrayOutputStream out = new ByteArrayOutputStream(len);
+                new HexDumpEncoder().encodeBuffer(
+                    new ByteArrayInputStream(output, offset, len), out);
+                content = out.toString();
+            } else {
+                content = "NULL";
+            }
 
             // Message id supplied by caller as part of traceTag
             logger.logp(lev, srcClass, srcMethod, "{0} ( {1} ): {2}",
-                new Object[] {traceTag, new Integer(origlen), out.toString()});
+                new Object[] {traceTag, new Integer(origlen), content});
         } catch (Exception e) {
             logger.logp(Level.WARNING, srcClass, srcMethod,
                 "SASLIMPL09:Error generating trace output: {0}", e);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,7 +42,6 @@
 //          VM_GenCollectFull
 //          VM_GenCollectFullConcurrent
 //          VM_ParallelGCFailedAllocation
-//          VM_ParallelGCFailedPermanentAllocation
 //          VM_ParallelGCSystemGC
 //  VM_GC_Operation
 //   - implements methods common to all classes in the hierarchy:
@@ -53,9 +52,7 @@
 //     is specified; and also the attach "inspectheap" operation
 //
 //  VM_GenCollectForAllocation
-//  VM_GenCollectForPermanentAllocation
 //  VM_ParallelGCFailedAllocation
-//  VM_ParallelGCFailedPermanentAllocation
 //   - this operation is invoked when allocation is failed;
 //     operation performs garbage collection and tries to
 //     allocate afterwards;
@@ -132,17 +129,22 @@ class VM_GC_HeapInspection: public VM_GC_Operation {
  private:
   outputStream* _out;
   bool _full_gc;
-  bool _need_prologue;
+  bool _csv_format; // "comma separated values" format for spreadsheet.
+  bool _print_help;
+  bool _print_class_stats;
+  const char* _columns;
  public:
-  VM_GC_HeapInspection(outputStream* out, bool request_full_gc,
-                       bool need_prologue) :
+  VM_GC_HeapInspection(outputStream* out, bool request_full_gc) :
     VM_GC_Operation(0 /* total collections,      dummy, ignored */,
                     GCCause::_heap_inspection /* GC Cause */,
                     0 /* total full collections, dummy, ignored */,
                     request_full_gc) {
     _out = out;
     _full_gc = request_full_gc;
-    _need_prologue = need_prologue;
+    _csv_format = false;
+    _print_help = false;
+    _print_class_stats = false;
+    _columns = NULL;
   }
 
   ~VM_GC_HeapInspection() {}
@@ -150,6 +152,10 @@ class VM_GC_HeapInspection: public VM_GC_Operation {
   virtual bool skip_operation() const;
   virtual bool doit_prologue();
   virtual void doit();
+  void set_csv_format(bool value) {_csv_format = value;}
+  void set_print_help(bool value) {_print_help = value;}
+  void set_print_class_stats(bool value) {_print_class_stats = value;}
+  void set_columns(const char* value) {_columns = value;}
  protected:
   bool collect();
 };
@@ -193,24 +199,27 @@ class VM_GenCollectFull: public VM_GC_Operation {
   virtual void doit();
 };
 
-class VM_GenCollectForPermanentAllocation: public VM_GC_Operation {
+class VM_CollectForMetadataAllocation: public VM_GC_Operation {
  private:
-  HeapWord*   _res;
-  size_t      _size;                       // size of object to be allocated
+  MetaWord*                _result;
+  size_t                   _size;     // size of object to be allocated
+  Metaspace::MetadataType  _mdtype;
+  ClassLoaderData*         _loader_data;
  public:
-  VM_GenCollectForPermanentAllocation(size_t size,
+  VM_CollectForMetadataAllocation(ClassLoaderData* loader_data,
+                                  size_t size, Metaspace::MetadataType mdtype,
                                       unsigned int gc_count_before,
                                       unsigned int full_gc_count_before,
                                       GCCause::Cause gc_cause)
     : VM_GC_Operation(gc_count_before, gc_cause, full_gc_count_before, true),
-      _size(size) {
-    _res = NULL;
-    _gc_cause = gc_cause;
+      _loader_data(loader_data), _size(size), _mdtype(mdtype), _result(NULL) {
   }
-  ~VM_GenCollectForPermanentAllocation()  {}
-  virtual VMOp_Type type() const { return VMOp_GenCollectForPermanentAllocation; }
+  ~VM_CollectForMetadataAllocation()  {
+    MetaspaceGC::set_expand_after_GC(false);
+  }
+  virtual VMOp_Type type() const { return VMOp_CollectForMetadataAllocation; }
   virtual void doit();
-  HeapWord* result() const       { return _res; }
+  MetaWord* result() const       { return _result; }
 };
 
 class SvcGCMarker : public StackObj {

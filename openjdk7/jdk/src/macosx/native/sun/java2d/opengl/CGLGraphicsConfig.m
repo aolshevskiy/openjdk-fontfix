@@ -63,12 +63,14 @@ OGLGC_DestroyOGLGraphicsConfig(jlong pConfigInfo)
 
         CGLCtxInfo *ctxinfo = (CGLCtxInfo *)oglc->ctxInfo;
         if (ctxinfo != NULL) {
+            NSAutoreleasePool * pool = [[NSAutoreleasePool alloc] init];        
             [NSOpenGLContext clearCurrentContext];
             [ctxinfo->context clearDrawable];
             [ctxinfo->context release];
             if (ctxinfo->scratchSurface != 0) {
                 [ctxinfo->scratchSurface release];
             }
+            [pool drain];
             free(ctxinfo);
         }
     }
@@ -431,10 +433,10 @@ Java_sun_java2d_opengl_CGLGraphicsConfig_getOGLCapabilities
 }
 
 JNIEXPORT jint JNICALL
-Java_sun_java2d_opengl_CGLGraphicsConfig__1getMaxTextureSize
+Java_sun_java2d_opengl_CGLGraphicsConfig_getMaxTextureSize
     (JNIEnv *env, jclass cglgc)
 {
-    J2dTraceLn(J2D_TRACE_INFO, "CGLGraphicsConfig__1getMaxTextureSize");
+    J2dTraceLn(J2D_TRACE_INFO, "CGLGraphicsConfig_getMaxTextureSize");
 
     __block int max = 0;
 

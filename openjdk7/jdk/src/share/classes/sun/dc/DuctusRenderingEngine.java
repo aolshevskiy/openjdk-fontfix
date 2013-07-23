@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -158,7 +158,7 @@ public class DuctusRenderingEngine extends RenderingEngine {
             feedConsumer(pi, consumer, normalize, 0.25f);
         } catch (PathException e) {
             throw new InternalError("Unable to Stroke shape ("+
-                                    e.getMessage()+")");
+                                    e.getMessage()+")", e);
         } finally {
             while (consumer != null && consumer != sr) {
                 PathConsumer next = consumer.getConsumer();
@@ -763,7 +763,7 @@ public class DuctusRenderingEngine extends RenderingEngine {
             consumer.endPath();
         } catch (PathException e) {
             throw new InternalError("Unable to Stroke shape ("+
-                                    e.getMessage()+")");
+                                    e.getMessage()+")", e);
         }
     }
 

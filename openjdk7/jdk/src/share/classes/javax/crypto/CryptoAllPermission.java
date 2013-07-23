@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -136,8 +136,7 @@ final class CryptoAllPermissionCollection extends PermissionCollection
      * @exception SecurityException - if this CryptoAllPermissionCollection
      * object has been marked readonly
      */
-    public void add(Permission permission)
-    {
+    public void add(Permission permission) {
         if (isReadOnly())
             throw new SecurityException("attempt to add a Permission to " +
                                         "a readonly PermissionCollection");
@@ -152,13 +151,12 @@ final class CryptoAllPermissionCollection extends PermissionCollection
      * Check and see if this set of permissions implies the permissions
      * expressed in "permission".
      *
-     * @param p the Permission object to compare
+     * @param permission the Permission object to compare
      *
      * @return true if the given permission is implied by this
      * CryptoAllPermissionCollection.
      */
-    public boolean implies(Permission permission)
-    {
+    public boolean implies(Permission permission) {
         if (!(permission instanceof CryptoPermission)) {
             return false;
         }
@@ -171,8 +169,8 @@ final class CryptoAllPermissionCollection extends PermissionCollection
      *
      * @return an enumeration of all the CryptoAllPermission objects.
      */
-    public Enumeration elements() {
-        Vector v = new Vector(1);
+    public Enumeration<Permission> elements() {
+        Vector<Permission> v = new Vector<>(1);
         if (all_allowed) v.add(CryptoAllPermission.INSTANCE);
         return v.elements();
     }

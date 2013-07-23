@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2000, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,7 @@ package com.sun.jdi;
  * @since  1.3
  */
 public class InternalException extends RuntimeException {
+     private static final long serialVersionUID = -9171606393104480607L;
      private int errorCode;
 
      public InternalException() {

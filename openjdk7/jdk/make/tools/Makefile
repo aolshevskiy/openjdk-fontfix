@@ -28,12 +28,15 @@
 #
 
 BUILDDIR = ..
+
+SUBDIRS_MAKEFLAGS += JAVAC_MAX_WARNINGS=true JAVAC_WARNINGS_FATAL=true
 include $(BUILDDIR)/common/Defs.gmk
 
 # Note: freetypecheck is built by Sanity.gmk if needed
 SUBDIRS =                   \
   addjsum                   \
   buildmetaindex            \
+  cldrconverter             \
   commentchecker            \
   compile_font_config       \
   compile_properties        \
@@ -45,11 +48,11 @@ SUBDIRS =                   \
   hasher_classes            \
   jarreorder                \
   jarsplit                  \
-  javazic                   \
   jdwpgen                   \
   makeclasslist             \
   strip_properties          \
   spp                       \
+  tzdb                      \
   CharsetMapping
 
 ifndef DISABLE_NIMBUS

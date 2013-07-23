@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,8 +28,10 @@ package sun.security.jgss;
 import org.ietf.jgss.*;
 import sun.security.jgss.spi.*;
 import java.util.*;
+import com.sun.security.jgss.*;
+import sun.security.jgss.spnego.SpNegoCredElement;
 
-public class GSSCredentialImpl implements GSSCredential {
+public class GSSCredentialImpl implements ExtendedGSSCredential {
 
     private GSSManagerImpl gssManager = null;
     private boolean destroyed = false;
@@ -86,6 +88,7 @@ public class GSSCredentialImpl implements GSSCredential {
             throw new GSSException(GSSException.NO_CRED);
     }
 
+    // Wrap a mech cred into a GSS cred
     public GSSCredentialImpl(GSSManagerImpl gssManager,
                       GSSCredentialSpi mechElement) throws GSSException {
 
@@ -102,6 +105,11 @@ public class GSSCredentialImpl implements GSSCredential {
                                         usage);
         tempCred = mechElement;
         hashtable.put(key, tempCred);
+        // More mechs that can use this cred, say, SPNEGO
+        if (!GSSUtil.isSpNegoMech(mechElement.getMechanism())) {
+            key = new SearchKey(GSSUtil.GSS_SPNEGO_MECH_OID, usage);
+            hashtable.put(key, new SpNegoCredElement(mechElement));
+        }
     }
 
     void init(GSSManagerImpl gssManager) {
@@ -120,6 +128,19 @@ public class GSSCredentialImpl implements GSSCredential {
             }
             destroyed = true;
         }
+    }
+
+    public GSSCredential impersonate(GSSName name) throws GSSException {
+        if (destroyed) {
+            throw new IllegalStateException("This credential is " +
+                                        "no longer valid");
+        }
+        Oid mech = tempCred.getMechanism();
+        GSSNameSpi nameElement = (name == null ? null :
+                                  ((GSSNameImpl)name).getElement(mech));
+        GSSCredentialSpi cred = tempCred.impersonate(nameElement);
+        return (cred == null ?
+            null : new GSSCredentialImpl(gssManager, cred));
     }
 
     public GSSName getName() throws GSSException {
@@ -576,7 +597,7 @@ public class GSSCredentialImpl implements GSSCredential {
         if (element == null)
             throw new GSSExceptionImpl(GSSException.NO_CRED,
                                        "No credential found for: " +
-                                       mechOid + getElementStr(mechOid,
+                                       getElementStr(mechOid,
                                        initiate? INITIATE_ONLY : ACCEPT_ONLY));
         return element;
     }

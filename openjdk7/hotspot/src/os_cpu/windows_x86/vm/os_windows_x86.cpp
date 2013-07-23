@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
  */
 
 // no precompiled headers
-#include "assembler_x86.inline.hpp"
+#include "asm/macroAssembler.hpp"
 #include "classfile/classLoader.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmSymbols.hpp"
@@ -48,8 +48,8 @@
 #include "runtime/osThread.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/timer.hpp"
-#include "thread_windows.inline.hpp"
 #include "utilities/events.hpp"
 #include "utilities/vmError.hpp"
 
@@ -174,9 +174,6 @@ bool os::register_code_area(char *low, char *high) {
   pDynamicCodeData pDCD;
   PRUNTIME_FUNCTION prt;
   PUNWIND_INFO_EH_ONLY punwind;
-
-  // If we are using Vectored Exceptions we don't need this registration
-  if (UseVectoredExceptions) return true;
 
   BufferBlob* blob = BufferBlob::create("CodeCache Exception Handler", sizeof(DynamicCodeData));
   CodeBuffer cb(blob);
@@ -402,7 +399,7 @@ frame os::current_frame() {
   typedef intptr_t*      get_fp_func           ();
   get_fp_func* func = CAST_TO_FN_PTR(get_fp_func*,
                                      StubRoutines::x86::get_previous_fp_entry());
-  if (func == NULL) return frame(NULL, NULL, NULL);
+  if (func == NULL) return frame();
   intptr_t* fp = (*func)();
 #else
   intptr_t* fp = _get_previous_fp();
@@ -413,7 +410,7 @@ frame os::current_frame() {
                 CAST_FROM_FN_PTR(address, os::current_frame));
   if (os::is_first_C_frame(&myframe)) {
     // stack is not walkable
-    return frame(NULL, NULL, NULL);
+    return frame();
   } else {
     return os::get_sender_for_C_frame(&myframe);
   }
@@ -519,24 +516,6 @@ void os::print_register_info(outputStream *st, void *context) {
 #endif
 
   st->cr();
-}
-
-extern "C" int SafeFetch32 (int * adr, int Err) {
-   int rv = Err ;
-   _try {
-       rv = *((volatile int *) adr) ;
-   } __except(EXCEPTION_EXECUTE_HANDLER) {
-   }
-   return rv ;
-}
-
-extern "C" intptr_t SafeFetchN (intptr_t * adr, intptr_t Err) {
-   intptr_t rv = Err ;
-   _try {
-       rv = *((volatile intptr_t *) adr) ;
-   } __except(EXCEPTION_EXECUTE_HANDLER) {
-   }
-   return rv ;
 }
 
 extern "C" int SpinPause () {

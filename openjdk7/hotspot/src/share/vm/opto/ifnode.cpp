@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -673,7 +673,7 @@ const TypeInt* IfNode::filtered_int_type(PhaseGVN* gvn, Node *val, Node* if_proj
 //           /    Region
 //
 Node* IfNode::fold_compares(PhaseGVN* phase) {
-  if (!EliminateAutoBox || Opcode() != Op_If) return NULL;
+  if (!phase->C->eliminate_boxing() || Opcode() != Op_If) return NULL;
 
   Node* this_cmp = in(1)->in(1);
   if (this_cmp != NULL && this_cmp->Opcode() == Op_CmpI &&

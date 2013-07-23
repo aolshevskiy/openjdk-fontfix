@@ -806,7 +806,7 @@ PhiNode* PhiNode::split_out_instance(const TypePtr* at, PhaseIterGVN *igvn) cons
       Node *in = ophi->in(i);
       if (in == NULL || igvn->type(in) == Type::TOP)
         continue;
-      Node *opt = MemNode::optimize_simple_memory_chain(in, at, igvn);
+      Node *opt = MemNode::optimize_simple_memory_chain(in, t_oop, NULL, igvn);
       PhiNode *optphi = opt->is_Phi() ? opt->as_Phi() : NULL;
       if (optphi != NULL && optphi->adr_type() == TypePtr::BOTTOM) {
         opt = node_map[optphi->_idx];
@@ -1437,7 +1437,7 @@ static Node* split_flow_path(PhaseGVN *phase, PhiNode *phi) {
     Node *n = phi->in(i);
     if( !n ) return NULL;
     if( phase->type(n) == Type::TOP ) return NULL;
-    if( n->Opcode() == Op_ConP || n->Opcode() == Op_ConN )
+    if( n->Opcode() == Op_ConP || n->Opcode() == Op_ConN || n->Opcode() == Op_ConNKlass )
       break;
   }
   if( i >= phi->req() )         // Only split for constants
@@ -1921,7 +1921,7 @@ Node *PhiNode::Ideal(PhaseGVN *phase, bool can_reshape) {
     const TypePtr* at = adr_type();
     for( uint i=1; i<req(); ++i ) {// For all paths in
       Node *ii = in(i);
-      Node *new_in = MemNode::optimize_memory_chain(ii, at, phase);
+      Node *new_in = MemNode::optimize_memory_chain(ii, at, NULL, phase);
       if (ii != new_in ) {
         set_req(i, new_in);
         progress = this;
@@ -1930,17 +1930,19 @@ Node *PhiNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   }
 
 #ifdef _LP64
-  // Push DecodeN down through phi.
+  // Push DecodeN/DecodeNKlass down through phi.
   // The rest of phi graph will transform by split EncodeP node though phis up.
-  if (UseCompressedOops && can_reshape && progress == NULL) {
+  if ((UseCompressedOops || UseCompressedKlassPointers) && can_reshape && progress == NULL) {
     bool may_push = true;
     bool has_decodeN = false;
+    bool is_decodeN = false;
     for (uint i=1; i<req(); ++i) {// For all paths in
       Node *ii = in(i);
-      if (ii->is_DecodeN() && ii->bottom_type() == bottom_type()) {
+      if (ii->is_DecodeNarrowPtr() && ii->bottom_type() == bottom_type()) {
         // Do optimization if a non dead path exist.
         if (ii->in(1)->bottom_type() != Type::TOP) {
           has_decodeN = true;
+          is_decodeN = ii->is_DecodeN();
         }
       } else if (!ii->is_Phi()) {
         may_push = false;
@@ -1950,13 +1952,18 @@ Node *PhiNode::Ideal(PhaseGVN *phase, bool can_reshape) {
     if (has_decodeN && may_push) {
       PhaseIterGVN *igvn = phase->is_IterGVN();
       // Make narrow type for new phi.
-      const Type* narrow_t = TypeNarrowOop::make(this->bottom_type()->is_ptr());
+      const Type* narrow_t;
+      if (is_decodeN) {
+        narrow_t = TypeNarrowOop::make(this->bottom_type()->is_ptr());
+      } else {
+        narrow_t = TypeNarrowKlass::make(this->bottom_type()->is_ptr());
+      }
       PhiNode* new_phi = new (phase->C) PhiNode(r, narrow_t);
       uint orig_cnt = req();
       for (uint i=1; i<req(); ++i) {// For all paths in
         Node *ii = in(i);
         Node* new_ii = NULL;
-        if (ii->is_DecodeN()) {
+        if (ii->is_DecodeNarrowPtr()) {
           assert(ii->bottom_type() == bottom_type(), "sanity");
           new_ii = ii->in(1);
         } else {
@@ -1964,14 +1971,22 @@ Node *PhiNode::Ideal(PhaseGVN *phase, bool can_reshape) {
           if (ii->as_Phi() == this) {
             new_ii = new_phi;
           } else {
-            new_ii = new (phase->C) EncodePNode(ii, narrow_t);
+            if (is_decodeN) {
+              new_ii = new (phase->C) EncodePNode(ii, narrow_t);
+            } else {
+              new_ii = new (phase->C) EncodePKlassNode(ii, narrow_t);
+            }
             igvn->register_new_node_with_optimizer(new_ii);
           }
         }
         new_phi->set_req(i, new_ii);
       }
       igvn->register_new_node_with_optimizer(new_phi, this);
-      progress = new (phase->C) DecodeNNode(new_phi, bottom_type());
+      if (is_decodeN) {
+        progress = new (phase->C) DecodeNNode(new_phi, bottom_type());
+      } else {
+        progress = new (phase->C) DecodeNKlassNode(new_phi, bottom_type());
+      }
     }
   }
 #endif
@@ -1991,7 +2006,7 @@ const RegMask &PhiNode::in_RegMask(uint i) const {
 }
 
 const RegMask &PhiNode::out_RegMask() const {
-  uint ideal_reg = Matcher::base2reg[_type->base()];
+  uint ideal_reg = _type->ideal_reg();
   assert( ideal_reg != Node::NotAMachineReg, "invalid type at Phi" );
   if( ideal_reg == 0 ) return RegMask::Empty;
   return *(Compile::current()->matcher()->idealreg2spillmask[ideal_reg]);

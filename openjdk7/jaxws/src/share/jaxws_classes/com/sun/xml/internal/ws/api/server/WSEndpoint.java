@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,9 +28,13 @@ package com.sun.xml.internal.ws.api.server;
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
 import com.sun.xml.internal.ws.api.BindingID;
+import com.sun.xml.internal.ws.api.Component;
+import com.sun.xml.internal.ws.api.ComponentRegistry;
+import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.config.management.EndpointCreationAttributes;
 import com.sun.xml.internal.ws.api.config.management.ManagedEndpointFactory;
+import com.sun.xml.internal.ws.api.databinding.MetadataReader;
 import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.model.SEIModel;
@@ -39,22 +43,29 @@ import com.sun.xml.internal.ws.api.pipe.Codec;
 import com.sun.xml.internal.ws.api.pipe.Engine;
 import com.sun.xml.internal.ws.api.pipe.FiberContextSwitchInterceptor;
 import com.sun.xml.internal.ws.api.pipe.ServerTubeAssemblerContext;
+import com.sun.xml.internal.ws.api.pipe.ThrowableContainerPropertySet;
 import com.sun.xml.internal.ws.api.pipe.Tube;
-import com.sun.xml.internal.ws.server.EndpointFactory;
-import com.sun.xml.internal.ws.util.xml.XmlUtil;
 import com.sun.xml.internal.ws.policy.PolicyMap;
+import com.sun.xml.internal.ws.server.EndpointAwareTube;
+import com.sun.xml.internal.ws.server.EndpointFactory;
 import com.sun.xml.internal.ws.util.ServiceFinder;
-import org.xml.sax.EntityResolver;
-
+import com.sun.xml.internal.ws.util.xml.XmlUtil;
+import com.sun.xml.internal.ws.wsdl.OperationDispatcher;
 import com.sun.org.glassfish.gmbal.ManagedObjectManager;
+import org.xml.sax.EntityResolver;
+import org.w3c.dom.Element;
 
 import javax.xml.namespace.QName;
 import javax.xml.ws.Binding;
+import javax.xml.ws.EndpointReference;
 import javax.xml.ws.WebServiceContext;
 import javax.xml.ws.WebServiceException;
+
 import java.net.URL;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executor;
 
@@ -109,7 +120,7 @@ import java.util.concurrent.Executor;
  *
  * @author Kohsuke Kawaguchi
  */
-public abstract class WSEndpoint<T> {
+public abstract class WSEndpoint<T> implements ComponentRegistry {
 
     /**
      * Gets the Endpoint's codec that is used to encode/decode {@link Message}s. This is a
@@ -214,8 +225,8 @@ public abstract class WSEndpoint<T> {
      * one-way message processing happens correctly. {@link Packet#webServiceContextDelegate}
      * should have the correct value, so that some {@link WebServiceContext} methods correctly.
      *
-     * @see {@link Packet#transportBackChannel}
-     * @see {@link Packet#webServiceContextDelegate}
+     * @see Packet#transportBackChannel
+     * @see Packet#webServiceContextDelegate
      *
      * @param request web service request
      * @param callback callback to get response packet
@@ -227,7 +238,7 @@ public abstract class WSEndpoint<T> {
     /**
      * Schedule invocation of web service asynchronously.
      *
-     * @see {@link #schedule(Packet, CompletionCallback)}
+     * @see #schedule(Packet, CompletionCallback)
      *
      * @param request web service request
      * @param callback callback to get response packet(exception if there is one)
@@ -237,6 +248,14 @@ public abstract class WSEndpoint<T> {
 
     public void process(@NotNull Packet request, @NotNull CompletionCallback callback, @Nullable FiberContextSwitchInterceptor interceptor ) {
        schedule(request,callback,interceptor);
+    }
+
+    /**
+     * Returns {@link Engine} for this endpoint
+     * @return Engine
+     */
+    public Engine getEngine() {
+        throw new UnsupportedOperationException();
     }
 
     /**
@@ -357,6 +376,18 @@ public abstract class WSEndpoint<T> {
     public abstract @Nullable ServiceDefinition getServiceDefinition();
 
     /**
+     * Gets the list of {@link BoundEndpoint} that are associated
+     * with this endpoint.
+     *
+     * @return
+     *      always return the same set.
+     */
+    public List<BoundEndpoint> getBoundEndpoints() {
+        Module m = getContainer().getSPI(Module.class);
+        return m != null ? m.getBoundEndpoints() : null;
+    }
+
+    /**
      * Gets the list of {@link EndpointComponent} that are associated
      * with this endpoint.
      *
@@ -371,8 +402,25 @@ public abstract class WSEndpoint<T> {
      *
      * @return
      *      always return the same set.
+     * @deprecated
      */
     public abstract @NotNull Set<EndpointComponent> getComponentRegistry();
+
+        public @NotNull Set<Component> getComponents() {
+        return Collections.emptySet();
+    }
+
+        public @Nullable <S> S getSPI(@NotNull Class<S> spiType) {
+                Set<Component> componentRegistry = getComponents();
+                if (componentRegistry != null) {
+                        for (Component c : componentRegistry) {
+                                S s = c.getSPI(spiType);
+                                if (s != null)
+                                        return s;
+                        }
+                }
+                return getContainer().getSPI(spiType);
+        }
 
     /**
      * Gets the {@link com.sun.xml.internal.ws.api.model.SEIModel} that represents the relationship
@@ -483,6 +531,21 @@ public abstract class WSEndpoint<T> {
      *      if the endpoint set up fails.
      */
     public static <T> WSEndpoint<T> create(
+            @NotNull Class<T> implType,
+            boolean processHandlerAnnotation,
+            @Nullable Invoker invoker,
+            @Nullable QName serviceName,
+            @Nullable QName portName,
+            @Nullable Container container,
+            @Nullable WSBinding binding,
+            @Nullable SDDocumentSource primaryWsdl,
+            @Nullable Collection<? extends SDDocumentSource> metadata,
+            @Nullable EntityResolver resolver,
+            boolean isTransportSynchronous) {
+        return create(implType, processHandlerAnnotation, invoker, serviceName, portName, container, binding, primaryWsdl, metadata, resolver, isTransportSynchronous, true);
+    }
+
+    public static <T> WSEndpoint<T> create(
         @NotNull Class<T> implType,
         boolean processHandlerAnnotation,
         @Nullable Invoker invoker,
@@ -493,20 +556,28 @@ public abstract class WSEndpoint<T> {
         @Nullable SDDocumentSource primaryWsdl,
         @Nullable Collection<? extends SDDocumentSource> metadata,
         @Nullable EntityResolver resolver,
-        boolean isTransportSynchronous)
+        boolean isTransportSynchronous,
+        boolean isStandard)
     {
         final WSEndpoint<T> endpoint =
             EndpointFactory.createEndpoint(
-                implType,processHandlerAnnotation, invoker,serviceName,portName,container,binding,primaryWsdl,metadata,resolver,isTransportSynchronous);
-        endpoint.getManagedObjectManager().resumeJMXRegistration();
+                implType,processHandlerAnnotation, invoker,serviceName,portName,container,binding,primaryWsdl,metadata,resolver,isTransportSynchronous,isStandard);
 
         final Iterator<ManagedEndpointFactory> managementFactories = ServiceFinder.find(ManagedEndpointFactory.class).iterator();
         if (managementFactories.hasNext()) {
             final ManagedEndpointFactory managementFactory = managementFactories.next();
             final EndpointCreationAttributes attributes = new EndpointCreationAttributes(
                     processHandlerAnnotation, invoker, resolver, isTransportSynchronous);
-            return managementFactory.createEndpoint(endpoint, attributes);
+
+            WSEndpoint<T> managedEndpoint = managementFactory.createEndpoint(endpoint, attributes);
+
+            if (endpoint.getAssemblerContext().getTerminalTube() instanceof EndpointAwareTube) {
+                ((EndpointAwareTube)endpoint.getAssemblerContext().getTerminalTube()).setEndpoint(managedEndpoint);
+            }
+
+            return managedEndpoint;
         }
+
 
         return endpoint;
     }
@@ -559,13 +630,85 @@ public abstract class WSEndpoint<T> {
      * Gives the wsdl:service default name computed from the endpoint implementaiton class
      */
     public static @NotNull QName getDefaultServiceName(Class endpointClass){
-        return EndpointFactory.getDefaultServiceName(endpointClass);
+        return getDefaultServiceName(endpointClass, true, null);
+    }
+    public static @NotNull QName getDefaultServiceName(Class endpointClass, MetadataReader metadataReader){
+        return getDefaultServiceName(endpointClass, true, metadataReader);
+    }
+
+    public static @NotNull QName getDefaultServiceName(Class endpointClass, boolean isStandard){
+        return getDefaultServiceName(endpointClass, isStandard, null);
+    }
+    public static @NotNull QName getDefaultServiceName(Class endpointClass, boolean isStandard, MetadataReader metadataReader){
+        return EndpointFactory.getDefaultServiceName(endpointClass, isStandard, metadataReader);
     }
 
     /**
      * Gives the wsdl:service/wsdl:port default name computed from the endpoint implementaiton class
      */
-    public static @NotNull QName getDefaultPortName(@NotNull QName serviceName, Class endpointClass){
-        return EndpointFactory.getDefaultPortName(serviceName, endpointClass);
+    public static @NotNull QName getDefaultPortName(@NotNull QName serviceName, Class endpointClass) {
+        return getDefaultPortName(serviceName, endpointClass, null);
     }
+    public static @NotNull QName getDefaultPortName(@NotNull QName serviceName, Class endpointClass, MetadataReader metadataReader) {
+        return getDefaultPortName(serviceName, endpointClass, true, metadataReader);
+    }
+
+    public static @NotNull QName getDefaultPortName(@NotNull QName serviceName, Class endpointClass, boolean isStandard) {
+        return getDefaultPortName(serviceName, endpointClass, isStandard, null);
+    }
+    public static @NotNull QName getDefaultPortName(@NotNull QName serviceName, Class endpointClass, boolean isStandard, MetadataReader metadataReader){
+        return EndpointFactory.getDefaultPortName(serviceName, endpointClass, isStandard, metadataReader);
+    }
+
+    /**
+     * Return EndpointReference instance, based on passed parameters and spec version represented by clazz
+     * @param <T>
+     * @param clazz represents spec version
+     * @param address   endpoint address
+     * @param wsdlAddress   wsdl address
+     * @param referenceParameters   any reference parameters to be added to the instance
+     * @return EndpointReference instance based on passed parameters and values obtained from current instance
+     */
+    public abstract <T extends EndpointReference> T getEndpointReference(Class<T> clazz, String address, String wsdlAddress, Element... referenceParameters);
+
+    /**
+     *
+     * @param <T>
+     * @param clazz
+     * @param address
+     * @param wsdlAddress
+     * @param metadata
+     * @param referenceParameters
+     * @return EndpointReference instance based on passed parameters and values obtained from current instance
+     */
+    public abstract <T extends EndpointReference> T getEndpointReference(Class<T> clazz,
+            String address, String wsdlAddress, List<Element> metadata,
+            List<Element> referenceParameters);
+
+    /**
+     * Used for managed endpoints infrastructure to compare equality of proxies vs proxied endpoints.
+     * @param endpoint
+     * @return true if the proxied endpoint instance held by this instance equals to 'endpoint', otherwise return false.
+     */
+    public boolean equalsProxiedInstance(WSEndpoint endpoint) {
+        if (endpoint == null) return false;
+        return this.equals(endpoint);
+    }
+
+    /**
+     * Nullable when there is no associated WSDL Model
+     * @return
+     */
+    public abstract @Nullable OperationDispatcher getOperationDispatcher();
+
+
+    /**
+     * This is used by WsaServerTube and WSEndpointImpl to create a Packet with SOAPFault message from a Java exception.
+     */
+    public abstract Packet createServiceResponseForException(final ThrowableContainerPropertySet tc,
+                                                             final Packet      responsePacket,
+                                                             final SOAPVersion soapVersion,
+                                                             final WSDLPort    wsdlPort,
+                                                             final SEIModel    seiModel,
+                                                             final WSBinding   binding);
 }

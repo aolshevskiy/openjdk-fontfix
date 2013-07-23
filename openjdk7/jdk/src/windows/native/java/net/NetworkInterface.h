@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -87,5 +87,10 @@ extern jfieldID ni_ibbroadcastID;   /* InterfaceAddress.broadcast */
 extern jfieldID ni_ibmaskID;        /* InterfaceAddress.maskLength */
 
 int enumInterfaces(JNIEnv *env, netif **netifPP);
+
+// Windows Visa (and later) only.....
+#ifndef IF_TYPE_IEEE80211
+#define IF_TYPE_IEEE80211     71
+#endif
 
 #endif

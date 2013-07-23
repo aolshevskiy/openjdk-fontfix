@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,72 +39,6 @@
  * bytes of slop to avoid deadlock.
  */
 #define PIPE_SIZE (4096+24)
-
-char *
-extractExecutablePath(JNIEnv *env, char *source)
-{
-    char *p, *r;
-
-    /* If no spaces, then use entire thing */
-    if ((p = strchr(source, ' ')) == NULL)
-        return source;
-
-    /* If no quotes, or quotes after space, return up to space */
-    if (((r = strchr(source, '"')) == NULL) || (r > p)) {
-        *p = 0;
-        return source;
-    }
-
-    /* Quotes before space, return up to space after next quotes */
-    p = strchr(r, '"');
-    if ((p = strchr(p, ' ')) == NULL)
-        return source;
-    *p = 0;
-    return source;
-}
-
-DWORD
-selectProcessFlag(JNIEnv *env, jstring cmd0)
-{
-    char buf[MAX_PATH];
-    DWORD newFlag = 0;
-    char *exe, *p, *name;
-    unsigned char buffer[2];
-    long headerLoc = 0;
-    int fd = 0;
-
-    exe = (char *)JNU_GetStringPlatformChars(env, cmd0, 0);
-    exe = extractExecutablePath(env, exe);
-
-    if (exe != NULL) {
-        if ((p = strchr(exe, '\\')) == NULL) {
-            SearchPath(NULL, exe, ".exe", MAX_PATH, buf, &name);
-        } else {
-            p = strrchr(exe, '\\');
-            *p = 0;
-            p++;
-            SearchPath(exe, p, ".exe", MAX_PATH, buf, &name);
-        }
-    }
-
-    fd = _open(buf, _O_RDONLY);
-    if (fd > 0) {
-        _read(fd, buffer, 2);
-        if (buffer[0] == 'M' && buffer[1] == 'Z') {
-            _lseek(fd, 60L, SEEK_SET);
-            _read(fd, buffer, 2);
-            headerLoc = (long)buffer[1] << 8 | (long)buffer[0];
-            _lseek(fd, headerLoc, SEEK_SET);
-            _read(fd, buffer, 2);
-            if (buffer[0] == 'P' && buffer[1] == 'E') {
-                newFlag = DETACHED_PROCESS;
-            }
-        }
-        _close(fd);
-    }
-    JNU_ReleaseStringPlatformChars(env, cmd0, exe);
-    return newFlag;
-}
 
 static void
 win32Error(JNIEnv *env, const char *functionName)
@@ -151,14 +85,7 @@ Java_java_lang_ProcessImpl_create(JNIEnv *env, jclass ignored,
     const jchar*  penvBlock = NULL;
     jlong  *handles = NULL;
     jlong ret = 0;
-    OSVERSIONINFO ver;
-    jboolean onNT = JNI_FALSE;
     DWORD processFlag;
-
-    ver.dwOSVersionInfoSize = sizeof(ver);
-    GetVersionEx(&ver);
-    if (ver.dwPlatformId == VER_PLATFORM_WIN32_NT)
-        onNT = JNI_TRUE;
 
     assert(cmd != NULL);
     pcmd = (*env)->GetStringChars(env, cmd, NULL);
@@ -193,10 +120,12 @@ Java_java_lang_ProcessImpl_create(JNIEnv *env, jclass ignored,
             goto Catch;
         }
         si.hStdInput = inRead;
-        SetHandleInformation(inWrite, HANDLE_FLAG_INHERIT, FALSE);
+        SetHandleInformation(inWrite, HANDLE_FLAG_INHERIT, 0);
         handles[0] = (jlong) inWrite;
     }
-    SetHandleInformation(si.hStdInput, HANDLE_FLAG_INHERIT, TRUE);
+    SetHandleInformation(si.hStdInput,
+        HANDLE_FLAG_INHERIT,
+        HANDLE_FLAG_INHERIT);
 
     if (handles[1] != (jlong) -1) {
         si.hStdOutput = (HANDLE) handles[1];
@@ -207,10 +136,12 @@ Java_java_lang_ProcessImpl_create(JNIEnv *env, jclass ignored,
             goto Catch;
         }
         si.hStdOutput = outWrite;
-        SetHandleInformation(outRead, HANDLE_FLAG_INHERIT, FALSE);
+        SetHandleInformation(outRead, HANDLE_FLAG_INHERIT, 0);
         handles[1] = (jlong) outRead;
     }
-    SetHandleInformation(si.hStdOutput, HANDLE_FLAG_INHERIT, TRUE);
+    SetHandleInformation(si.hStdOutput,
+        HANDLE_FLAG_INHERIT,
+        HANDLE_FLAG_INHERIT);
 
     if (redirectErrorStream) {
         si.hStdError = si.hStdOutput;
@@ -224,15 +155,14 @@ Java_java_lang_ProcessImpl_create(JNIEnv *env, jclass ignored,
             goto Catch;
         }
         si.hStdError = errWrite;
-        SetHandleInformation(errRead, HANDLE_FLAG_INHERIT, FALSE);
+        SetHandleInformation(errRead, HANDLE_FLAG_INHERIT, 0);
         handles[2] = (jlong) errRead;
     }
-    SetHandleInformation(si.hStdError, HANDLE_FLAG_INHERIT, TRUE);
+    SetHandleInformation(si.hStdError,
+        HANDLE_FLAG_INHERIT,
+        HANDLE_FLAG_INHERIT);
 
-    if (onNT)
-        processFlag = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
-    else
-        processFlag = selectProcessFlag(env, cmd) | CREATE_UNICODE_ENVIRONMENT;
+    processFlag = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
     ret = CreateProcessW(0,                /* executable name */
                          (LPWSTR)pcmd,     /* command line */
                          0,                /* process security attribute */
@@ -299,8 +229,27 @@ Java_java_lang_ProcessImpl_waitForInterruptibly(JNIEnv *env, jclass ignored, jlo
 
     if (WaitForMultipleObjects(sizeof(events)/sizeof(events[0]), events,
                                FALSE,    /* Wait for ANY event */
-                               INFINITE) /* Wait forever */
+                               INFINITE)  /* Wait forever */
         == WAIT_FAILED)
+        win32Error(env, "WaitForMultipleObjects");
+}
+
+JNIEXPORT void JNICALL
+Java_java_lang_ProcessImpl_waitForTimeoutInterruptibly(JNIEnv *env,
+                                                       jclass ignored,
+                                                       jlong handle,
+                                                       jlong timeout)
+{
+    HANDLE events[2];
+    DWORD dwTimeout = (DWORD)timeout;
+    DWORD result;
+    events[0] = (HANDLE) handle;
+    events[1] = JVM_GetThreadInterruptEvent();
+    result = WaitForMultipleObjects(sizeof(events)/sizeof(events[0]), events,
+                                    FALSE,    /* Wait for ANY event */
+                                    dwTimeout);  /* Wait for dwTimeout */
+
+    if (result == WAIT_FAILED)
         win32Error(env, "WaitForMultipleObjects");
 }
 
@@ -308,6 +257,14 @@ JNIEXPORT void JNICALL
 Java_java_lang_ProcessImpl_terminateProcess(JNIEnv *env, jclass ignored, jlong handle)
 {
     TerminateProcess((HANDLE) handle, 1);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_java_lang_ProcessImpl_isProcessAlive(JNIEnv *env, jclass ignored, jlong handle)
+{
+    DWORD dwExitStatus;
+    GetExitCodeProcess(handle, &dwExitStatus);
+    return dwExitStatus == STILL_ACTIVE;
 }
 
 JNIEXPORT jboolean JNICALL

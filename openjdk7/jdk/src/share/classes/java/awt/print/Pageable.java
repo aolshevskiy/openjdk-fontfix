@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2000, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package java.awt.print;
 
+import java.lang.annotation.Native;
+
 /**
  * The <code>Pageable</code> implementation represents a set of
  * pages to be printed. The <code>Pageable</code> object returns
@@ -41,7 +43,7 @@ public interface Pageable {
      * method if a <code>Pageable</code> implementation does not know
      * the number of pages in its set.
      */
-    int UNKNOWN_NUMBER_OF_PAGES = -1;
+    @Native int UNKNOWN_NUMBER_OF_PAGES = -1;
 
     /**
      * Returns the number of pages in the set.

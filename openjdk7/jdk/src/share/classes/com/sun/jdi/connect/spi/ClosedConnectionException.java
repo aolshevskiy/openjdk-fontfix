@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,7 +46,7 @@ package com.sun.jdi.connect.spi;
  * @since 1.5
  */
 public class ClosedConnectionException extends java.io.IOException {
-
+    private static final long serialVersionUID = 3877032124297204774L;
     /**
      * Constructs a <tt>ClosedConnectionException</tt> with no detail
      * message.

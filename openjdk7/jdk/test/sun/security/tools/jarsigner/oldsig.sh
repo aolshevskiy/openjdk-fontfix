@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 6543940 6868865 7083664
+# @bug 6543940 6868865
 # @summary Exception thrown when signing a jarfile in java 1.5
 #
 # @run shell oldsig.sh

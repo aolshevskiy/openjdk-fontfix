@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -73,13 +73,16 @@ import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.util.JavacTask;
 import com.sun.tools.javac.api.JavacTool;
 import com.sun.tools.javac.code.Flags;
+import com.sun.tools.javac.tree.EndPosTable;
 import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.tree.JCTree.JCAnnotatedType;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.JCTree.JCNewClass;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.tree.TreeInfo;
 import com.sun.tools.javac.tree.TreeScanner;
 
+import static com.sun.tools.javac.tree.JCTree.Tag.*;
 import static com.sun.tools.javac.util.Position.NOPOS;
 
 /**
@@ -98,7 +101,8 @@ import static com.sun.tools.javac.util.Position.NOPOS;
  * @test
  * @bug 6919889
  * @summary assorted position errors in compiler syntax trees
- * @run main TreePosTest -q -r -ef ./tools/javac/typeAnnotations -ef ./tools/javap/typeAnnotations -et ANNOTATED_TYPE .
+ * OLD: -q -r -ef ./tools/javac/typeAnnotations -ef ./tools/javap/typeAnnotations -et ANNOTATED_TYPE .
+ * @run main TreePosTest -q -r .
  */
 public class TreePosTest {
     /**
@@ -291,6 +295,14 @@ public class TreePosTest {
         errors++;
     }
 
+    /**
+     * Names for tree tags.
+     */
+    private static String getTagName(JCTree.Tag tag) {
+        String name = tag.name();
+        return (name == null) ? "??" : name;
+    }
+
     /** Number of files that have been analyzed. */
     int fileCount;
     /** Number of errors reported. */
@@ -312,8 +324,6 @@ public class TreePosTest {
     Set<File> excludeFiles = new HashSet<File>();
     /** Set of tag names to be excluded from analysis. */
     Set<String> excludeTags = new HashSet<String>();
-    /** Table of printable names for tree tag values. */
-    TagNames tagNames = new TagNames();
 
     /**
      * Main class for testing assertions concerning tree positions for tree nodes.
@@ -337,7 +347,7 @@ public class TreePosTest {
                 // there is no corresponding source text.
                 // Redundant semicolons in a class definition can cause empty
                 // initializer blocks with no positions.
-                if ((self.tag == JCTree.MODIFIERS || self.tag == JCTree.BLOCK)
+                if ((self.tag == MODIFIERS || self.tag == BLOCK)
                         && self.pos == NOPOS) {
                     // If pos is NOPOS, so should be the start and end positions
                     check("start == NOPOS", encl, self, self.start == NOPOS);
@@ -359,15 +369,24 @@ public class TreePosTest {
                     //    e.g.    int[][] a = new int[2][];
                     check("encl.start <= start", encl, self, encl.start <= self.start);
                     check("start <= pos", encl, self, self.start <= self.pos);
-                    if (!(self.tag == JCTree.TYPEARRAY
-                            && (encl.tag == JCTree.VARDEF ||
-                                encl.tag == JCTree.METHODDEF ||
-                                encl.tag == JCTree.TYPEARRAY))) {
+                    if (!( (self.tag == TYPEARRAY ||
+                            isAnnotatedArray(self.tree))
+                            && (encl.tag == VARDEF ||
+                                encl.tag == METHODDEF ||
+                                encl.tag == TYPEARRAY ||
+                                isAnnotatedArray(encl.tree))
+                           ||
+                            encl.tag == ANNOTATED_TYPE && self.tag == SELECT
+                         )) {
                         check("encl.pos <= start || end <= encl.pos",
                                 encl, self, encl.pos <= self.start || self.end <= encl.pos);
                     }
                     check("pos <= end", encl, self, self.pos <= self.end);
-                    if (!(self.tag == JCTree.TYPEARRAY && encl.tag == JCTree.TYPEARRAY)) {
+                    if (!( (self.tag == TYPEARRAY || isAnnotatedArray(self.tree)) &&
+                            (encl.tag == TYPEARRAY || isAnnotatedArray(encl.tree))
+                           ||
+                            encl.tag == MODIFIERS && self.tag == ANNOTATION
+                         ) ) {
                         check("end <= encl.end", encl, self, self.end <= encl.end);
                     }
                 }
@@ -379,6 +398,11 @@ public class TreePosTest {
             encl = prevEncl;
         }
 
+        private boolean isAnnotatedArray(JCTree tree) {
+            return tree.hasTag(ANNOTATED_TYPE) &&
+                            ((JCAnnotatedType)tree).underlyingType.hasTag(TYPEARRAY);
+        }
+
         @Override
         public void visitVarDef(JCVariableDecl tree) {
             // enum member declarations are desugared in the parser and have
@@ -388,7 +412,7 @@ public class TreePosTest {
             if ((tree.mods.flags & Flags.ENUM) != 0) {
                 scan(tree.mods);
                 if (tree.init != null) {
-                    if (tree.init.getTag() == JCTree.NEWCLASS) {
+                    if (tree.init.hasTag(NEWCLASS)) {
                         JCNewClass init = (JCNewClass) tree.init;
                         if (init.args != null && init.args.nonEmpty()) {
                             scan(init.args);
@@ -404,11 +428,11 @@ public class TreePosTest {
 
         boolean check(Info encl, Info self) {
             if (excludeTags.size() > 0) {
-                if (encl != null && excludeTags.contains(tagNames.get(encl.tag))
-                        || excludeTags.contains(tagNames.get(self.tag)))
+                if (encl != null && excludeTags.contains(getTagName(encl.tag))
+                        || excludeTags.contains(getTagName(self.tag)))
                     return false;
             }
-            return tags.size() == 0 || tags.contains(tagNames.get(self.tag));
+            return tags.size() == 0 || tags.contains(getTagName(self.tag));
         }
 
         void check(String label, Info encl, Info self, boolean ok) {
@@ -419,7 +443,8 @@ public class TreePosTest {
                     viewer.addEntry(sourcefile, label, encl, self);
                 }
 
-                String s = self.tree.toString();
+                String s = "encl: " + encl.tree.toString() +
+                        "  this: " + self.tree.toString();
                 String msg = sourcefile.getName() + ": " + label + ": " +
                         "encl:" + encl + " this:" + self + "\n" +
                         s.substring(0, Math.min(80, s.length())).replaceAll("[\r\n]+", " ");
@@ -428,7 +453,7 @@ public class TreePosTest {
         }
 
         JavaFileObject sourcefile;
-        Map<JCTree, Integer> endPosTable;
+        EndPosTable endPosTable;
         Info encl;
 
     }
@@ -439,13 +464,13 @@ public class TreePosTest {
     private class Info {
         Info() {
             tree = null;
-            tag = JCTree.ERRONEOUS;
+            tag = ERRONEOUS;
             start = 0;
             pos = 0;
             end = Integer.MAX_VALUE;
         }
 
-        Info(JCTree tree, Map<JCTree, Integer> endPosTable) {
+        Info(JCTree tree, EndPosTable endPosTable) {
             this.tree = tree;
             tag = tree.getTag();
             start = TreeInfo.getStartPos(tree);
@@ -455,43 +480,14 @@ public class TreePosTest {
 
         @Override
         public String toString() {
-            return tagNames.get(tree.getTag()) + "[start:" + start + ",pos:" + pos + ",end:" + end + "]";
+            return getTagName(tree.getTag()) + "[start:" + start + ",pos:" + pos + ",end:" + end + "]";
         }
 
         final JCTree tree;
-        final int tag;
+        final JCTree.Tag tag;
         final int start;
         final int pos;
         final int end;
-    }
-
-    /**
-     * Names for tree tags.
-     * javac does not provide an API to convert tag values to strings, so this class uses
-     * reflection to determine names of public static final int values in JCTree.
-     */
-    private static class TagNames {
-        String get(int tag) {
-            if (map == null) {
-                map = new HashMap<Integer, String>();
-                Class c = JCTree.class;
-                for (Field f : c.getDeclaredFields()) {
-                    if (f.getType().equals(int.class)) {
-                        int mods = f.getModifiers();
-                        if (Modifier.isPublic(mods) && Modifier.isStatic(mods) && Modifier.isFinal(mods)) {
-                            try {
-                                map.put(f.getInt(null), f.getName());
-                            } catch (IllegalAccessException e) {
-                            }
-                        }
-                    }
-                }
-            }
-            String name = map.get(tag);
-            return (name == null) ? "??" : name;
-        }
-
-        private Map<Integer, String> map;
     }
 
     /**
@@ -719,7 +715,7 @@ public class TreePosTest {
 
             void setInfo(Info info) {
                 this.info = info;
-                tagName.setText(tagNames.get(info.tag));
+                tagName.setText(getTagName(info.tag));
                 start.setText(String.valueOf(info.start));
                 pos.setText(String.valueOf(info.pos));
                 end.setText(String.valueOf(info.end));

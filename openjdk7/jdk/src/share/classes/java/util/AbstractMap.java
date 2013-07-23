@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -443,7 +443,7 @@ public abstract class AbstractMap<K,V> implements Map<K,V> {
 
         if (!(o instanceof Map))
             return false;
-        Map<K,V> m = (Map<K,V>) o;
+        Map<?,?> m = (Map<?,?>) o;
         if (m.size() != size())
             return false;
 
@@ -534,7 +534,7 @@ public abstract class AbstractMap<K,V> implements Map<K,V> {
      * @return a shallow copy of this map
      */
     protected Object clone() throws CloneNotSupportedException {
-        AbstractMap<K,V> result = (AbstractMap<K,V>)super.clone();
+        AbstractMap<?,?> result = (AbstractMap<?,?>)super.clone();
         result.keySet = null;
         result.values = null;
         return result;
@@ -543,6 +543,8 @@ public abstract class AbstractMap<K,V> implements Map<K,V> {
     /**
      * Utility method for SimpleEntry and SimpleImmutableEntry.
      * Test for equality, checking for nulls.
+     *
+     * NB: Do not replace with Object.equals until JDK-8015417 is resolved.
      */
     private static boolean eq(Object o1, Object o2) {
         return o1 == null ? o2 == null : o1.equals(o2);
@@ -652,7 +654,7 @@ public abstract class AbstractMap<K,V> implements Map<K,V> {
         public boolean equals(Object o) {
             if (!(o instanceof Map.Entry))
                 return false;
-            Map.Entry e = (Map.Entry)o;
+            Map.Entry<?,?> e = (Map.Entry<?,?>)o;
             return eq(key, e.getKey()) && eq(value, e.getValue());
         }
 
@@ -783,7 +785,7 @@ public abstract class AbstractMap<K,V> implements Map<K,V> {
         public boolean equals(Object o) {
             if (!(o instanceof Map.Entry))
                 return false;
-            Map.Entry e = (Map.Entry)o;
+            Map.Entry<?,?> e = (Map.Entry<?,?>)o;
             return eq(key, e.getKey()) && eq(value, e.getValue());
         }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,8 +23,7 @@
  */
 
 #include "precompiled.hpp"
-#include "asm/assembler.inline.hpp"
-#include "assembler_sparc.inline.hpp"
+#include "asm/assembler.hpp"
 #include "code/relocInfo.hpp"
 #include "nativeInst_sparc.hpp"
 #include "oops/oop.inline.hpp"
@@ -97,8 +96,8 @@ void Relocation::pd_set_data_value(address x, intptr_t o, bool verify_only) {
     jint inst2;
     guarantee(Assembler::inv_op2(inst)==Assembler::sethi_op2, "must be sethi");
     if (format() != 0) {
-      assert(type() == relocInfo::oop_type, "only narrow oops case");
-      jint np = oopDesc::encode_heap_oop((oop)x);
+      assert(type() == relocInfo::oop_type || type() == relocInfo::metadata_type, "only narrow oops or klasses case");
+      jint np = type() == relocInfo::oop_type ? oopDesc::encode_heap_oop((oop)x) : oopDesc::encode_klass((Klass*)x);
       inst &= ~Assembler::hi22(-1);
       inst |=  Assembler::hi22((intptr_t)np);
       if (verify_only) {
@@ -194,38 +193,11 @@ address Relocation::pd_get_address_from_code() {
   return *(address*)addr();
 }
 
-
-int Relocation::pd_breakpoint_size() {
-  // minimum breakpoint size, in short words
-  return NativeIllegalInstruction::instruction_size / sizeof(short);
-}
-
-void Relocation::pd_swap_in_breakpoint(address x, short* instrs, int instrlen) {
-  Untested("pd_swap_in_breakpoint");
-  // %%% probably do not need a general instrlen; just use the trap size
-  if (instrs != NULL) {
-    assert(instrlen * sizeof(short) == NativeIllegalInstruction::instruction_size, "enough instrlen in reloc. data");
-    for (int i = 0; i < instrlen; i++) {
-      instrs[i] = ((short*)x)[i];
-    }
-  }
-  NativeIllegalInstruction::insert(x);
-}
-
-
-void Relocation::pd_swap_out_breakpoint(address x, short* instrs, int instrlen) {
-  Untested("pd_swap_out_breakpoint");
-  assert(instrlen * sizeof(short) == sizeof(int), "enough buf");
-  union { int l; short s[1]; } u;
-  for (int i = 0; i < instrlen; i++) {
-    u.s[i] = instrs[i];
-  }
-  NativeInstruction* ni = nativeInstruction_at(x);
-  ni->set_long_at(0, u.l);
-}
-
 void poll_Relocation::fix_relocation_after_move(const CodeBuffer* src, CodeBuffer* dest) {
 }
 
 void poll_return_Relocation::fix_relocation_after_move(const CodeBuffer* src, CodeBuffer* dest) {
+}
+
+void metadata_Relocation::pd_fix_value(address x) {
 }

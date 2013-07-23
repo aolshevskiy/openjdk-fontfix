@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -100,7 +100,7 @@ VMError::VMError(Thread* thread, const char* filename, int lineno,
                  const char* message, const char * detail_msg)
 {
   _thread = thread;
-  _id = internal_error;     // Value that's not an OS exception/signal
+  _id = INTERNAL_ERROR;     // Value that's not an OS exception/signal
   _filename = filename;
   _lineno = lineno;
   _message = message;
@@ -119,9 +119,9 @@ VMError::VMError(Thread* thread, const char* filename, int lineno,
 
 // Constructor for OOM errors
 VMError::VMError(Thread* thread, const char* filename, int lineno, size_t size,
-                 const char* message) {
+                 VMErrorType vm_err_type, const char* message) {
     _thread = thread;
-    _id = oom_error;     // Value that's not an OS exception/signal
+    _id = vm_err_type; // Value that's not an OS exception/signal
     _filename = filename;
     _lineno = lineno;
     _message = message;
@@ -142,7 +142,7 @@ VMError::VMError(Thread* thread, const char* filename, int lineno, size_t size,
 // Constructor for non-fatal errors
 VMError::VMError(const char* message) {
     _thread = NULL;
-    _id = internal_error;     // Value that's not an OS exception/signal
+    _id = INTERNAL_ERROR;     // Value that's not an OS exception/signal
     _filename = NULL;
     _lineno = 0;
     _message = message;
@@ -351,9 +351,12 @@ void VMError::report(outputStream* st) {
   STEP(15, "(printing type of error)")
 
      switch(_id) {
-       case oom_error:
+       case OOM_MALLOC_ERROR:
+       case OOM_MMAP_ERROR:
          if (_size) {
-           st->print("# Native memory allocation (malloc) failed to allocate ");
+           st->print("# Native memory allocation ");
+           st->print((_id == (int)OOM_MALLOC_ERROR) ? "(malloc) failed to allocate " :
+                                                 "(mmap) failed to map ");
            jio_snprintf(buf, sizeof(buf), SIZE_FORMAT, _size);
            st->print(buf);
            st->print(" bytes");
@@ -386,7 +389,7 @@ void VMError::report(outputStream* st) {
            return;  // that's enough for the screen
          }
          break;
-       case internal_error:
+       case INTERNAL_ERROR:
        default:
          break;
      }
@@ -685,13 +688,7 @@ void VMError::report(outputStream* st) {
   STEP(190, "(printing heap information)" )
 
      if (_verbose && Universe::is_fully_initialized()) {
-       // Print heap information before vm abort. As we'd like as much
-       // information as possible in the report we ask for the
-       // extended (i.e., more detailed) version.
-       Universe::print_on(st, true /* extended */);
-       st->cr();
-
-       Universe::heap()->barrier_set()->print_on(st);
+       Universe::heap()->print_on_error(st);
        st->cr();
 
        st->print_cr("Polling page: " INTPTR_FORMAT, os::get_polling_page());
@@ -702,7 +699,7 @@ void VMError::report(outputStream* st) {
 
      if (_verbose && Universe::is_fully_initialized()) {
        // print code cache information before vm abort
-       CodeCache::print_bounds(st);
+       CodeCache::print_summary(st);
        st->cr();
      }
 
@@ -802,16 +799,67 @@ void VMError::report(outputStream* st) {
 VMError* volatile VMError::first_error = NULL;
 volatile jlong VMError::first_error_tid = -1;
 
+// An error could happen before tty is initialized or after it has been
+// destroyed. Here we use a very simple unbuffered fdStream for printing.
+// Only out.print_raw() and out.print_raw_cr() should be used, as other
+// printing methods need to allocate large buffer on stack. To format a
+// string, use jio_snprintf() with a static buffer or use staticBufferStream.
+fdStream VMError::out(defaultStream::output_fd());
+fdStream VMError::log; // error log used by VMError::report_and_die()
+
+/** Expand a pattern into a buffer starting at pos and open a file using constructed path */
+static int expand_and_open(const char* pattern, char* buf, size_t buflen, size_t pos) {
+  int fd = -1;
+  if (Arguments::copy_expand_pid(pattern, strlen(pattern), &buf[pos], buflen - pos)) {
+    fd = open(buf, O_RDWR | O_CREAT | O_TRUNC, 0666);
+  }
+  return fd;
+}
+
+/**
+ * Construct file name for a log file and return it's file descriptor.
+ * Name and location depends on pattern, default_pattern params and access
+ * permissions.
+ */
+static int prepare_log_file(const char* pattern, const char* default_pattern, char* buf, size_t buflen) {
+  int fd = -1;
+
+  // If possible, use specified pattern to construct log file name
+  if (pattern != NULL) {
+    fd = expand_and_open(pattern, buf, buflen, 0);
+  }
+
+  // Either user didn't specify, or the user's location failed,
+  // so use the default name in the current directory
+  if (fd == -1) {
+    const char* cwd = os::get_current_directory(buf, buflen);
+    if (cwd != NULL) {
+      size_t pos = strlen(cwd);
+      int fsep_len = jio_snprintf(&buf[pos], buflen-pos, "%s", os::file_separator());
+      pos += fsep_len;
+      if (fsep_len > 0) {
+        fd = expand_and_open(default_pattern, buf, buflen, pos);
+      }
+    }
+  }
+
+   // try temp directory if it exists.
+   if (fd == -1) {
+     const char* tmpdir = os::get_temp_directory();
+     if (tmpdir != NULL && strlen(tmpdir) > 0) {
+       int pos = jio_snprintf(buf, buflen, "%s%s", tmpdir, os::file_separator());
+       if (pos > 0) {
+         fd = expand_and_open(default_pattern, buf, buflen, pos);
+       }
+     }
+   }
+
+  return fd;
+}
+
 void VMError::report_and_die() {
   // Don't allocate large buffer on stack
   static char buffer[O_BUFLEN];
-
-  // An error could happen before tty is initialized or after it has been
-  // destroyed. Here we use a very simple unbuffered fdStream for printing.
-  // Only out.print_raw() and out.print_raw_cr() should be used, as other
-  // printing methods need to allocate large buffer on stack. To format a
-  // string, use jio_snprintf() with a static buffer or use staticBufferStream.
-  static fdStream out(defaultStream::output_fd());
 
   // How many errors occurred in error handler when reporting first_error.
   static int recursive_error_count;
@@ -821,7 +869,6 @@ void VMError::report_and_die() {
   static bool out_done = false;         // done printing to standard out
   static bool log_done = false;         // done saving error log
   static bool transmit_report_done = false; // done error reporting
-  static fdStream log;                  // error log
 
   // disble NMT to avoid further exception
   MemTracker::shutdown(MemTracker::NMT_error_reporting);
@@ -861,10 +908,11 @@ void VMError::report_and_die() {
     // This is not the first error, see if it happened in a different thread
     // or in the same thread during error reporting.
     if (first_error_tid != mytid) {
-      jio_snprintf(buffer, sizeof(buffer),
+      char msgbuf[64];
+      jio_snprintf(msgbuf, sizeof(msgbuf),
                    "[thread " INT64_FORMAT " also had an error]",
                    mytid);
-      out.print_raw_cr(buffer);
+      out.print_raw_cr(msgbuf);
 
       // error reporting is not MT-safe, block current thread
       os::infinite_sleep();
@@ -911,36 +959,7 @@ void VMError::report_and_die() {
     // see if log file is already open
     if (!log.is_open()) {
       // open log file
-      int fd = -1;
-
-      if (ErrorFile != NULL) {
-        bool copy_ok =
-          Arguments::copy_expand_pid(ErrorFile, strlen(ErrorFile), buffer, sizeof(buffer));
-        if (copy_ok) {
-          fd = open(buffer, O_RDWR | O_CREAT | O_TRUNC, 0666);
-        }
-      }
-
-      if (fd == -1) {
-        const char *cwd = os::get_current_directory(buffer, sizeof(buffer));
-        size_t len = strlen(cwd);
-        // either user didn't specify, or the user's location failed,
-        // so use the default name in the current directory
-        jio_snprintf(&buffer[len], sizeof(buffer)-len, "%shs_err_pid%u.log",
-                     os::file_separator(), os::current_process_id());
-        fd = open(buffer, O_RDWR | O_CREAT | O_TRUNC, 0666);
-      }
-
-      if (fd == -1) {
-        const char * tmpdir = os::get_temp_directory();
-        // try temp directory if it exists.
-        if (tmpdir != NULL && tmpdir[0] != '\0') {
-          jio_snprintf(buffer, sizeof(buffer), "%s%shs_err_pid%u.log",
-                       tmpdir, os::file_separator(), os::current_process_id());
-          fd = open(buffer, O_RDWR | O_CREAT | O_TRUNC, 0666);
-        }
-      }
-
+      int fd = prepare_log_file(ErrorFile, "hs_err_pid%p.log", buffer, sizeof(buffer));
       if (fd != -1) {
         out.print_raw("# An error report file with more information is saved as:\n# ");
         out.print_raw_cr(buffer);
@@ -964,7 +983,7 @@ void VMError::report_and_die() {
     // Run error reporting to determine whether or not to report the crash.
     if (!transmit_report_done && should_report_bug(first_error->_id)) {
       transmit_report_done = true;
-      FILE* hs_err = ::fdopen(log.fd(), "r");
+      FILE* hs_err = os::open(log.fd(), "r");
       if (NULL != hs_err) {
         ErrorReporter er;
         er.call(hs_err, buffer, O_BUFLEN);
@@ -1007,6 +1026,27 @@ void VMError::report_and_die() {
 
     // done with OnError
     OnError = NULL;
+  }
+
+  static bool skip_replay = false;
+  if (DumpReplayDataOnError && _thread && _thread->is_Compiler_thread() && !skip_replay) {
+    skip_replay = true;
+    ciEnv* env = ciEnv::current();
+    if (env != NULL) {
+      int fd = prepare_log_file(ReplayDataFile, "replay_pid%p.log", buffer, sizeof(buffer));
+      if (fd != -1) {
+        FILE* replay_data_file = os::open(fd, "w");
+        if (replay_data_file != NULL) {
+          fileStream replay_data_stream(replay_data_file, /*need_close=*/true);
+          env->dump_replay_data(&replay_data_stream);
+          out.print_raw("#\n# Compiler replay data is saved as:\n# ");
+          out.print_raw_cr(buffer);
+        } else {
+          out.print_raw("#\n# Can't open file to dump replay data. Error: ");
+          out.print_raw_cr(strerror(os::get_last_error()));
+        }
+      }
+    }
   }
 
   static bool skip_bug_url = !should_report_bug(first_error->_id);

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,12 @@ BUILDDIR = ../..
 PACKAGE = java.lang
 LIBRARY = java
 PRODUCT = java
+SUBDIRS_MAKEFLAGS += JAVAC_MAX_WARNINGS=true
+SUBDIRS_MAKEFLAGS += JAVAC_WARNINGS_FATAL=true
+JAVAC_MAX_WARNINGS=true
 include $(BUILDDIR)/common/Defs.gmk
+
+AUTO_FILES_JAVA_DIRS = java/util/function
 
 # windows compiler flags
 ifeq ($(PLATFORM),windows)
@@ -61,13 +66,11 @@ include FILES_java.gmk
 include Exportedfiles.gmk
 
 ifeq ($(PLATFORM),windows)
-FILES_java += 	java/io/Win32FileSystem.java \
-		java/io/WinNTFileSystem.java \
+FILES_java += 	java/io/WinNTFileSystem.java \
 		java/util/prefs/WindowsPreferences.java \
                 java/util/prefs/WindowsPreferencesFactory.java
 
 FILES_c    +=   ProcessImpl_md.c \
-		Win32FileSystem_md.c \
 		WinNTFileSystem_md.c \
 		canonicalize_md.c \
 		dirent_md.c \
@@ -153,6 +156,11 @@ vpath %.c $(PLATFORM_SRC)/native/common
 vpath %.c $(PLATFORM_SRC)/native/java/util
 vpath %.c $(PLATFORM_SRC)/native/sun/security/provider
 vpath %.c $(PLATFORM_SRC)/native/sun/io
+ifeq ($(PLATFORM),macosx)
+vpath %.c $(PLATFORM_SRC_MACOS)/native/sun/util/locale/provider
+else # PLATFORM
+vpath %.c $(PLATFORM_SRC)/native/sun/util/locale/provider
+endif # PLATFORM
 
 #
 # Includes the fdlibm header file.
@@ -305,6 +313,12 @@ PROPS = content-types.properties
 CAL_PROPS = calendars.properties
 
 #
+# Rule to copy Hijrah-umalqura calendar properties file.
+#
+HIJRAH_UMALQURA_PROPS = hijrah-config-umalqura.properties
+
+
+#
 # Rule to copy tzmappings file on Windows
 #
 ifeq ($(PLATFORM), windows)
@@ -316,12 +330,15 @@ $(TZMAP): $(TZMAPFILE)
 	$(call chmod-file, 444)
 endif
 
-build: $(LIBDIR)/$(PROPS) $(LIBDIR)/$(CAL_PROPS) $(TZMAP)
+build: $(LIBDIR)/$(PROPS) $(LIBDIR)/$(CAL_PROPS) $(LIBDIR)/$(HIJRAH_UMALQURA_PROPS) $(TZMAP)
 
 $(LIBDIR)/$(PROPS): $(PLATFORM_SRC)/lib/$(PROPS)
 	$(install-file)
 
 $(LIBDIR)/$(CAL_PROPS): $(SHARE_SRC)/lib/$(CAL_PROPS)
+	$(install-file)
+
+$(LIBDIR)/$(HIJRAH_UMALQURA_PROPS): $(SHARE_SRC)/lib/$(HIJRAH_UMALQURA_PROPS)
 	$(install-file)
 
 clean:: 

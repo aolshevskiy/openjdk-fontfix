@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.xml.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -58,7 +57,7 @@ public final class WsdlmodelMessages {
 
     /**
      * Import of {0} is violation of BP 1.1 R2001. Proceeding with a warning.
-     * R2001 A DESCRIPTION MUST only use the WSDL "import" statement to import another WSDL description.
+     * R2001 A DESCRIPTION must only use the WSDL "import" statement to import another WSDL description.
      *
      */
     public static String WSDL_IMPORT_SHOULD_BE_WSDL(Object arg0) {
@@ -70,7 +69,7 @@ public final class WsdlmodelMessages {
     }
 
     /**
-     * Mex WSDL metadata can not be parsed, the systemId is of the MEX source is null.
+     * MEX WSDL metadata can not be parsed, the systemId is of the MEX source is null.
      *
      */
     public static String MEX_METADATA_SYSTEMID_NULL() {

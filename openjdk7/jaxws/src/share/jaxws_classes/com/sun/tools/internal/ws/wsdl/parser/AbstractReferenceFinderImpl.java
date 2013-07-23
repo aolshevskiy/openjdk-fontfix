@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,6 +36,7 @@ import org.xml.sax.helpers.XMLFilterImpl;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 
 /**
  * XMLFilter that finds references to other schema files from
@@ -69,6 +70,7 @@ public abstract class AbstractReferenceFinderImpl extends XMLFilterImpl {
      */
     protected abstract String findExternalResource( String nsURI, String localName, Attributes atts);
 
+    @Override
     public void startElement(String namespaceURI, String localName, String qName, Attributes atts)
         throws SAXException {
         super.startElement(namespaceURI, localName, qName, atts);
@@ -78,7 +80,17 @@ public abstract class AbstractReferenceFinderImpl extends XMLFilterImpl {
 
         try {
             // absolutize URL.
-            String ref = new URI(locator.getSystemId()).resolve(new URI(relativeRef)).toString();
+            assert locator != null;
+            String lsi = locator.getSystemId();
+            String ref;
+            if (lsi.startsWith("jar:")) {
+                    int bangIdx = lsi.indexOf('!');
+                    if (bangIdx > 0) {
+                            ref = new URL(new URL(lsi), relativeRef).toString();
+                    } else
+                            ref = relativeRef;
+            } else
+                    ref = new URI(lsi).resolve(new URI(relativeRef)).toString();
 
             // then parse this schema as well,
             // but don't mark this document as a root.
@@ -102,6 +114,7 @@ public abstract class AbstractReferenceFinderImpl extends XMLFilterImpl {
 
     private Locator locator;
 
+    @Override
     public void setDocumentLocator(Locator locator) {
         super.setDocumentLocator(locator);
         this.locator = locator;

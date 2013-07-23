@@ -35,10 +35,11 @@ import java.util.jar.JarFile;
 
 public interface JavaUtilJarAccess {
     public boolean jarFileHasClassPathAttribute(JarFile jar) throws IOException;
+    public boolean jarFileHasProfileAttribute(JarFile jar) throws IOException;
     public CodeSource[] getCodeSources(JarFile jar, URL url);
     public CodeSource getCodeSource(JarFile jar, URL url, String name);
     public Enumeration<String> entryNames(JarFile jar, CodeSource[] cs);
     public Enumeration<JarEntry> entries2(JarFile jar);
     public void setEagerValidation(JarFile jar, boolean eager);
-    public List getManifestDigests(JarFile jar);
+    public List<Object> getManifestDigests(JarFile jar);
 }

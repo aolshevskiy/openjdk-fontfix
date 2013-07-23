@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -154,7 +154,7 @@ public class UnicodeSetIterator {
 
         if (stringIterator == null) return false;
         codepoint = IS_STRING; // signal that value is actually a string
-        string = (String)stringIterator.next();
+        string = stringIterator.next();
         if (!stringIterator.hasNext()) stringIterator = null;
         return true;
     }
@@ -203,7 +203,7 @@ public class UnicodeSetIterator {
      * @internal
      */
     protected int nextElement;
-    private Iterator stringIterator = null;
+    private Iterator<String> stringIterator = null;
 
     /**
      * Invariant: stringIterator is null when there are no (more) strings remaining

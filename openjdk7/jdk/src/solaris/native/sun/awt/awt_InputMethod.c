@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,28 +30,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <X11/Xlib.h>
-#ifdef XAWT
 #include <sys/time.h>
-#else /* !XAWT */
-#include <Xm/Xm.h>
-#include <Xm/RowColumn.h>
-#include <Xm/MwmUtil.h>
-#include <Xm/MenuShell.h>
-#endif /* XAWT */
 
 #include "awt.h"
 #include "awt_p.h"
 
 #include <sun_awt_X11InputMethod.h>
-#ifdef XAWT
-#include <sun_awt_X11_XComponentPeer.h>
 #include <sun_awt_X11_XInputMethod.h>
-#else /* !XAWT */
-#include <sun_awt_motif_MComponentPeer.h>
-#include <sun_awt_motif_MInputMethod.h>
-
-#define MCOMPONENTPEER_CLASS_NAME       "sun/awt/motif/MComponentPeer"
-#endif /* XAWT */
 
 #define THROW_OUT_OF_MEMORY_ERROR() \
         JNU_ThrowOutOfMemoryError((JNIEnv *)JNU_GetEnv(jvm, JNI_VERSION_1_2), NULL)
@@ -111,11 +96,7 @@ static XIMProc callback_funcs[NCALLBACKS] = {
 typedef struct {
     Window   w;                /*status window id        */
     Window   root;             /*the root window id      */
-#ifdef XAWT
     Window   parent;           /*parent shell window     */
-#else
-    Widget   parent;           /*parent shell window     */
-#endif
     int      x, y;             /*parent's upperleft position */
     int      width, height;    /*parent's width, height  */
     GC       lightGC;          /*gc for light border     */
@@ -141,17 +122,10 @@ typedef struct _X11InputMethodData {
     XIC         ic_active;      /* X Input Context for active clients */
     XIC         ic_passive;     /* X Input Context for passive clients */
     XIMCallback *callbacks;     /* callback parameters */
-#ifndef XAWT
-    jobject     peer;           /* MComponentPeer of client Window */
-#endif /* XAWT */
     jobject     x11inputmethod; /* global ref to X11InputMethod instance */
                                 /* associated with the XIC */
 #if defined(__linux__) || defined(MACOSX)
     StatusWindow *statusWindow; /* our own status window  */
-#else
-#ifndef XAWT
-    Widget      statusWidget;   /* IM status window widget */
-#endif /* XAWT */
 #endif
     char        *lookup_buf;    /* buffer used for XmbLookupString */
     int         lookup_buf_len; /* lookup buffer size in bytes */
@@ -191,12 +165,6 @@ Display * dpy = NULL;
 
 #define GetJNIEnv() (JNIEnv *)JNU_GetEnv(jvm, JNI_VERSION_1_2)
 
-#ifndef XAWT
-static jobject  mcompClass = NULL;
-static jobject  awteventClass = NULL;
-static jfieldID mcompPDataID = NULL;
-#endif /* XAWT */
-
 static void DestroyXIMCallback(XIM, XPointer, XPointer);
 static void OpenXIMCallback(Display *, XPointer, XPointer);
 /* Solaris XIM Extention */
@@ -217,7 +185,6 @@ extern char *XSetIMValues(
 );
 #endif
 
-#ifdef XAWT_HACK
 /*
  * This function is stolen from /src/solaris/hpi/src/system_md.c
  * It is used in setting the time in Java-level InputEvents
@@ -229,7 +196,6 @@ awt_util_nowMillisUTC()
     gettimeofday(&t, NULL);
     return ((jlong)t.tv_sec) * 1000 + (jlong)(t.tv_usec/1000);
 }
-#endif /* XAWT_HACK */
 
 /*
  * Converts the wchar_t string to a multi-byte string calling wcstombs(). A
@@ -260,28 +226,6 @@ wcstombsdmp(wchar_t *wcs, int len)
 
     return mbs;
 }
-
-#ifndef XAWT
-/*
- * Find a class for the given class name and return a global reference to the
- * class.
- */
-static jobject
-findClass(const char *className)
-{
-    JNIEnv *env = GetJNIEnv();
-    jclass classClass;
-    jobject objectClass;
-
-    classClass = (*env)->FindClass(env, className);
-    objectClass = (*env)->NewGlobalRef(env,classClass);
-
-    if (JNU_IsNull(env, objectClass)) {
-        JNU_ThrowClassNotFoundException(env, className);
-    }
-    return objectClass;
-}
-#endif /* XAWT */
 
 /*
  * Returns True if the global reference is still in the list,
@@ -444,9 +388,6 @@ freeX11InputMethodData(JNIEnv *env, X11InputMethodData *pX11IMData)
         free((void *)pX11IMData->callbacks);
 
     if (env) {
-#ifndef XAWT
-        (*env)->DeleteGlobalRef(env, pX11IMData->peer);
-#endif /* XAWT */
         /* Remove the global reference from the list, so that
            the callback function or whoever refers to it could know.
         */
@@ -506,7 +447,7 @@ setXICWindowFocus(XIC ic, Window w)
  */
 #define INITIAL_LOOKUP_BUF_SIZE 512
 
-Bool
+Boolean
 awt_x11inputmethod_lookupString(XKeyPressedEvent *event, KeySym *keysymp)
 {
     JNIEnv *env = GetJNIEnv();
@@ -516,8 +457,8 @@ awt_x11inputmethod_lookupString(XKeyPressedEvent *event, KeySym *keysymp)
     int mblen;
     jstring javastr;
     XIC ic;
-    Bool result = True;
-    static Bool composing = False;
+    Boolean result = True;
+    static Boolean composing = False;
 
     /*
       printf("lookupString: entering...\n");
@@ -580,23 +521,10 @@ awt_x11inputmethod_lookupString(XKeyPressedEvent *event, KeySym *keysymp)
     /* Get keysym without taking modifiers into account first to map
      * to AWT keyCode table.
      */
-#ifndef XAWT
-    if (((event->state & ShiftMask) ||
-        (event->state & LockMask)) &&
-         keysym >= 'A' && keysym <= 'Z')
-    {
-        keysym = XLookupKeysym(event, 0);
-    }
-#endif
-
     switch (status) {
     case XLookupBoth:
         if (!composing) {
-#ifdef XAWT
             if (event->keycode != 0) {
-#else
-            if (keysym < 128 || ((keysym & 0xff00) == 0xff00)) {
-#endif
                 *keysymp = keysym;
                 result = False;
                 break;
@@ -616,11 +544,7 @@ awt_x11inputmethod_lookupString(XKeyPressedEvent *event, KeySym *keysymp)
                                  "dispatchCommittedText",
                                  "(Ljava/lang/String;J)V",
                                  javastr,
-#ifndef XAWT_HACK
-                                 awt_util_nowMillisUTC_offset(event->time));
-#else
                                  event->time);
-#endif
         }
         break;
 
@@ -650,11 +574,7 @@ awt_x11inputmethod_lookupString(XKeyPressedEvent *event, KeySym *keysymp)
 
 #if defined(__linux__) || defined(MACOSX)
 static StatusWindow *createStatusWindow(
-#ifdef XAWT
                                 Window parent) {
-#else
-                                Widget parent) {
-#endif
     StatusWindow *statusWindow;
     XSetWindowAttributes attrib;
     unsigned long attribmask;
@@ -682,22 +602,12 @@ static StatusWindow *createStatusWindow(
     Window *ignoreWindowPtr;
     unsigned int ignoreUnit;
 
-#ifdef XAWT
     XGetGeometry(dpy, parent, &rootWindow, &x, &y, &w, &h, &bw, &depth);
-#else
-    while (!XtIsShell(parent)){
-        parent = XtParent(parent);
-    }
-#endif
 
     attrib.override_redirect = True;
     attribmask = CWOverrideRedirect;
     for (i = 0; i < awt_numScreens; i++) {
-#ifdef XAWT
         if (RootWindow(dpy, i) == rootWindow) {
-#else
-        if (ScreenOfDisplay(dpy, i) == XtScreen(parent)) {
-#endif
             screen = i;
             break;
         }
@@ -798,11 +708,7 @@ static StatusWindow *createStatusWindow(
 
 /* This method is to turn off or turn on the status window. */
 static void onoffStatusWindow(X11InputMethodData* pX11IMData,
-#ifdef XAWT
                                 Window parent,
-#else
-                                Widget parent,
-#endif
                                 Bool ON){
     XWindowAttributes xwa;
     Window child;
@@ -820,15 +726,9 @@ static void onoffStatusWindow(X11InputMethodData* pX11IMData,
         statusWindow->on = False;
         return;
     }
-#ifdef XAWT
     parent = JNU_CallMethodByName(GetJNIEnv(), NULL, pX11IMData->x11inputmethod,
                                   "getCurrentParentWindow",
                                   "()J").j;
-#else
-    while (!XtIsShell(parent)){
-        parent = XtParent(parent);
-    }
-#endif
     if (statusWindow->parent != parent){
         statusWindow->parent = parent;
     }
@@ -941,11 +841,7 @@ void statusWindowEventHandler(XEvent event){
   }
 }
 
-#ifdef XAWT
 static void adjustStatusWindow(Window shell){
-#else
-void adjustStatusWindow(Widget shell){
-#endif
     JNIEnv *env = GetJNIEnv();
     X11InputMethodData *pX11IMData = NULL;
     StatusWindow *statusWindow;
@@ -957,11 +853,7 @@ void adjustStatusWindow(Widget shell){
         || !statusWindow->on) {
         return;
     }
-#ifdef XAWT
     {
-#else
-    if (statusWindow->parent == shell) {
-#endif
         XWindowAttributes xwa;
         int x, y;
         Window child;
@@ -1009,12 +901,7 @@ void adjustStatusWindow(Widget shell){
  * fallback to None styles.
  */
 static Bool
-#ifdef XAWT
 createXIC(JNIEnv * env, X11InputMethodData *pX11IMData, Window w)
-#else /* !XAWT */
-createXIC(Widget w, X11InputMethodData *pX11IMData,
-          jobject tc, jobject peer)
-#endif /* XAWT */
 {
     XIC active_ic, passive_ic;
     XVaNestedList preedit = NULL;
@@ -1031,17 +918,9 @@ createXIC(Widget w, X11InputMethodData *pX11IMData,
     if (X11im == NULL) {
         return False;
     }
-#ifdef XAWT
     if (!w) {
         return False;
     }
-#else /* !XAWT */
-    /*
-     * If the parent window has one or more TextComponents, the status
-     * area of Motif will be shared with the created XIC. Otherwise,
-     * root-window style status is used.
-     */
-#endif /* XAWT */
 
     ret = XGetIMValues(X11im, XNQueryInputStyle, &im_styles, NULL);
 
@@ -1064,28 +943,7 @@ createXIC(Widget w, X11InputMethodData *pX11IMData,
         }
     }
 #else /*! __linux__ && !MACOSX */
-#ifdef XAWT
     on_the_spot_styles |= XIMStatusNothing;
-#else /* !XAWT */
-    /*
-     * If the parent window has one or more TextComponents, the status
-     * area of Motif will be shared with the created XIC. Otherwise,
-     * root-window style status is used.
-     */
-    if (tc != NULL){
-        XVaNestedList status = NULL;
-        status = awt_motif_getXICStatusAreaList(w, tc);
-        if (status != NULL){
-            on_the_spot_styles |=  XIMStatusArea;
-            XFree(status);
-        }
-        else
-            on_the_spot_styles |= XIMStatusNothing;
-    }
-    else
-        on_the_spot_styles |= XIMStatusNothing;
-
-#endif /* XAWT */
 #endif /* __linux__ || MACOSX */
 
     for (i = 0; i < im_styles->count_styles; i++) {
@@ -1157,32 +1015,12 @@ createXIC(Widget w, X11InputMethodData *pX11IMData,
             XFree((void *)preedit);
         }
 #else /* !__linux__ && !MACOSX */
-#ifndef XAWT
-        if (on_the_spot_styles & XIMStatusArea) {
-            Widget parent;
-            status = awt_motif_getXICStatusAreaList(w, tc);
-            if (status == NULL)
-                goto err;
-            pX11IMData->statusWidget = awt_util_getXICStatusAreaWindow(w);
-            pX11IMData->ic_active = XCreateIC(X11im,
-                                              XNClientWindow, pX11IMData->statusWidget,
-                                              XNFocusWindow, w,
-                                              XNInputStyle, active_styles,
-                                              XNPreeditAttributes, preedit,
-                                              XNStatusAttributes, status,
-                                              NULL);
-            XFree((void *)status);
-        } else {
-#endif /* XAWT */
             pX11IMData->ic_active = XCreateIC(X11im,
                                               XNClientWindow, w,
                                               XNFocusWindow, w,
                                               XNInputStyle, active_styles,
                                               XNPreeditAttributes, preedit,
                                               NULL);
-#ifndef XAWT
-        }
-#endif /* XAWT */
         XFree((void *)preedit);
 #endif /* __linux__ || MACOSX */
         pX11IMData->ic_passive = XCreateIC(X11im,
@@ -1479,7 +1317,7 @@ static void DestroyXIMCallback(XIM im, XPointer client_data, XPointer call_data)
 }
 
 /*
- * Class:     java_sun_awt_motif_X11InputMethod
+ * Class:     sun_awt_X11InputMethod
  * Method:    initIDs
  * Signature: ()V
  */
@@ -1495,24 +1333,15 @@ Java_sun_awt_X11InputMethod_initIDs(JNIEnv *env, jclass cls)
 
 
 JNIEXPORT jboolean JNICALL
-#ifdef XAWT
 Java_sun_awt_X11_XInputMethod_openXIMNative(JNIEnv *env,
                                           jobject this,
                                           jlong display)
-#else
-Java_sun_awt_motif_MInputMethod_openXIMNative(JNIEnv *env,
-                                          jobject this)
-#endif
 {
     Bool registered;
 
     AWT_LOCK();
 
-#ifdef XAWT
     dpy = (Display *)jlong_to_ptr(display);
-#else
-    dpy = awt_display;
-#endif
 
 /* Use IMInstantiate call back only on Linux, as there is a bug in Solaris
    (4768335)
@@ -1534,30 +1363,17 @@ Java_sun_awt_motif_MInputMethod_openXIMNative(JNIEnv *env,
 }
 
 JNIEXPORT jboolean JNICALL
-#ifdef XAWT
 Java_sun_awt_X11_XInputMethod_createXICNative(JNIEnv *env,
                                                   jobject this,
                                                   jlong window)
 {
-#else /* !XAWT */
-Java_sun_awt_motif_MInputMethod_createXICNative(JNIEnv *env,
-                                                  jobject this,
-                                                  jobject comp,
-                                                  jobject tc)
-{
-    struct ComponentData *cdata;
-#endif /* XAWT */
     X11InputMethodData *pX11IMData;
     jobject globalRef;
     XIC ic;
 
     AWT_LOCK();
 
-#ifdef XAWT
     if (!window) {
-#else /* !XAWT */
-    if (JNU_IsNull(env, comp)) {
-#endif /* XAWT */
         JNU_ThrowNullPointerException(env, "NullPointerException");
         AWT_UNLOCK();
         return JNI_FALSE;
@@ -1570,40 +1386,16 @@ Java_sun_awt_motif_MInputMethod_createXICNative(JNIEnv *env,
         return JNI_FALSE;
     }
 
-#ifndef XAWT
-    if (mcompClass == NULL) {
-        mcompClass = findClass(MCOMPONENTPEER_CLASS_NAME);
-        mcompPDataID = (*env)->GetFieldID(env, mcompClass, "pData", "J");
-    }
-    cdata = (struct ComponentData *) JNU_GetLongFieldAsPtr(env,comp,mcompPDataID);
-
-    if (cdata == 0) {
-        free((void *)pX11IMData);
-        JNU_ThrowNullPointerException(env, "createXIC");
-        AWT_UNLOCK();
-        return JNI_FALSE;
-    }
-
-    pX11IMData->peer = (*env)->NewGlobalRef(env, comp);
-#endif /* XAWT */
     globalRef = (*env)->NewGlobalRef(env, this);
     pX11IMData->x11inputmethod = globalRef;
 #if defined(__linux__) || defined(MACOSX)
     pX11IMData->statusWindow = NULL;
-#else /* !__linux__ && !MACOSX */
-#ifndef XAWT
-    pX11IMData->statusWidget = (Widget) NULL;
-#endif /* XAWT */
 #endif /* __linux__ || MACOSX */
 
     pX11IMData->lookup_buf = 0;
     pX11IMData->lookup_buf_len = 0;
 
-#ifdef XAWT
     if (createXIC(env, pX11IMData, (Window)window)
-#else /* !XAWT */
-    if (createXIC(cdata->widget, pX11IMData, tc, comp)
-#endif /* XAWT */
         == False) {
         destroyX11InputMethodData((JNIEnv *) NULL, pX11IMData);
         pX11IMData = (X11InputMethodData *) NULL;
@@ -1615,77 +1407,6 @@ Java_sun_awt_motif_MInputMethod_createXICNative(JNIEnv *env,
     return (pX11IMData != NULL);
 }
 
-#ifndef XAWT
-JNIEXPORT void JNICALL
-Java_sun_awt_motif_MInputMethod_reconfigureXICNative(JNIEnv *env,
-                                                       jobject this,
-                                                       jobject comp,
-                                                       jobject tc)
-{
-    X11InputMethodData *pX11IMData;
-
-    AWT_LOCK();
-
-    pX11IMData = getX11InputMethodData(env, this);
-    if (pX11IMData == NULL) {
-        AWT_UNLOCK();
-        return;
-    }
-
-    if (pX11IMData->current_ic == (XIC)0) {
-        destroyX11InputMethodData(env, pX11IMData);
-        pX11IMData = (X11InputMethodData *)NULL;
-    } else {
-        Bool active;
-        struct ComponentData *cdata;
-
-        active = pX11IMData->current_ic == pX11IMData->ic_active;
-        if (mcompClass == NULL) {
-            mcompClass = findClass(MCOMPONENTPEER_CLASS_NAME);
-            mcompPDataID = (*env)->GetFieldID(env, mcompClass, "pData", "J");
-        }
-        cdata = (struct ComponentData *) JNU_GetLongFieldAsPtr(env,comp,mcompPDataID);
-        if (cdata == 0) {
-            JNU_ThrowNullPointerException(env, "reconfigureXICNative");
-            destroyX11InputMethodData(env, pX11IMData);
-            pX11IMData = (X11InputMethodData *)NULL;
-        }
-        XDestroyIC(pX11IMData->ic_active);
-        if (pX11IMData->ic_active != pX11IMData->ic_passive)
-            XDestroyIC(pX11IMData->ic_passive);
-        pX11IMData->current_ic = (XIC)0;
-        pX11IMData->ic_active = (XIC)0;
-        pX11IMData->ic_passive = (XIC)0;
-        if (createXIC(cdata->widget, pX11IMData, tc, comp)) {
-            pX11IMData->current_ic = active ?
-                        pX11IMData->ic_active : pX11IMData->ic_passive;
-            /*
-             * On Solaris2.6, setXICWindowFocus() has to be invoked
-             * before setting focus.
-             */
-            setXICWindowFocus(pX11IMData->current_ic, cdata->widget);
-            setXICFocus(pX11IMData->current_ic, True);
-        } else {
-            destroyX11InputMethodData((JNIEnv *) NULL, pX11IMData);
-            pX11IMData = (X11InputMethodData *)NULL;
-        }
-    }
-
-    setX11InputMethodData(env, this, pX11IMData);
-
-    AWT_UNLOCK();
-}
-
-JNIEXPORT void JNICALL
-Java_sun_awt_motif_MInputMethod_setXICFocusNative(JNIEnv *env,
-                                              jobject this,
-                                              jobject comp,
-                                              jboolean req,
-                                              jboolean active)
-{
-    struct ComponentData *cdata;
-    Widget w;
-#else /* !XAWT */
 JNIEXPORT void JNICALL
 Java_sun_awt_X11_XInputMethod_setXICFocusNative(JNIEnv *env,
                                               jobject this,
@@ -1693,7 +1414,6 @@ Java_sun_awt_X11_XInputMethod_setXICFocusNative(JNIEnv *env,
                                               jboolean req,
                                               jboolean active)
 {
-#endif /* XAWT */
     X11InputMethodData *pX11IMData;
     AWT_LOCK();
     pX11IMData = getX11InputMethodData(env, this);
@@ -1703,40 +1423,16 @@ Java_sun_awt_X11_XInputMethod_setXICFocusNative(JNIEnv *env,
     }
 
     if (req) {
-#ifdef XAWT
         if (!w) {
             AWT_UNLOCK();
             return;
         }
-#else /* !XAWT */
-        struct ComponentData *cdata;
-
-        if (JNU_IsNull(env, comp)) {
-            AWT_UNLOCK();
-            return;
-        }
-        if (mcompClass == NULL) {
-            mcompClass = findClass(MCOMPONENTPEER_CLASS_NAME);
-            mcompPDataID = (*env)->GetFieldID(env, mcompClass, "pData", "J");
-        }
-        cdata = (struct ComponentData *)JNU_GetLongFieldAsPtr(env, comp,
-                                                              mcompPDataID);
-        if (cdata == 0) {
-            JNU_ThrowNullPointerException(env, "setXICFocus pData");
-            AWT_UNLOCK();
-            return;
-        }
-#endif /* XAWT */
-
         pX11IMData->current_ic = active ?
                         pX11IMData->ic_active : pX11IMData->ic_passive;
         /*
          * On Solaris2.6, setXICWindowFocus() has to be invoked
          * before setting focus.
          */
-#ifndef XAWT
-        w = cdata->widget;
-#endif /* XAWT */
         setXICWindowFocus(pX11IMData->current_ic, w);
         setXICFocus(pX11IMData->current_ic, req);
         currentX11InputMethodInstance = pX11IMData->x11inputmethod;
@@ -1853,40 +1549,6 @@ Java_sun_awt_X11InputMethod_resetXIC(JNIEnv *env,
     return jText;
 }
 
-#ifndef XAWT
-JNIEXPORT void JNICALL
-Java_sun_awt_motif_MInputMethod_configureStatusAreaNative(JNIEnv *env,
-                                                            jobject this,
-                                                            jobject tc)
-{
-    X11InputMethodData *pX11IMData;
-    XVaNestedList status;
-
-#if defined(__linux__) || defined(MACOSX)
-      /*do nothing for linux? */
-#else
-    AWT_LOCK();
-    pX11IMData = getX11InputMethodData(env, this);
-
-    if ((pX11IMData == NULL) || (pX11IMData->ic_active == (XIC)0)) {
-        AWT_UNLOCK();
-        return;
-    }
-
-    if (pX11IMData->statusWidget) {
-        status = awt_motif_getXICStatusAreaList(pX11IMData->statusWidget, tc);
-        if (status != (XVaNestedList)NULL) {
-            XSetICValues(pX11IMData->ic_active,
-                         XNStatusAttributes, status,
-                         NULL);
-            XFree((void *)status);
-        }
-    }
-    AWT_UNLOCK();
-#endif
-}
-#endif /* XAWT */
-
 /*
  * Class:     sun_awt_X11InputMethod
  * Method:    setCompositionEnabledNative
@@ -1964,7 +1626,6 @@ JNIEXPORT jboolean JNICALL Java_sun_awt_X11InputMethod_isCompositionEnabledNativ
     return (jboolean)(state == XIMPreeditEnable);
 }
 
-#ifdef XAWT
 JNIEXPORT void JNICALL Java_sun_awt_X11_XInputMethod_adjustStatusWindow
   (JNIEnv *env, jobject this, jlong window)
 {
@@ -1974,4 +1635,3 @@ JNIEXPORT void JNICALL Java_sun_awt_X11_XInputMethod_adjustStatusWindow
     AWT_UNLOCK();
 #endif
 }
-#endif

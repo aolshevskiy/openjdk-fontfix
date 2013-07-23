@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,18 +58,15 @@ public class CustomExceptionGenerator extends GeneratorBase {
     public static void generate(Model model,
         WsimportOptions options,
         ErrorReceiver receiver){
-        CustomExceptionGenerator exceptionGen = new CustomExceptionGenerator(model, options, receiver);
+        CustomExceptionGenerator exceptionGen = new CustomExceptionGenerator();
+        exceptionGen.init(model, options, receiver);
         exceptionGen.doGeneration();
-    }
-    private CustomExceptionGenerator(
-        Model model,
-        WsimportOptions options,
-        ErrorReceiver receiver) {
-        super(model, options, receiver);
     }
 
     public GeneratorBase getGenerator(Model model, WsimportOptions options, ErrorReceiver receiver) {
-        return new CustomExceptionGenerator(model, options, receiver);
+        GeneratorBase g = new CustomExceptionGenerator();
+        g.init(model, options, receiver);
+        return g;
     }
 
     @Override

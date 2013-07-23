@@ -129,14 +129,14 @@ default: all
 # All ant targets of interest
 ANT_TARGETS = all build dist clobber clean sanity
 
-# Just for compat reasons, delete in future.
-drop_included:
-source:
-
 # Create a make target for each
 $(ANT_TARGETS):
 	cd .. && $(ANT_JAVA_HOME) $(ANT) $(ANT_OPTIONS) -version
 	cd .. && $(ANT_JAVA_HOME) $(ANT) $(ANT_OPTIONS) $@
+
+# Just for compat reasons, delete in future.
+drop_included:
+source:
 
 # Help target
 define helpenvline

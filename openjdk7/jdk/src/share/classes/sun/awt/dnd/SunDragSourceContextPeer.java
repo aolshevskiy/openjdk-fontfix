@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,6 +52,8 @@ import java.util.SortedMap;
 
 import sun.awt.SunToolkit;
 import sun.awt.datatransfer.DataTransferer;
+import java.awt.datatransfer.DataFlavor;
+
 
 /**
  * <p>
@@ -61,7 +63,6 @@ import sun.awt.datatransfer.DataTransferer;
  * @since JDK1.3.1
  *
  */
-
 public abstract class SunDragSourceContextPeer implements DragSourceContextPeer {
 
     private DragGestureEvent  trigger;
@@ -126,9 +127,9 @@ public abstract class SunDragSourceContextPeer implements DragSourceContextPeer 
         dragImageOffset   = p;
 
         Transferable transferable  = getDragSourceContext().getTransferable();
-        SortedMap formatMap = DataTransferer.getInstance().getFormatsForTransferable
-             (transferable, DataTransferer.adaptFlavorMap
-                 (getTrigger().getDragSource().getFlavorMap()));
+        SortedMap<Long,DataFlavor> formatMap = DataTransferer.getInstance().
+            getFormatsForTransferable(transferable, DataTransferer.adaptFlavorMap
+                (getTrigger().getDragSource().getFlavorMap()));
         long[] formats = DataTransferer.getInstance().
             keysToLongArray(formatMap);
         startDrag(transferable, formats, formatMap);
@@ -274,7 +275,7 @@ public abstract class SunDragSourceContextPeer implements DragSourceContextPeer 
      * upcall from native code
      */
 
-    private void dragEnter(final int targetActions,
+    protected void dragEnter(final int targetActions,
                            final int modifiers,
                            final int x, final int y) {
         postDragSourceDragEvent(targetActions, modifiers, x, y, DISPATCH_ENTER);
@@ -352,10 +353,6 @@ public abstract class SunDragSourceContextPeer implements DragSourceContextPeer 
 
     public static void setDragDropInProgress(boolean b)
       throws InvalidDnDOperationException {
-        if (dragDropInProgress == b) {
-            throw new InvalidDnDOperationException(getExceptionMessage(b));
-        }
-
         synchronized (SunDragSourceContextPeer.class) {
             if (dragDropInProgress == b) {
                 throw new InvalidDnDOperationException(getExceptionMessage(b));

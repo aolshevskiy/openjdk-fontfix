@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.tools.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -345,7 +344,7 @@ public final class ModelerMessages {
     }
 
     /**
-     * not a WS-I BP1.1 compliant SOAP port "{0}": the wsdl binding has mixed style, it must be rpc-literal or document-literal operation!
+     * not a WS-I BP1.1 compliant SOAP port "{0}": the WSDL binding has mixed style, it must be rpc-literal or document-literal operation!
      *
      */
     public static String WSDLMODELER_WARNING_PORT_SOAP_BINDING_MIXED_STYLE(Object arg0) {
@@ -460,12 +459,24 @@ public final class ModelerMessages {
         return localizer.localize(localizableWSDLMODELER_INVALID_OPERATION_JAVA_RESERVED_WORD_NOT_ALLOWED_CUSTOM_NAME(arg0, arg1));
     }
 
+    public static Localizable localizableWSDLMODELER_WARNING_MEMBER_SUBMISSION_ADDRESSING_USED(Object arg0, Object arg1) {
+        return messageFactory.getMessage("wsdlmodeler.warning.memberSubmissionAddressingUsed", arg0, arg1);
+    }
+
+    /**
+     * obsolete addressing version 08-2004:"{0}" used; version "{1}" should be used instead.
+     *
+     */
+    public static String WSDLMODELER_WARNING_MEMBER_SUBMISSION_ADDRESSING_USED(Object arg0, Object arg1) {
+        return localizer.localize(localizableWSDLMODELER_WARNING_MEMBER_SUBMISSION_ADDRESSING_USED(arg0, arg1));
+    }
+
     public static Localizable localizableWSDLMODELER_WARNING_BINDING_OPERATION_MULTIPLE_PART_BINDING(Object arg0, Object arg1) {
         return messageFactory.getMessage("wsdlmodeler.warning.bindingOperation.multiplePartBinding", arg0, arg1);
     }
 
     /**
-     * Check the abstract operation "{0}" binding, part "{1}" has multiple binding. Will try to generated artiffacts anyway...
+     * Check the abstract operation "{0}" binding, part "{1}" has multiple binding. Will try to generated artifacts anyway...
      *
      */
     public static String WSDLMODELER_WARNING_BINDING_OPERATION_MULTIPLE_PART_BINDING(Object arg0, Object arg1) {
@@ -525,7 +536,7 @@ public final class ModelerMessages {
     }
 
     /**
-     * Ingoring operation "{0}": more than one part bound to body
+     * Ignoring operation "{0}": more than one part bound to body
      *
      */
     public static String WSDLMODELER_WARNING_OPERATION_MORE_THAN_ONE_PART_IN_MESSAGE(Object arg0) {
@@ -580,18 +591,6 @@ public final class ModelerMessages {
         return localizer.localize(localizableWSDLMODELER_RPCLIT_UNKOWNSCHEMATYPE(arg0, arg1, arg2));
     }
 
-    public static Localizable localizableWSDLMODELER_HEADERFAULT_PART_NOT_FOUND(Object arg0, Object arg1, Object arg2) {
-        return messageFactory.getMessage("wsdlmodeler.headerfault.part.notFound", arg0, arg1, arg2);
-    }
-
-    /**
-     * part "{1}" not found for the header fault "{0}", in binding "{2}"
-     *
-     */
-    public static String WSDLMODELER_HEADERFAULT_PART_NOT_FOUND(Object arg0, Object arg1, Object arg2) {
-        return localizer.localize(localizableWSDLMODELER_HEADERFAULT_PART_NOT_FOUND(arg0, arg1, arg2));
-    }
-
     public static Localizable localizableWSDLMODELER_WARNING_IGNORING_OPERATION_CANNOT_HANDLE_BODY_PARTS_ATTRIBUTE(Object arg0) {
         return messageFactory.getMessage("wsdlmodeler.warning.ignoringOperation.cannotHandleBodyPartsAttribute", arg0);
     }
@@ -609,7 +608,7 @@ public final class ModelerMessages {
     }
 
     /**
-     * Non unique body parts! In a port, as per BP 1.1 R2710 operations must have unique operation signaure on the wire for successful dispatch. In port {0}, Operations "{1}" and "{2}" have the same request body block {3}. Try running wsimport with -extension switch, runtime will try to dispatch using SOAPAction
+     * Non unique body parts! In a port, as per BP 1.1 R2710 operations must have unique operation signature on the wire for successful dispatch. In port {0}, Operations "{1}" and "{2}" have the same request body block {3}. Try running wsimport with -extension switch, runtime will try to dispatch using SOAPAction
      *
      */
     public static String WSDLMODELER_NON_UNIQUE_BODY_ERROR(Object arg0, Object arg1, Object arg2, Object arg3) {
@@ -784,30 +783,6 @@ public final class ModelerMessages {
         return localizer.localize(localizableWSDLMODELER_WARNING_IGNORING_OPERATION_NOT_SUPPORTED_STYLE(arg0));
     }
 
-    public static Localizable localizableWSDLMODELER_INVALID_MESSAGE_PART_MUST_HAVE_TYPE_DESCRIPTOR(Object arg0, Object arg1) {
-        return messageFactory.getMessage("wsdlmodeler.invalid.message.partMustHaveTypeDescriptor", arg0, arg1);
-    }
-
-    /**
-     * in message "{0}", part "{1}" must specify a "type" attribute
-     *
-     */
-    public static String WSDLMODELER_INVALID_MESSAGE_PART_MUST_HAVE_TYPE_DESCRIPTOR(Object arg0, Object arg1) {
-        return localizer.localize(localizableWSDLMODELER_INVALID_MESSAGE_PART_MUST_HAVE_TYPE_DESCRIPTOR(arg0, arg1));
-    }
-
-    public static Localizable localizableWSDLMODELER_MULTIPLE_OUTPUT_PARAMETERS(Object arg0) {
-        return messageFactory.getMessage("wsdlmodeler.multipleOutputParameters", arg0);
-    }
-
-    /**
-     * multiple "out" parameters in operation: {0}
-     *
-     */
-    public static String WSDLMODELER_MULTIPLE_OUTPUT_PARAMETERS(Object arg0) {
-        return localizer.localize(localizableWSDLMODELER_MULTIPLE_OUTPUT_PARAMETERS(arg0));
-    }
-
     public static Localizable localizableWSDLMODELER_INVALID_BINDING_OPERATION_MULTIPLE_PART_BINDING(Object arg0, Object arg1) {
         return messageFactory.getMessage("wsdlmodeler.invalid.bindingOperation.multiplePartBinding", arg0, arg1);
     }
@@ -818,18 +793,6 @@ public final class ModelerMessages {
      */
     public static String WSDLMODELER_INVALID_BINDING_OPERATION_MULTIPLE_PART_BINDING(Object arg0, Object arg1) {
         return localizer.localize(localizableWSDLMODELER_INVALID_BINDING_OPERATION_MULTIPLE_PART_BINDING(arg0, arg1));
-    }
-
-    public static Localizable localizableWSDLMODELER_INVALID() {
-        return messageFactory.getMessage("wsdlmodeler.invalid");
-    }
-
-    /**
-     * invalid WSDL document
-     *
-     */
-    public static String WSDLMODELER_INVALID() {
-        return localizer.localize(localizableWSDLMODELER_INVALID());
     }
 
     public static Localizable localizableWSDLMODELER_INVALID_BINDING_OPERATION_MULTIPLE_MATCHING_OPERATIONS(Object arg0, Object arg1) {
@@ -1036,12 +999,24 @@ public final class ModelerMessages {
         return localizer.localize(localizableWSDLMODELER_WARNING_R_2716_R_2726(arg0, arg1));
     }
 
+    public static Localizable localizableWSDLMODELER_INVALID_IGNORING_MEMBER_SUBMISSION_ADDRESSING(Object arg0, Object arg1) {
+        return messageFactory.getMessage("wsdlmodeler.invalid.ignoringMemberSubmissionAddressing", arg0, arg1);
+    }
+
+    /**
+     * ignoring wsa:Action attribute since obsolete addressing version 08-2004:"{0}" used; expecting addressing version "{1}". To use version 08-2004 anyway run wsimport with -extension switch.
+     *
+     */
+    public static String WSDLMODELER_INVALID_IGNORING_MEMBER_SUBMISSION_ADDRESSING(Object arg0, Object arg1) {
+        return localizer.localize(localizableWSDLMODELER_INVALID_IGNORING_MEMBER_SUBMISSION_ADDRESSING(arg0, arg1));
+    }
+
     public static Localizable localizableWSDLMODELER_WARNING_NO_SOAP_ADDRESS(Object arg0) {
         return messageFactory.getMessage("wsdlmodeler.warning.noSOAPAddress", arg0);
     }
 
     /**
-     * port "{0}" is not a SOAP port, it has no soap:address
+     * Port "{0}" is not a SOAP port, it has no soap:address
      *
      */
     public static String WSDLMODELER_WARNING_NO_SOAP_ADDRESS(Object arg0) {
@@ -1257,7 +1232,7 @@ public final class ModelerMessages {
     }
 
     /**
-     * Non unique body parts! In a port, as per BP 1.1 R2710 operations must have unique operation signaure on the wire for successful dispatch. In port {0}, Operations "{1}" and "{2}" have the same request body block {3}. Method dispatching may fail, runtime will try to dispatch using SOAPAction
+     * Non unique body parts! In a port, as per BP 1.1 R2710 operations must have unique operation signature on the wire for successful dispatch. In port {0}, Operations "{1}" and "{2}" have the same request body block {3}. Method dispatching may fail, runtime will try to dispatch using SOAPAction
      *
      */
     public static String WSDLMODELER_NON_UNIQUE_BODY_WARNING(Object arg0, Object arg1, Object arg2, Object arg3) {
@@ -1449,7 +1424,7 @@ public final class ModelerMessages {
     }
 
     /**
-     * port "{0}": not a standard SOAP port. The generated artifacts may not work with JAXWS runtime.
+     * port "{0}": not a standard SOAP port. The generated artifacts may not work with JAX-WS runtime.
      *
      */
     public static String WSDLMODELER_WARNING_NON_SOAP_PORT(Object arg0) {
@@ -1461,7 +1436,7 @@ public final class ModelerMessages {
     }
 
     /**
-     * Invalid headerfault "{0}" for header {1} in operation {2}: part must specify a "element" attribute
+     * Invalid headerfault "{0}" for header {1} in operation {2}: part must specify an "element" attribute
      *
      */
     public static String WSDLMODELER_INVALID_HEADERFAULT_MESSAGE_PART_MUST_HAVE_ELEMENT_DESCRIPTOR(Object arg0, Object arg1, Object arg2) {
@@ -1570,7 +1545,7 @@ public final class ModelerMessages {
     }
 
     /**
-     * ignoring header fault part="{0}" message="{1}" of operation {2}, use attribute MUST be "literal"
+     * ignoring header fault part="{0}" message="{1}" of operation {2}, use attribute must be "literal"
      *
      */
     public static String WSDLMODELER_WARNING_IGNORING_HEADER_FAULT_NOT_LITERAL(Object arg0, Object arg1, Object arg2) {

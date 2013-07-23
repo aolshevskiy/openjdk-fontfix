@@ -26,11 +26,11 @@ package sun.jvm.hotspot.debugger.linux;
 
 import sun.jvm.hotspot.debugger.*;
 
-class LinuxAddress implements Address {
+public class LinuxAddress implements Address {
     protected LinuxDebugger debugger;
     protected long addr;
 
-    LinuxAddress(LinuxDebugger debugger, long addr) {
+    public LinuxAddress(LinuxDebugger debugger, long addr) {
         this.debugger = debugger;
         this.addr = addr;
     }
@@ -77,6 +77,11 @@ class LinuxAddress implements Address {
     public Address getCompOopAddressAt(long offset)
             throws UnalignedAddressException, UnmappedAddressException {
         return debugger.readCompOopAddress(addr + offset);
+    }
+
+    public Address getCompKlassAddressAt(long offset)
+            throws UnalignedAddressException, UnmappedAddressException {
+        return debugger.readCompKlassAddress(addr + offset);
     }
 
     //

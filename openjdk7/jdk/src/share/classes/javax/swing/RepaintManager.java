@@ -354,7 +354,7 @@ public class RepaintManager
 
         // Queue a Runnable to invoke paintDirtyRegions and
         // validateInvalidComponents.
-        scheduleProcessingRunnable();
+        scheduleProcessingRunnable(SunToolkit.targetToAppContext(invalidComponent));
     }
 
 
@@ -443,7 +443,7 @@ public class RepaintManager
 
         // Queue a Runnable to invoke paintDirtyRegions and
         // validateInvalidComponents.
-        scheduleProcessingRunnable();
+        scheduleProcessingRunnable(SunToolkit.targetToAppContext(c));
     }
 
     /**
@@ -778,7 +778,6 @@ public class RepaintManager
 
         final java.util.List<Component> roots =
             new ArrayList<Component>(tmpDirtyComponents.size());
-
         for (Component dirty : tmpDirtyComponents.keySet()) {
             collectDirtyComponents(tmpDirtyComponents, dirty, roots);
         }
@@ -786,16 +785,20 @@ public class RepaintManager
         final AtomicInteger count = new AtomicInteger(roots.size());
         painting = true;
         try {
-            for(int j = 0; j < count.get(); j++) {
+            for (int j=0 ; j < count.get(); j++) {
                 final int i = j;
                 final Component dirtyComponent = roots.get(j);
-
                 AccessControlContext stack = AccessController.getContext();
                 AccessControlContext acc =
                     AWTAccessor.getComponentAccessor().getAccessControlContext(dirtyComponent);
                 javaSecurityAccess.doIntersectionPrivilege(new PrivilegedAction<Void>() {
                     public Void run() {
                         Rectangle rect = tmpDirtyComponents.get(dirtyComponent);
+                        // Sometimes when RepaintManager is changed during the painting
+                        // we may get null here, see #6995769 for details
+                        if (rect == null) {
+                            return null;
+                        }
 
                         int localBoundsH = dirtyComponent.getHeight();
                         int localBoundsW = dirtyComponent.getWidth();
@@ -1111,9 +1114,9 @@ public class RepaintManager
             }
         }
         // Clear out the VolatileImages
-        Iterator gcs = volatileMap.keySet().iterator();
+        Iterator<GraphicsConfiguration> gcs = volatileMap.keySet().iterator();
         while (gcs.hasNext()) {
-            GraphicsConfiguration gc = (GraphicsConfiguration)gcs.next();
+            GraphicsConfiguration gc = gcs.next();
             VolatileImage image = volatileMap.get(gc);
             if (image.getWidth() > width || image.getHeight() > height) {
                 image.flush();
@@ -1384,10 +1387,6 @@ public class RepaintManager
             setPaintManager(paintManager);
         }
         return paintManager;
-    }
-
-    private void scheduleProcessingRunnable() {
-        scheduleProcessingRunnable(AppContext.getAppContext());
     }
 
     private void scheduleProcessingRunnable(AppContext context) {

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1996, 2006, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1996, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,7 @@ FILES_c = \
 	Compiler.c \
 	Console_md.c \
 	Double.c \
-	FileSystem_md.c \
+	Executable.c \
 	FileDescriptor_md.c \
 	FileInputStream.c \
 	FileInputStream_md.c \
@@ -48,7 +48,6 @@ FILES_c = \
 	Proxy.c \
 	RandomAccessFile.c \
 	RandomAccessFile_md.c \
-	ResourceBundle.c \
 	Runtime.c \
 	SecurityManager.c \
 	Shutdown.c \
@@ -69,7 +68,6 @@ FILES_c = \
 	jdk_util_md.c \
 	check_version.c \
 	java_props_md.c \
-	DriverManager.c \
 	ConstantPool.c \
 	MessageUtils.c \
 	GC.c \
@@ -79,4 +77,5 @@ FILES_c = \
 	AtomicLong.c \
 	Version.c \
 	VM.c \
-	VMSupport.c 
+	VMSupport.c \
+	HostLocaleProviderAdapter_md.c

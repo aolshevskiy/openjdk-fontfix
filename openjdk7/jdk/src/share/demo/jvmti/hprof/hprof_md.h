@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,7 +69,7 @@ unsigned md_htonl(unsigned l);
 unsigned md_ntohs(unsigned short s);
 unsigned md_ntohl(unsigned l);
 
-void   md_build_library_name(char *holder, int holderlen, char *pname, char *fname);
+void   md_build_library_name(char *holder, int holderlen, const char *pname, const char *fname);
 void * md_load_library(const char *name, char *err_buf, int err_buflen);
 void   md_unload_library(void *handle);
 void * md_find_library_entry(void *handle, const char *name);

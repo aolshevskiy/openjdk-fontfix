@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,7 @@ package com.sun.xml.internal.ws.client.sei;
 
 import com.sun.xml.internal.ws.api.model.Parameter;
 import com.sun.xml.internal.ws.model.ParameterImpl;
-import com.sun.xml.internal.bind.api.RawAccessor;
+import com.sun.xml.internal.ws.spi.db.PropertyAccessor;
 
 import javax.xml.ws.Holder;
 import javax.xml.ws.WebServiceException;
@@ -48,7 +48,7 @@ import javax.xml.bind.JAXBException;
  *
  * @author Kohsuke Kawaguchi
  */
-abstract class ValueSetter {
+public abstract class ValueSetter {
     private ValueSetter() {}
 
     /**
@@ -154,12 +154,12 @@ abstract class ValueSetter {
      */
     static final class AsyncBeanValueSetter extends ValueSetter {
 
-        private final RawAccessor accessor;
+        private final PropertyAccessor accessor;
 
         AsyncBeanValueSetter(ParameterImpl p, Class wrapper) {
             QName name = p.getName();
             try {
-                accessor = p.getOwner().getJAXBContext().getElementPropertyAccessor(
+                accessor = p.getOwner().getBindingContext().getElementPropertyAccessor(
                             wrapper, name.getNamespaceURI(), name.getLocalPart() );
             } catch (JAXBException e) {
                     throw new WebServiceException(  // TODO: i18n

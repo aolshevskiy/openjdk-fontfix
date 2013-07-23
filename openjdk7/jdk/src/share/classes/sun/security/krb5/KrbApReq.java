@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,11 +33,14 @@ package sun.security.krb5;
 
 import sun.security.krb5.internal.*;
 import sun.security.krb5.internal.crypto.*;
-import sun.security.krb5.internal.rcache.*;
+import sun.security.jgss.krb5.Krb5AcceptCredential;
 import java.net.InetAddress;
 import sun.security.util.*;
 import java.io.IOException;
 import java.util.Arrays;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import sun.security.krb5.internal.rcache.AuthTimeWithHash;
 
 /**
  * This class encapsulates a KRB-AP-REQ that a client sends to a
@@ -52,11 +55,23 @@ public class KrbApReq {
     private Credentials creds;
     private APReq apReqMessg;
 
-    private static CacheTable table = new CacheTable();
+    // Used by acceptor side
+    private static ReplayCache rcache = ReplayCache.getInstance();
     private static boolean DEBUG = Krb5.DEBUG;
+    private static final char[] hexConst = "0123456789ABCDEF".toCharArray();
+
+    private static final MessageDigest md;
+
+    static {
+        try {
+            md = MessageDigest.getInstance("MD5");
+        } catch (NoSuchAlgorithmException ex) {
+            throw new RuntimeException("Impossible");
+        }
+    }
 
     /**
-     * Contructs a AP-REQ message to send to the peer.
+     * Constructs an AP-REQ message to send to the peer.
      * @param tgsCred the <code>Credentials</code> to be used to construct the
      *          AP Request  protocol message.
      * @param mutualRequired Whether mutual authentication is required
@@ -80,7 +95,7 @@ public class KrbApReq {
 */
 
     /**
-     * Contructs a AP-REQ message to send to the peer.
+     * Constructs an AP-REQ message to send to the peer.
      * @param tgsCred the <code>Credentials</code> to be used to construct the
      *          AP Request  protocol message.
      * @param mutualRequired Whether mutual authentication is required
@@ -124,7 +139,7 @@ public class KrbApReq {
     }
 
     /**
-     * Contructs a AP-REQ message from the bytes received from the
+     * Constructs an AP-REQ message from the bytes received from the
      * peer.
      * @param message The message received from the peer
      * @param keys <code>EncrtyptionKey</code>s to decrypt the message;
@@ -135,17 +150,17 @@ public class KrbApReq {
      */
      // Used in InitSecContextToken (for AP_REQ and not TGS REQ)
     public KrbApReq(byte[] message,
-                    EncryptionKey[] keys,
+                    Krb5AcceptCredential cred,
                     InetAddress initiator)
         throws KrbException, IOException {
         obuf = message;
         if (apReqMessg == null)
             decode();
-        authenticate(keys, initiator);
+        authenticate(cred, initiator);
     }
 
     /**
-     * Contructs a AP-REQ message from the bytes received from the
+     * Constructs an AP-REQ message from the bytes received from the
      * peer.
      * @param value The <code>DerValue</code> that contains the
      *              DER enoded AP-REQ protocol message
@@ -179,7 +194,6 @@ public class KrbApReq {
     KrbApReq(APOptions apOptions,
              Ticket ticket,
              EncryptionKey key,
-             Realm crealm,
              PrincipalName cname,
              Checksum cksum,
              KerberosTime ctime,
@@ -189,7 +203,7 @@ public class KrbApReq {
         throws Asn1Exception, IOException,
                KdcErrException, KrbCryptoException {
 
-        init(apOptions, ticket, key, crealm, cname,
+        init(apOptions, ticket, key, cname,
              cksum, ctime, subKey, seqNumber, authorizationData,
             KeyUsage.KU_PA_TGS_REQ_AUTHENTICATOR);
 
@@ -204,11 +218,10 @@ public class KrbApReq {
         int usage)
         throws KrbException, IOException {
 
-        ctime = new KerberosTime(KerberosTime.NOW);
+        ctime = KerberosTime.now();
         init(options,
              tgs_creds.ticket,
              tgs_creds.key,
-             tgs_creds.client.getRealm(),
              tgs_creds.client,
              cksum,
              ctime,
@@ -221,7 +234,6 @@ public class KrbApReq {
     private void init(APOptions apOptions,
                       Ticket ticket,
                       EncryptionKey key,
-                      Realm crealm,
                       PrincipalName cname,
                       Checksum cksum,
                       KerberosTime ctime,
@@ -232,7 +244,7 @@ public class KrbApReq {
         throws Asn1Exception, IOException,
                KdcErrException, KrbCryptoException {
 
-        createMessage(apOptions, ticket, key, crealm, cname,
+        createMessage(apOptions, ticket, key, cname,
                       cksum, ctime, subKey, seqNumber, authorizationData,
             usage);
         obuf = apReqMessg.asn1Encode();
@@ -263,10 +275,11 @@ public class KrbApReq {
         }
     }
 
-    private void authenticate(EncryptionKey[] keys, InetAddress initiator)
+    private void authenticate(Krb5AcceptCredential cred, InetAddress initiator)
         throws KrbException, IOException {
         int encPartKeyType = apReqMessg.ticket.encPart.getEType();
         Integer kvno = apReqMessg.ticket.encPart.getKeyVersionNumber();
+        EncryptionKey[] keys = cred.getKrb5EncryptionKeys(apReqMessg.ticket.sname);
         EncryptionKey dkey = EncryptionKey.findKey(encPartKeyType, kvno, keys);
 
         if (dkey == null) {
@@ -288,27 +301,29 @@ public class KrbApReq {
         authenticator = new Authenticator(temp2);
         ctime = authenticator.ctime;
         cusec = authenticator.cusec;
-        authenticator.ctime.setMicroSeconds(authenticator.cusec);
-        authenticator.cname.setRealm(authenticator.crealm);
-        apReqMessg.ticket.sname.setRealm(apReqMessg.ticket.realm);
-        enc_ticketPart.cname.setRealm(enc_ticketPart.crealm);
+        authenticator.ctime =
+                authenticator.ctime.withMicroSeconds(authenticator.cusec);
 
-        if (!authenticator.cname.equals(enc_ticketPart.cname))
+        if (!authenticator.cname.equals(enc_ticketPart.cname)) {
             throw new KrbApErrException(Krb5.KRB_AP_ERR_BADMATCH);
+        }
 
-        KerberosTime currTime = new KerberosTime(KerberosTime.NOW);
-        if (!authenticator.ctime.inClockSkew(currTime))
+        if (!authenticator.ctime.inClockSkew())
             throw new KrbApErrException(Krb5.KRB_AP_ERR_SKEW);
 
-        // start to check if it is a replay attack.
-        AuthTime time =
-            new AuthTime(authenticator.ctime.getTime(), authenticator.cusec);
-        String client = authenticator.cname.toString();
-        if (table.get(time, authenticator.cname.toString()) != null) {
-            throw new KrbApErrException(Krb5.KRB_AP_ERR_REPEAT);
-        } else {
-            table.put(client, time, currTime.getTime());
+        byte[] hash = md.digest(apReqMessg.authenticator.cipher);
+        char[] h = new char[hash.length * 2];
+        for (int i=0; i<hash.length; i++) {
+            h[2*i] = hexConst[(hash[i]&0xff)>>4];
+            h[2*i+1] = hexConst[hash[i]&0xf];
         }
+        AuthTimeWithHash time = new AuthTimeWithHash(
+                authenticator.cname.toString(),
+                apReqMessg.ticket.sname.toString(),
+                authenticator.ctime.getSeconds(),
+                authenticator.cusec,
+                new String(h));
+        rcache.checkAndStore(KerberosTime.now(), time);
 
         if (initiator != null) {
             // sender host address
@@ -332,7 +347,7 @@ public class KrbApReq {
         // else
         //    save authenticator to check for later
 
-        KerberosTime now = new KerberosTime(KerberosTime.NOW);
+        KerberosTime now = KerberosTime.now();
 
         if ((enc_ticketPart.starttime != null &&
              enc_ticketPart.starttime.greaterThanWRTClockSkew(now)) ||
@@ -457,7 +472,6 @@ public class KrbApReq {
     private void createMessage(APOptions apOptions,
                                Ticket ticket,
                                EncryptionKey key,
-                               Realm crealm,
                                PrincipalName cname,
                                Checksum cksum,
                                KerberosTime ctime,
@@ -474,8 +488,7 @@ public class KrbApReq {
             seqno = new Integer(seqNumber.current());
 
         authenticator =
-            new Authenticator(crealm,
-                              cname,
+            new Authenticator(cname,
                               cksum,
                               ctime.getMicroSeconds(),
                               ctime,
@@ -495,10 +508,6 @@ public class KrbApReq {
      // Check that key is one of the permitted types
      private static void checkPermittedEType(int target) throws KrbException {
         int[] etypes = EType.getDefaults("permitted_enctypes");
-        if (etypes == null) {
-            throw new KrbException(
-                "No supported encryption types listed in permitted_enctypes");
-        }
         if (!EType.isSupported(target, etypes)) {
             throw new KrbException(EType.toString(target) +
                 " encryption type not in permitted_enctypes list");

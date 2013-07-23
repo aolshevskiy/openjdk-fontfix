@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,7 +34,8 @@ import sun.invoke.empty.Empty;
 import sun.invoke.util.ValueConversions;
 import sun.invoke.util.VerifyType;
 import sun.invoke.util.Wrapper;
-import sun.misc.Unsafe;
+import sun.reflect.CallerSensitive;
+import sun.reflect.Reflection;
 import static java.lang.invoke.LambdaForm.*;
 import static java.lang.invoke.MethodHandleStatics.*;
 import static java.lang.invoke.MethodHandles.Lookup.IMPL_LOOKUP;
@@ -368,16 +369,22 @@ import static java.lang.invoke.MethodHandles.Lookup.IMPL_LOOKUP;
 
         @Override
         MethodHandle viewAsType(MethodType newType) {
-            MethodHandle mh = super.viewAsType(newType);
+            if (newType.lastParameterType() != type().lastParameterType())
+                throw new InternalError();
+            MethodHandle newTarget = asFixedArity().viewAsType(newType);
             // put back the varargs bit:
-            MethodType type = mh.type();
-            int arity = type.parameterCount();
-            return mh.asVarargsCollector(type.parameterType(arity-1));
+            return new AsVarargsCollector(newTarget, newType, arrayType);
         }
 
         @Override
         MemberName internalMemberName() {
             return asFixedArity().internalMemberName();
+        }
+
+        /*non-public*/
+        @Override
+        boolean isInvokeSpecial() {
+            return asFixedArity().isInvokeSpecial();
         }
 
 
@@ -740,7 +747,8 @@ import static java.lang.invoke.MethodHandles.Lookup.IMPL_LOOKUP;
             GuardWithCatch gguard = new GuardWithCatch(gtarget, exType, gcatcher);
             if (gtarget == null || gcatcher == null)  throw new InternalError();
             MethodHandle ginvoker = GuardWithCatch.VARARGS_INVOKE.bindReceiver(gguard);
-            return makeCollectArguments(ginvoker, ValueConversions.varargsArray(nargs), 0, false);
+            MethodHandle gcollect = makeCollectArguments(ginvoker, ValueConversions.varargsArray(nargs), 0, false);
+            return makePairwiseConvert(gcollect, type, 2);
         }
     }
 
@@ -816,8 +824,6 @@ import static java.lang.invoke.MethodHandles.Lookup.IMPL_LOOKUP;
             return restoreToType(bccInvoker.bindTo(vamh), mh.type());
         }
 
-        private static final Unsafe UNSAFE = Unsafe.getUnsafe();
-
         private static MethodHandle makeInjectedInvoker(Class<?> hostClass) {
             Class<?> bcc = UNSAFE.defineAnonymousClass(hostClass, T_BYTES, null);
             if (hostClass.getClassLoader() != bcc.getClassLoader())
@@ -847,7 +853,7 @@ import static java.lang.invoke.MethodHandles.Lookup.IMPL_LOOKUP;
                 MethodHandle vamh = prepareForInvoker(MH_checkCallerClass);
                 Object ok = bccInvoker.invokeExact(vamh, new Object[]{hostClass, bcc});
             } catch (Throwable ex) {
-                throw newInternalError(ex);
+                throw new InternalError(ex);
             }
             return bccInvoker;
         }
@@ -884,13 +890,15 @@ import static java.lang.invoke.MethodHandles.Lookup.IMPL_LOOKUP;
                                 MethodType.methodType(boolean.class, Class.class, Class.class));
                 assert((boolean) MH_checkCallerClass.invokeExact(THIS_CLASS, THIS_CLASS));
             } catch (Throwable ex) {
-                throw newInternalError(ex);
+                throw new InternalError(ex);
             }
         }
 
+        @CallerSensitive
         private static boolean checkCallerClass(Class<?> expected, Class<?> expected2) {
-            final int FRAME_COUNT_ARG = 2;  // [0] Reflection [1] BindCaller [2] Expected
-            Class<?> actual = sun.reflect.Reflection.getCallerClass(FRAME_COUNT_ARG);
+            // This method is called via MH_checkCallerClass and so it's
+            // correct to ask for the immediate caller here.
+            Class<?> actual = Reflection.getCallerClass();
             if (actual != expected && actual != expected2)
                 throw new InternalError("found "+actual.getName()+", expected "+expected.getName()
                                         +(expected == expected2 ? "" : ", or else "+expected2.getName()));
@@ -915,7 +923,7 @@ import static java.lang.invoke.MethodHandles.Lookup.IMPL_LOOKUP;
                             }
                             values[0] = bytes;
                         } catch (java.io.IOException ex) {
-                            throw newInternalError(ex);
+                            throw new InternalError(ex);
                         }
                         return null;
                     }

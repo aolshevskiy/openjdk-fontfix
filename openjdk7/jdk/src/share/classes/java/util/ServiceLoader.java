@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
+import java.security.AccessController;
+import java.security.AccessControlContext;
+import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.Iterator;
@@ -185,10 +188,13 @@ public final class ServiceLoader<S>
     private static final String PREFIX = "META-INF/services/";
 
     // The class or interface representing the service being loaded
-    private Class<S> service;
+    private final Class<S> service;
 
     // The class loader used to locate, load, and instantiate providers
-    private ClassLoader loader;
+    private final ClassLoader loader;
+
+    // The access control context taken when the ServiceLoader is created
+    private final AccessControlContext acc;
 
     // Cached providers, in instantiation order
     private LinkedHashMap<String,S> providers = new LinkedHashMap<>();
@@ -213,25 +219,26 @@ public final class ServiceLoader<S>
     }
 
     private ServiceLoader(Class<S> svc, ClassLoader cl) {
-        service = svc;
-        loader = cl;
+        service = Objects.requireNonNull(svc, "Service interface cannot be null");
+        loader = (cl == null) ? ClassLoader.getSystemClassLoader() : cl;
+        acc = (System.getSecurityManager() != null) ? AccessController.getContext() : null;
         reload();
     }
 
-    private static void fail(Class service, String msg, Throwable cause)
+    private static void fail(Class<?> service, String msg, Throwable cause)
         throws ServiceConfigurationError
     {
         throw new ServiceConfigurationError(service.getName() + ": " + msg,
                                             cause);
     }
 
-    private static void fail(Class service, String msg)
+    private static void fail(Class<?> service, String msg)
         throws ServiceConfigurationError
     {
         throw new ServiceConfigurationError(service.getName() + ": " + msg);
     }
 
-    private static void fail(Class service, URL u, int line, String msg)
+    private static void fail(Class<?> service, URL u, int line, String msg)
         throws ServiceConfigurationError
     {
         fail(service, u + ":" + line + ": " + msg);
@@ -240,7 +247,7 @@ public final class ServiceLoader<S>
     // Parse a single line from the given configuration file, adding the name
     // on the line to the names list.
     //
-    private int parseLine(Class service, URL u, BufferedReader r, int lc,
+    private int parseLine(Class<?> service, URL u, BufferedReader r, int lc,
                           List<String> names)
         throws IOException, ServiceConfigurationError
     {
@@ -286,7 +293,7 @@ public final class ServiceLoader<S>
     //         If an I/O error occurs while reading from the given URL, or
     //         if a configuration-file format error is detected
     //
-    private Iterator<String> parse(Class service, URL u)
+    private Iterator<String> parse(Class<?> service, URL u)
         throws ServiceConfigurationError
     {
         InputStream in = null;
@@ -327,7 +334,7 @@ public final class ServiceLoader<S>
             this.loader = loader;
         }
 
-        public boolean hasNext() {
+        private boolean hasNextService() {
             if (nextName != null) {
                 return true;
             }
@@ -352,10 +359,9 @@ public final class ServiceLoader<S>
             return true;
         }
 
-        public S next() {
-            if (!hasNext()) {
+        private S nextService() {
+            if (!hasNextService())
                 throw new NoSuchElementException();
-            }
             String cn = nextName;
             nextName = null;
             Class<?> c = null;
@@ -379,6 +385,28 @@ public final class ServiceLoader<S>
                      x);
             }
             throw new Error();          // This cannot happen
+        }
+
+        public boolean hasNext() {
+            if (acc == null) {
+                return hasNextService();
+            } else {
+                PrivilegedAction<Boolean> action = new PrivilegedAction<Boolean>() {
+                    public Boolean run() { return hasNextService(); }
+                };
+                return AccessController.doPrivileged(action, acc);
+            }
+        }
+
+        public S next() {
+            if (acc == null) {
+                return nextService();
+            } else {
+                PrivilegedAction<S> action = new PrivilegedAction<S>() {
+                    public S run() { return nextService(); }
+                };
+                return AccessController.doPrivileged(action, acc);
+            }
         }
 
         public void remove() {

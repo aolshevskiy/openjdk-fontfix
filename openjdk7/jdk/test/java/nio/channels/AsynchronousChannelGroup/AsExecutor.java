@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,24 +37,30 @@ public class AsExecutor {
             .withFixedThreadPool(5, factory);
         AsynchronousChannelGroup group2 = AsynchronousChannelGroup
             .withCachedThreadPool(Executors.newCachedThreadPool(factory), 0);
+        AsynchronousChannelGroup group3 = AsynchronousChannelGroup
+            .withThreadPool(Executors.newFixedThreadPool(10, factory));
 
         try {
             // execute simple tasks
             testSimpleTask(group1);
             testSimpleTask(group2);
+            testSimpleTask(group3);
 
             // install security manager and test again
             System.setSecurityManager( new SecurityManager() );
             testSimpleTask(group1);
             testSimpleTask(group2);
+            testSimpleTask(group3);
 
             // attempt to execute tasks that run with only frames from boot
             // class loader on the stack.
             testAttackingTask(group1);
             testAttackingTask(group2);
+            testAttackingTask(group3);
         } finally {
             group1.shutdown();
             group2.shutdown();
+            group3.shutdown();
         }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,15 +42,16 @@ class BCEscapeAnalyzer;
 
 // ciMethod
 //
-// This class represents a methodOop in the HotSpot virtual
+// This class represents a Method* in the HotSpot virtual
 // machine.
-class ciMethod : public ciObject {
+class ciMethod : public ciMetadata {
   friend class CompileBroker;
   CI_PACKAGE_ACCESS
   friend class ciEnv;
   friend class ciExceptionHandlerStream;
   friend class ciBytecodeStream;
   friend class ciMethodHandle;
+  friend class ciReplay;
 
  private:
   // General method information.
@@ -69,6 +70,7 @@ class ciMethod : public ciObject {
   int _handler_count;
   int _interpreter_invocation_count;
   int _interpreter_throwout_count;
+  int _instructions_size;
 
   bool _uses_monitors;
   bool _balanced_monitors;
@@ -90,8 +92,8 @@ class ciMethod : public ciObject {
   ciMethod(methodHandle h_m);
   ciMethod(ciInstanceKlass* holder, ciSymbol* name, ciSymbol* signature, ciInstanceKlass* accessor);
 
-  methodOop get_methodOop() const {
-    methodOop m = (methodOop)get_oop();
+  Method* get_Method() const {
+    Method* m = (Method*)_metadata;
     assert(m != NULL, "illegal use of unloaded method");
     return m;
   }
@@ -164,8 +166,9 @@ class ciMethod : public ciObject {
   // Code size for inlining decisions.
   int code_size_for_inlining();
 
-  bool force_inline() { return get_methodOop()->force_inline(); }
-  bool dont_inline()  { return get_methodOop()->dont_inline();  }
+  bool caller_sensitive() { return get_Method()->caller_sensitive(); }
+  bool force_inline()     { return get_Method()->force_inline();     }
+  bool dont_inline()      { return get_Method()->dont_inline();      }
 
   int comp_level();
   int highest_osr_comp_level();
@@ -193,7 +196,6 @@ class ciMethod : public ciObject {
   // Analysis and profiling.
   //
   // Usage note: liveness_at_bci and init_vars should be wrapped in ResourceMarks.
-  bool          uses_monitors() const            { return _uses_monitors; } // this one should go away, it has a misleading name
   bool          has_monitor_bytecodes() const    { return _uses_monitors; }
   bool          has_balanced_monitors();
 
@@ -252,7 +254,6 @@ class ciMethod : public ciObject {
   bool can_be_osr_compiled(int entry_bci);
   void set_not_compilable(const char* reason = NULL);
   bool has_compiled_code();
-  int  instructions_size(int comp_level = CompLevel_any);
   void log_nmethod_identity(xmlStream* log);
   bool is_not_reached(int bci);
   bool was_executed_more_than(int times);
@@ -260,7 +261,12 @@ class ciMethod : public ciObject {
   bool is_klass_loaded(int refinfo_index, bool must_be_resolved) const;
   bool check_call(int refinfo_index, bool is_static) const;
   bool ensure_method_data();  // make sure it exists in the VM also
+  address ensure_method_counters();
+  int instructions_size();
   int scale_count(int count, float prof_factor = 1.);  // make MDO count commensurate with IIC
+
+  // Stack walking support
+  bool is_ignored_by_security_stack_walk() const;
 
   // JSR 292 support
   bool is_method_handle_intrinsic()  const;
@@ -268,7 +274,7 @@ class ciMethod : public ciObject {
   bool has_member_arg() const;
 
   // What kind of ciObject is this?
-  bool is_method()                               { return true; }
+  bool is_method() const                         { return true; }
 
   // Java access flags
   bool is_public      () const                   { return flags().is_public(); }
@@ -291,6 +297,9 @@ class ciMethod : public ciObject {
   bool is_accessor    () const;
   bool is_initializer () const;
   bool can_be_statically_bound() const           { return _can_be_statically_bound; }
+  void dump_replay_data(outputStream* st);
+  bool is_boxing_method() const;
+  bool is_unboxing_method() const;
 
   // Print the bytecodes of this method.
   void print_codes_on(outputStream* st);

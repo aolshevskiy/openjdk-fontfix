@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,7 @@
 
 #include "c1/c1_CodeStubs.hpp"
 #include "ci/ciMethodData.hpp"
-#include "oops/methodDataOop.hpp"
+#include "oops/methodData.hpp"
 #include "utilities/top.hpp"
 
 class Compilation;
@@ -83,6 +83,9 @@ class LIR_Assembler: public CompilationResourceObj {
 
   void jobject2reg(jobject o, Register reg);
   void jobject2reg_with_patching(Register reg, CodeEmitInfo* info);
+
+  void metadata2reg(Metadata* o, Register reg);
+  void klass2reg_with_patching(Register reg, CodeEmitInfo* info);
 
   void emit_stubs(CodeStubList* stub_list);
 
@@ -192,6 +195,7 @@ class LIR_Assembler: public CompilationResourceObj {
   void emit_opBranch(LIR_OpBranch* op);
   void emit_opLabel(LIR_OpLabel* op);
   void emit_arraycopy(LIR_OpArrayCopy* op);
+  void emit_updatecrc32(LIR_OpUpdateCRC32* op);
   void emit_opConvert(LIR_OpConvert* op);
   void emit_alloc_obj(LIR_OpAllocObj* op);
   void emit_alloc_array(LIR_OpAllocArray* op);
@@ -207,6 +211,9 @@ class LIR_Assembler: public CompilationResourceObj {
   void arith_op(LIR_Code code, LIR_Opr left, LIR_Opr right, LIR_Opr dest, CodeEmitInfo* info, bool pop_fpu_stack);
   void arithmetic_idiv(LIR_Code code, LIR_Opr left, LIR_Opr right, LIR_Opr temp, LIR_Opr result, CodeEmitInfo* info);
   void intrinsic_op(LIR_Code code, LIR_Opr value, LIR_Opr unused, LIR_Opr dest, LIR_Op* op);
+#ifdef ASSERT
+  void emit_assert(LIR_OpAssert* op);
+#endif
 
   void logic_op(LIR_Code code, LIR_Opr left, LIR_Opr right, LIR_Opr dest);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,19 +43,18 @@ import javax.xml.ws.WebServiceException;
 import javax.xml.ws.handler.MessageContext;
 import javax.xml.ws.handler.Handler;
 import java.util.*;
+import java.util.Map.Entry;
 
 /**
  * @author Rama Pulavarthi
  */
 public class ServerMessageHandlerTube extends HandlerTube{
     private SEIModel seiModel;
-    private WSBinding binding;
     private Set<String> roles;
 
     public ServerMessageHandlerTube(SEIModel seiModel, WSBinding binding, Tube next, HandlerTube cousinTube) {
-        super(next, cousinTube);
+        super(next, cousinTube, binding);
         this.seiModel = seiModel;
-        this.binding = binding;
         setUpHandlersOnce();
     }
 
@@ -65,14 +64,13 @@ public class ServerMessageHandlerTube extends HandlerTube{
     private ServerMessageHandlerTube(ServerMessageHandlerTube that, TubeCloner cloner) {
         super(that, cloner);
         this.seiModel = that.seiModel;
-        this.binding = that.binding;
         this.handlers = that.handlers;
         this.roles = that.roles;
     }
 
     private void setUpHandlersOnce() {
         handlers = new ArrayList<Handler>();
-        HandlerConfiguration handlerConfig = ((BindingImpl) binding).getHandlerConfig();
+        HandlerConfiguration handlerConfig = ((BindingImpl) getBinding()).getHandlerConfig();
         List<MessageHandler> msgHandlersSnapShot= handlerConfig.getMessageHandlers();
         if (!msgHandlersSnapShot.isEmpty()) {
             handlers.addAll(msgHandlersSnapShot);
@@ -84,8 +82,9 @@ public class ServerMessageHandlerTube extends HandlerTube{
     void callHandlersOnResponse(MessageUpdatableContext context, boolean handleFault) {
         //Lets copy all the MessageContext.OUTBOUND_ATTACHMENT_PROPERTY to the message
         Map<String, DataHandler> atts = (Map<String, DataHandler>) context.get(MessageContext.OUTBOUND_MESSAGE_ATTACHMENTS);
-        AttachmentSet attSet = packet.getMessage().getAttachments();
-        for(String cid : atts.keySet()){
+        AttachmentSet attSet = context.packet.getMessage().getAttachments();
+        for (Entry<String, DataHandler> entry : atts.entrySet()) {
+            String cid = entry.getKey();
             if (attSet.get(cid) == null) { // Otherwise we would be adding attachments twice
                 Attachment att = new DataHandlerAttachment(cid, atts.get(cid));
                 attSet.add(att);
@@ -122,9 +121,13 @@ public class ServerMessageHandlerTube extends HandlerTube{
         return handlerResult;
     }
 
+    protected void resetProcessor() {
+        processor = null;
+    }
+
     void setUpProcessor() {
-        if(!handlers.isEmpty()) {
-            processor = new SOAPHandlerProcessor(false, this, binding, handlers);
+        if(!handlers.isEmpty() && processor == null) {
+            processor = new SOAPHandlerProcessor(false, this, getBinding(), handlers);
         }
     }
 
@@ -133,7 +136,7 @@ public class ServerMessageHandlerTube extends HandlerTube{
 
     }
     MessageUpdatableContext getContext(Packet packet) {
-       MessageHandlerContextImpl context = new MessageHandlerContextImpl(seiModel, binding, port, packet, roles);
+       MessageHandlerContextImpl context = new MessageHandlerContextImpl(seiModel, getBinding(), port, packet, roles);
        return context;
     }
 

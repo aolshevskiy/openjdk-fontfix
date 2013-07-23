@@ -27,9 +27,7 @@ package sun.java2d.pipe;
 
 import java.awt.AlphaComposite;
 import java.awt.Color;
-import java.awt.Graphics2D;
 import java.awt.Image;
-import java.awt.Rectangle;
 import java.awt.Transparency;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.NoninvertibleTransformException;
@@ -38,15 +36,13 @@ import java.awt.image.BufferedImage;
 import java.awt.image.BufferedImageOp;
 import java.awt.image.ColorModel;
 import java.awt.image.DataBuffer;
-import java.awt.image.DirectColorModel;
 import java.awt.image.ImageObserver;
 import java.awt.image.IndexColorModel;
 import java.awt.image.Raster;
 import java.awt.image.VolatileImage;
-import java.awt.image.WritableRaster;
-import java.awt.image.ImagingOpException;
 import sun.awt.SunHints;
 import sun.awt.image.ImageRepresentation;
+import sun.awt.image.SurfaceManager;
 import sun.awt.image.ToolkitImage;
 import sun.java2d.InvalidPipeException;
 import sun.java2d.SunGraphics2D;
@@ -146,7 +142,7 @@ public class DrawImage implements DrawImagePipe
         int imgh = img.getHeight(null);
         boolean checkfinalxform;
 
-        if (sg.transformState <= sg.TRANSFORM_ANY_TRANSLATE &&
+        if (sg.transformState <= SunGraphics2D.TRANSFORM_ANY_TRANSLATE &&
             (txtype == AffineTransform.TYPE_IDENTITY ||
              txtype == AffineTransform.TYPE_TRANSLATION))
         {
@@ -166,7 +162,7 @@ public class DrawImage implements DrawImagePipe
                 return;
             }
             checkfinalxform = false;
-        } else if (sg.transformState <= sg.TRANSFORM_TRANSLATESCALE &&
+        } else if (sg.transformState <= SunGraphics2D.TRANSFORM_TRANSLATESCALE &&
                    ((txtype & (AffineTransform.TYPE_FLIP |
                                AffineTransform.TYPE_MASK_ROTATION |
                                AffineTransform.TYPE_GENERAL_TRANSFORM)) == 0))
@@ -323,15 +319,17 @@ public class DrawImage implements DrawImagePipe
     BufferedImage makeBufferedImage(Image img, Color bgColor, int type,
                                     int sx1, int sy1, int sx2, int sy2)
     {
-        BufferedImage bimg = new BufferedImage(sx2-sx1, sy2-sy1, type);
-        Graphics2D g2d = bimg.createGraphics();
+        final int width = sx2 - sx1;
+        final int height = sy2 - sy1;
+        final BufferedImage bimg = new BufferedImage(width, height, type);
+        final SunGraphics2D g2d = (SunGraphics2D) bimg.createGraphics();
         g2d.setComposite(AlphaComposite.Src);
         if (bgColor != null) {
             g2d.setColor(bgColor);
-            g2d.fillRect(0, 0, sx2-sx1, sy2-sy1);
+            g2d.fillRect(0, 0, width, height);
             g2d.setComposite(AlphaComposite.SrcOver);
         }
-        g2d.drawImage(img, -sx1, -sy1, null);
+        g2d.copyImage(img, 0, 0, sx1, sy1, width, height, null, null);
         g2d.dispose();
         return bimg;
     }
@@ -344,14 +342,14 @@ public class DrawImage implements DrawImagePipe
         Region clip = sg.getCompClip();
         SurfaceData dstData = sg.surfaceData;
         SurfaceData srcData = dstData.getSourceSurfaceData(img,
-                                                           sg.TRANSFORM_GENERIC,
+                                                           SunGraphics2D.TRANSFORM_GENERIC,
                                                            sg.imageComp,
                                                            bgColor);
 
         if (srcData == null) {
             img = getBufferedImage(img);
             srcData = dstData.getSourceSurfaceData(img,
-                                                   sg.TRANSFORM_GENERIC,
+                                                   SunGraphics2D.TRANSFORM_GENERIC,
                                                    sg.imageComp,
                                                    bgColor);
             if (srcData == null) {
@@ -372,7 +370,7 @@ public class DrawImage implements DrawImagePipe
             sx1 = sy1 = 0;
 
             srcData = dstData.getSourceSurfaceData(img,
-                                                   sg.TRANSFORM_GENERIC,
+                                                   SunGraphics2D.TRANSFORM_GENERIC,
                                                    sg.imageComp,
                                                    bgColor);
         }
@@ -398,7 +396,7 @@ public class DrawImage implements DrawImagePipe
             sx1 = sy1 = 0;
 
             srcData = dstData.getSourceSurfaceData(img,
-                                                   sg.TRANSFORM_GENERIC,
+                                                   SunGraphics2D.TRANSFORM_GENERIC,
                                                    sg.imageComp,
                                                    null);
             srcType = srcData.getSurfaceType();
@@ -449,7 +447,7 @@ public class DrawImage implements DrawImagePipe
         SurfaceType dstType = dstData.getSurfaceType();
         MaskBlit maskblit;
         Blit blit;
-        if (sg.compositeState <= sg.COMP_ALPHA) {
+        if (sg.compositeState <= SunGraphics2D.COMP_ALPHA) {
             /* NOTE: We either have, or we can make,
              * a MaskBlit for any alpha composite type
              */
@@ -565,7 +563,7 @@ public class DrawImage implements DrawImagePipe
         while (true) {
             SurfaceData srcData =
                 dstData.getSourceSurfaceData(img,
-                                             sg.TRANSFORM_ISIDENT,
+                                             SunGraphics2D.TRANSFORM_ISIDENT,
                                              sg.imageComp,
                                              bgColor);
             if (srcData == null) {
@@ -628,7 +626,7 @@ public class DrawImage implements DrawImagePipe
         while (true) {
             SurfaceData srcData =
                 dstData.getSourceSurfaceData(img,
-                                             sg.TRANSFORM_TRANSLATESCALE,
+                                             SunGraphics2D.TRANSFORM_TRANSLATESCALE,
                                              sg.imageComp,
                                              bgColor);
 
@@ -737,8 +735,9 @@ public class DrawImage implements DrawImagePipe
         atfm.scale(m00, m11);
         atfm.translate(srcX-sx1, srcY-sy1);
 
-        int imgW = img.getWidth(null);
-        int imgH = img.getHeight(null);
+        final int scale = SurfaceManager.getImageScale(img);
+        final int imgW = img.getWidth(null) * scale;
+        final int imgH = img.getHeight(null) * scale;
         srcW += srcX;
         srcH += srcY;
         // Make sure we are not out of bounds
@@ -800,11 +799,11 @@ public class DrawImage implements DrawImagePipe
 
     public static boolean isSimpleTranslate(SunGraphics2D sg) {
         int ts = sg.transformState;
-        if (ts <= sg.TRANSFORM_INT_TRANSLATE) {
+        if (ts <= SunGraphics2D.TRANSFORM_INT_TRANSLATE) {
             // Integer translates are always "simple"
             return true;
         }
-        if (ts >= sg.TRANSFORM_TRANSLATESCALE) {
+        if (ts >= SunGraphics2D.TRANSFORM_TRANSLATESCALE) {
             // Scales and beyond are always "not simple"
             return false;
         }
@@ -846,8 +845,11 @@ public class DrawImage implements DrawImagePipe
         }
         int type = tx.getType();
         boolean needTrans =
-            ((type&(tx.TYPE_MASK_ROTATION|tx.TYPE_GENERAL_TRANSFORM)) != 0);
-        if (! needTrans && type != tx.TYPE_TRANSLATION && type != tx.TYPE_IDENTITY)
+                ((type & (AffineTransform.TYPE_MASK_ROTATION |
+                          AffineTransform.TYPE_GENERAL_TRANSFORM)) != 0);
+        if (! needTrans &&
+              type != AffineTransform.TYPE_TRANSLATION &&
+              type != AffineTransform.TYPE_IDENTITY)
         {
             double[] mtx = new double[4];
             tx.getMatrix(mtx);
@@ -861,7 +863,7 @@ public class DrawImage implements DrawImagePipe
                 Raster raster = bImg.getRaster();
                 IndexColorModel icm = (IndexColorModel) cm;
                 // Just need to make sure that we have a transparent pixel
-                if (needTrans && cm.getTransparency() == cm.OPAQUE) {
+                if (needTrans && cm.getTransparency() == Transparency.OPAQUE) {
                     // Fix 4221407
                     if (raster instanceof sun.awt.image.BytePackedRaster) {
                         dstCM = ColorModel.getRGBdefault();
@@ -892,7 +894,7 @@ public class DrawImage implements DrawImagePipe
                     }   /* raster instanceof sun.awt.image.BytePackedRaster */
                 } /* if (cm.getTransparency() == cm.OPAQUE) */
             } /* if (cm instanceof IndexColorModel) */
-            else if (needTrans && cm.getTransparency() == cm.OPAQUE) {
+            else if (needTrans && cm.getTransparency() == Transparency.OPAQUE) {
                 // Need a bitmask transparency
                 // REMIND: for now, use full transparency since no loops
                 // for bitmask
@@ -902,7 +904,7 @@ public class DrawImage implements DrawImagePipe
         else {
 
             if (cm instanceof IndexColorModel ||
-                (needTrans && cm.getTransparency() == cm.OPAQUE))
+                (needTrans && cm.getTransparency() == Transparency.OPAQUE))
             {
                 // Need a bitmask transparency
                 // REMIND: for now, use full transparency since no loops

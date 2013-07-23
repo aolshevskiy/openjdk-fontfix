@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  */
 
 /* Copyright  (c) 2002 Graz University of Technology. All rights reserved.
@@ -165,7 +165,7 @@ JNIEXPORT jlongArray JNICALL Java_sun_security_pkcs11_wrapper_PKCS11_C_1Generate
         if (ckMechanism.pParameter != NULL_PTR) {
             free(ckMechanism.pParameter);
         }
-        JNU_ThrowOutOfMemoryError(env, 0);
+        throwOutOfMemoryError(env, 0);
         return NULL;
     }
     ckpPublicKeyHandle = ckpKeyHandles;   /* first element of array is Public Key */
@@ -253,7 +253,7 @@ JNIEXPORT jbyteArray JNICALL Java_sun_security_pkcs11_wrapper_PKCS11_C_1WrapKey
             if (ckMechanism.pParameter != NULL_PTR) {
                 free(ckMechanism.pParameter);
             }
-            JNU_ThrowOutOfMemoryError(env, 0);
+            throwOutOfMemoryError(env, 0);
             return NULL;
         }
 

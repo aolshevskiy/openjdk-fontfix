@@ -44,7 +44,7 @@
 //    [pointer to locals     ]                   = locals()             locals_offset
 //    [constant pool cache   ]                   = cache()              cache_offset
 //    [methodData            ]                   = mdp()                mdx_offset
-//    [methodOop             ]                   = method()             method_offset
+//    [Method*               ]                   = method()             method_offset
 //    [last sp               ]                   = last_sp()            last_sp_offset
 //    [old stack pointer     ]                     (sender_sp)          sender_sp_offset
 //    [old frame pointer     ]   <- fp           = link()
@@ -170,7 +170,7 @@
     return (intptr_t*) addr_at(offset);
   }
 
-#if ASSERT
+#ifdef ASSERT
   // Used in frame::sender_for_{interpreter,compiled}_frame
   static void verify_deopt_original_pc(   nmethod* nm, intptr_t* unextended_sp, bool is_method_handle_return = false);
   static void verify_deopt_mh_original_pc(nmethod* nm, intptr_t* unextended_sp) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,9 @@
  */
 
 package java.sql;
+
+import java.time.Instant;
+import java.time.LocalTime;
 
 /**
  * <P>A thin wrapper around the <code>java.util.Date</code> class that allows the JDBC
@@ -115,6 +118,7 @@ public class Time extends java.util.Date {
      *
      * @return a <code>String</code> in hh:mm:ss format
      */
+    @SuppressWarnings("deprecation")
     public String toString () {
         int hour = super.getHours();
         int minute = super.getMinutes();
@@ -245,4 +249,45 @@ public class Time extends java.util.Date {
     * compatibility.
     */
     static final long serialVersionUID = 8397324403548013681L;
+
+    /**
+     * Obtains an instance of {@code Time} from a {@link LocalTime} object
+     * with the same hour, minute and second time value as the given
+     * {@code LocalTime}.
+     *
+     * @param time a {@code LocalTime} to convert
+     * @return a {@code Time} object
+     * @exception NullPointerException if {@code time} is null
+     * @since 1.8
+     */
+    @SuppressWarnings("deprecation")
+    public static Time valueOf(LocalTime time) {
+        return new Time(time.getHour(), time.getMinute(), time.getSecond());
+    }
+
+    /**
+     * Converts this {@code Time} object to a {@code LocalTime}.
+     * <p>
+     * The conversion creates a {@code LocalTime} that represents the same
+     * hour, minute, and second time value as this {@code Time}.
+     *
+     * @return a {@code LocalTime} object representing the same time value
+     * @since 1.8
+     */
+    @SuppressWarnings("deprecation")
+    public LocalTime toLocalTime() {
+        return LocalTime.of(getHours(), getMinutes(), getSeconds());
+    }
+
+   /**
+    * This method always throws an UnsupportedOperationException and should
+    * not be used because SQL {@code Time} values do not have a date
+    * component.
+    *
+    * @exception java.lang.UnsupportedOperationException if this method is invoked
+    */
+    @Override
+    public Instant toInstant() {
+        throw new java.lang.UnsupportedOperationException();
+    }
 }

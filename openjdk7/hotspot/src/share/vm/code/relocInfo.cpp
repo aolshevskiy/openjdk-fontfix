@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,32 +23,13 @@
  */
 
 #include "precompiled.hpp"
+#include "code/codeCache.hpp"
 #include "code/compiledIC.hpp"
 #include "code/nmethod.hpp"
 #include "code/relocInfo.hpp"
 #include "memory/resourceArea.hpp"
 #include "runtime/stubCodeGenerator.hpp"
 #include "utilities/copy.hpp"
-#ifdef TARGET_ARCH_x86
-# include "assembler_x86.inline.hpp"
-# include "nativeInst_x86.hpp"
-#endif
-#ifdef TARGET_ARCH_sparc
-# include "assembler_sparc.inline.hpp"
-# include "nativeInst_sparc.hpp"
-#endif
-#ifdef TARGET_ARCH_zero
-# include "assembler_zero.inline.hpp"
-# include "nativeInst_zero.hpp"
-#endif
-#ifdef TARGET_ARCH_arm
-# include "assembler_arm.inline.hpp"
-# include "nativeInst_arm.hpp"
-#endif
-#ifdef TARGET_ARCH_ppc
-# include "assembler_ppc.inline.hpp"
-# include "nativeInst_ppc.hpp"
-#endif
 
 
 const RelocationHolder RelocationHolder::none; // its type is relocInfo::none
@@ -357,31 +338,6 @@ void RelocIterator::set_limit(address limit) {
   _limit = limit;
 }
 
-
-void PatchingRelocIterator:: prepass() {
-  // turn breakpoints off during patching
-  _init_state = (*this);        // save cursor
-  while (next()) {
-    if (type() == relocInfo::breakpoint_type) {
-      breakpoint_reloc()->set_active(false);
-    }
-  }
-  (RelocIterator&)(*this) = _init_state;        // reset cursor for client
-}
-
-
-void PatchingRelocIterator:: postpass() {
-  // turn breakpoints back on after patching
-  (RelocIterator&)(*this) = _init_state;        // reset cursor again
-  while (next()) {
-    if (type() == relocInfo::breakpoint_type) {
-      breakpoint_Relocation* bpt = breakpoint_reloc();
-      bpt->set_active(bpt->enabled());
-    }
-  }
-}
-
-
 // All the strange bit-encodings are in here.
 // The idea is to encode relocation data which are small integers
 // very efficiently (a single extra halfword).  Larger chunks of
@@ -438,6 +394,11 @@ RelocationHolder RelocationHolder::plus(int offset) const {
       {
         oop_Relocation* r = (oop_Relocation*)reloc();
         return oop_Relocation::spec(r->oop_index(), r->offset() + offset);
+      }
+    case relocInfo::metadata_type:
+      {
+        metadata_Relocation* r = (metadata_Relocation*)reloc();
+        return metadata_Relocation::spec(r->metadata_index(), r->offset() + offset);
       }
     default:
       ShouldNotReachHere();
@@ -578,33 +539,33 @@ void oop_Relocation::unpack_data() {
   unpack_2_ints(_oop_index, _offset);
 }
 
+void metadata_Relocation::pack_data_to(CodeSection* dest) {
+  short* p = (short*) dest->locs_end();
+  p = pack_2_ints_to(p, _metadata_index, _offset);
+  dest->set_locs_end((relocInfo*) p);
+}
+
+
+void metadata_Relocation::unpack_data() {
+  unpack_2_ints(_metadata_index, _offset);
+}
+
 
 void virtual_call_Relocation::pack_data_to(CodeSection* dest) {
   short*  p     = (short*) dest->locs_end();
   address point =          dest->locs_point();
 
-  // Try to make a pointer NULL first.
-  if (_oop_limit >= point &&
-      _oop_limit <= point + NativeCall::instruction_size) {
-    _oop_limit = NULL;
-  }
-  // If the _oop_limit is NULL, it "defaults" to the end of the call.
-  // See ic_call_Relocation::oop_limit() below.
-
-  normalize_address(_first_oop, dest);
-  normalize_address(_oop_limit, dest);
-  jint x0 = scaled_offset_null_special(_first_oop, point);
-  jint x1 = scaled_offset_null_special(_oop_limit, point);
-  p = pack_2_ints_to(p, x0, x1);
+  normalize_address(_cached_value, dest);
+  jint x0 = scaled_offset_null_special(_cached_value, point);
+  p = pack_1_int_to(p, x0);
   dest->set_locs_end((relocInfo*) p);
 }
 
 
 void virtual_call_Relocation::unpack_data() {
-  jint x0, x1; unpack_2_ints(x0, x1);
+  jint x0 = unpack_1_int();
   address point = addr();
-  _first_oop = x0==0? NULL: address_from_scaled_offset(x0, point);
-  _oop_limit = x1==0? NULL: address_from_scaled_offset(x1, point);
+  _cached_value = x0==0? NULL: address_from_scaled_offset(x0, point);
 }
 
 
@@ -718,51 +679,6 @@ void section_word_Relocation::unpack_data() {
   _target  = address_from_scaled_offset(offset, base);
 }
 
-
-void breakpoint_Relocation::pack_data_to(CodeSection* dest) {
-  short* p = (short*) dest->locs_end();
-  address point = dest->locs_point();
-
-  *p++ = _bits;
-
-  assert(_target != NULL, "sanity");
-
-  if (internal())  normalize_address(_target, dest);
-
-  jint target_bits =
-    (jint)( internal() ? scaled_offset           (_target, point)
-                       : runtime_address_to_index(_target) );
-  if (settable()) {
-    // save space for set_target later
-    p = add_jint(p, target_bits);
-  } else {
-    p = add_var_int(p, target_bits);
-  }
-
-  for (int i = 0; i < instrlen(); i++) {
-    // put placeholder words until bytes can be saved
-    p = add_short(p, (short)0x7777);
-  }
-
-  dest->set_locs_end((relocInfo*) p);
-}
-
-
-void breakpoint_Relocation::unpack_data() {
-  _bits = live_bits();
-
-  int targetlen = datalen() - 1 - instrlen();
-  jint target_bits = 0;
-  if (targetlen == 0)       target_bits = 0;
-  else if (targetlen == 1)  target_bits = *(data()+1);
-  else if (targetlen == 2)  target_bits = relocInfo::jint_from_data(data()+1);
-  else                      { ShouldNotReachHere(); }
-
-  _target = internal() ? address_from_scaled_offset(target_bits, addr())
-                       : index_to_runtime_address  (target_bits);
-}
-
-
 //// miscellaneous methods
 oop* oop_Relocation::oop_addr() {
   int n = _oop_index;
@@ -799,98 +715,46 @@ void oop_Relocation::verify_oop_relocation() {
   }
 }
 
-
-RelocIterator virtual_call_Relocation::parse_ic(nmethod* &nm, address &ic_call, address &first_oop,
-                                                oop* &oop_addr, bool *is_optimized) {
-  assert(ic_call != NULL, "ic_call address must be set");
-  assert(ic_call != NULL || first_oop != NULL, "must supply a non-null input");
-  if (nm == NULL) {
-    CodeBlob* code;
-    if (ic_call != NULL) {
-      code = CodeCache::find_blob(ic_call);
-    } else if (first_oop != NULL) {
-      code = CodeCache::find_blob(first_oop);
-    }
-    nm = code->as_nmethod_or_null();
-    assert(nm != NULL, "address to parse must be in nmethod");
-  }
-  assert(ic_call   == NULL || nm->contains(ic_call),   "must be in nmethod");
-  assert(first_oop == NULL || nm->contains(first_oop), "must be in nmethod");
-
-  address oop_limit = NULL;
-
-  if (ic_call != NULL) {
-    // search for the ic_call at the given address
-    RelocIterator iter(nm, ic_call, ic_call+1);
-    bool ret = iter.next();
-    assert(ret == true, "relocInfo must exist at this address");
-    assert(iter.addr() == ic_call, "must find ic_call");
-    if (iter.type() == relocInfo::virtual_call_type) {
-      virtual_call_Relocation* r = iter.virtual_call_reloc();
-      first_oop = r->first_oop();
-      oop_limit = r->oop_limit();
-      *is_optimized = false;
+// meta data versions
+Metadata** metadata_Relocation::metadata_addr() {
+  int n = _metadata_index;
+  if (n == 0) {
+    // metadata is stored in the code stream
+    return (Metadata**) pd_address_in_code();
     } else {
-      assert(iter.type() == relocInfo::opt_virtual_call_type, "must be a virtual call");
-      *is_optimized = true;
-      oop_addr = NULL;
-      first_oop = NULL;
-      return iter;
+    // metadata is stored in table at nmethod::metadatas_begin
+    return code()->metadata_addr_at(n);
     }
   }
 
-  // search for the first_oop, to get its oop_addr
-  RelocIterator all_oops(nm, first_oop);
-  RelocIterator iter = all_oops;
-  iter.set_limit(first_oop+1);
-  bool found_oop = false;
-  while (iter.next()) {
-    if (iter.type() == relocInfo::oop_type) {
-      assert(iter.addr() == first_oop, "must find first_oop");
-      oop_addr = iter.oop_reloc()->oop_addr();
-      found_oop = true;
-      break;
-    }
-  }
-  assert(found_oop, "must find first_oop");
 
-  bool did_reset = false;
-  while (ic_call == NULL) {
-    // search forward for the ic_call matching the given first_oop
-    while (iter.next()) {
-      if (iter.type() == relocInfo::virtual_call_type) {
-        virtual_call_Relocation* r = iter.virtual_call_reloc();
-        if (r->first_oop() == first_oop) {
-          ic_call   = r->addr();
-          oop_limit = r->oop_limit();
-          break;
-        }
-      }
-    }
-    guarantee(!did_reset, "cannot find ic_call");
-    iter = RelocIterator(nm); // search the whole nmethod
-    did_reset = true;
+Metadata* metadata_Relocation::metadata_value() {
+  Metadata* v = *metadata_addr();
+  // clean inline caches store a special pseudo-null
+  if (v == (Metadata*)Universe::non_oop_word())  v = NULL;
+  return v;
   }
 
-  assert(oop_limit != NULL && first_oop != NULL && ic_call != NULL, "");
-  all_oops.set_limit(oop_limit);
-  return all_oops;
+
+void metadata_Relocation::fix_metadata_relocation() {
+  if (!metadata_is_immediate()) {
+    // get the metadata from the pool, and re-insert it into the instruction:
+    pd_fix_value(value());
+  }
 }
 
 
-address virtual_call_Relocation::first_oop() {
-  assert(_first_oop != NULL && _first_oop < addr(), "must precede ic_call");
-  return _first_oop;
+void metadata_Relocation::verify_metadata_relocation() {
+  if (!metadata_is_immediate()) {
+    // get the metadata from the pool, and re-insert it into the instruction:
+    verify_value(value());
+  }
 }
 
-
-address virtual_call_Relocation::oop_limit() {
-  if (_oop_limit == NULL)
-    return addr() + NativeCall::instruction_size;
-  else
-    return _oop_limit;
+address virtual_call_Relocation::cached_value() {
+  assert(_cached_value != NULL && _cached_value < addr(), "must precede ic_call");
+  return _cached_value;
 }
-
 
 
 void virtual_call_Relocation::clear_inline_cache() {
@@ -999,81 +863,6 @@ address internal_word_Relocation::target() {
   return target;
 }
 
-
-breakpoint_Relocation::breakpoint_Relocation(int kind, address target, bool internal) {
-  bool active    = false;
-  bool enabled   = (kind == initialization);
-  bool removable = (kind != safepoint);
-  bool settable  = (target == NULL);
-
-  int bits = kind;
-  if (enabled)    bits |= enabled_state;
-  if (internal)   bits |= internal_attr;
-  if (removable)  bits |= removable_attr;
-  if (settable)   bits |= settable_attr;
-
-  _bits = bits | high_bit;
-  _target = target;
-
-  assert(this->kind()      == kind,      "kind encoded");
-  assert(this->enabled()   == enabled,   "enabled encoded");
-  assert(this->active()    == active,    "active encoded");
-  assert(this->internal()  == internal,  "internal encoded");
-  assert(this->removable() == removable, "removable encoded");
-  assert(this->settable()  == settable,  "settable encoded");
-}
-
-
-address breakpoint_Relocation::target() const {
-  return _target;
-}
-
-
-void breakpoint_Relocation::set_target(address x) {
-  assert(settable(), "must be settable");
-  jint target_bits =
-    (jint)(internal() ? scaled_offset           (x, addr())
-                      : runtime_address_to_index(x));
-  short* p = &live_bits() + 1;
-  p = add_jint(p, target_bits);
-  assert(p == instrs(), "new target must fit");
-  _target = x;
-}
-
-
-void breakpoint_Relocation::set_enabled(bool b) {
-  if (enabled() == b) return;
-
-  if (b) {
-    set_bits(bits() | enabled_state);
-  } else {
-    set_active(false);          // remove the actual breakpoint insn, if any
-    set_bits(bits() & ~enabled_state);
-  }
-}
-
-
-void breakpoint_Relocation::set_active(bool b) {
-  assert(!b || enabled(), "cannot activate a disabled breakpoint");
-
-  if (active() == b) return;
-
-  // %%% should probably seize a lock here (might not be the right lock)
-  //MutexLockerEx ml_patch(Patching_lock, true);
-  //if (active() == b)  return;         // recheck state after locking
-
-  if (b) {
-    set_bits(bits() | active_state);
-    if (instrlen() == 0)
-      fatal("breakpoints in original code must be undoable");
-    pd_swap_in_breakpoint (addr(), instrs(), instrlen());
-  } else {
-    set_bits(bits() & ~active_state);
-    pd_swap_out_breakpoint(addr(), instrs(), instrlen());
-  }
-}
-
-
 //---------------------------------------------------------------------------------
 // Non-product code
 
@@ -1139,6 +928,25 @@ void RelocIterator::print_current() {
       }
       break;
     }
+  case relocInfo::metadata_type:
+    {
+      metadata_Relocation* r = metadata_reloc();
+      Metadata** metadata_addr  = NULL;
+      Metadata*    raw_metadata   = NULL;
+      Metadata*    metadata_value = NULL;
+      if (code() != NULL || r->metadata_is_immediate()) {
+        metadata_addr  = r->metadata_addr();
+        raw_metadata   = *metadata_addr;
+        metadata_value = r->metadata_value();
+      }
+      tty->print(" | [metadata_addr=" INTPTR_FORMAT " *=" INTPTR_FORMAT " offset=%d]",
+                 metadata_addr, (address)raw_metadata, r->offset());
+      if (metadata_value != NULL) {
+        tty->print("metadata_value=" INTPTR_FORMAT ": ", (address)metadata_value);
+        metadata_value->print_value_on(tty);
+      }
+      break;
+    }
   case relocInfo::external_word_type:
   case relocInfo::internal_word_type:
   case relocInfo::section_word_type:
@@ -1157,8 +965,8 @@ void RelocIterator::print_current() {
   case relocInfo::virtual_call_type:
     {
       virtual_call_Relocation* r = (virtual_call_Relocation*) reloc();
-      tty->print(" | [destination=" INTPTR_FORMAT " first_oop=" INTPTR_FORMAT " oop_limit=" INTPTR_FORMAT "]",
-                 r->destination(), r->first_oop(), r->oop_limit());
+      tty->print(" | [destination=" INTPTR_FORMAT " cached_value=" INTPTR_FORMAT "]",
+                 r->destination(), r->cached_value());
       break;
     }
   case relocInfo::static_stub_type:

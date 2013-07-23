@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 5094028 6219522 7083664
+# @bug 5094028 6219522
 # @summary test new jarsigner -sigalg and -digestalg options
 # @author Sean Mullan
 #

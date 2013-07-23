@@ -27,6 +27,8 @@ package sun.awt.windows;
 import java.awt.*;
 import java.awt.event.AdjustmentEvent;
 import java.awt.peer.ScrollPanePeer;
+
+import sun.awt.AWTAccessor;
 import sun.awt.PeerEvent;
 
 import sun.util.logging.PlatformLogger;
@@ -159,7 +161,7 @@ class WScrollPanePeer extends WPanelPeer implements ScrollPanePeer {
         }
 
         public PeerEvent coalesceEvents(PeerEvent newEvent) {
-            if (log.isLoggable(PlatformLogger.FINEST)) {
+            if (log.isLoggable(PlatformLogger.Level.FINEST)) {
                 log.finest("ScrollEvent coalesced: " + newEvent);
             }
             if (newEvent instanceof ScrollEvent) {
@@ -168,8 +170,6 @@ class WScrollPanePeer extends WPanelPeer implements ScrollPanePeer {
             return null;
         }
     }
-
-    native void setTypedValue(ScrollPaneAdjustable adjustable, int newpos, int type);
 
     /*
      * Runnable for the ScrollEvent that performs the adjustment.
@@ -204,7 +204,7 @@ class WScrollPanePeer extends WPanelPeer implements ScrollPanePeer {
             } else if (orient == Adjustable.HORIZONTAL) {
                 adj = (ScrollPaneAdjustable)sp.getHAdjustable();
             } else {
-                if (log.isLoggable(PlatformLogger.FINE)) {
+                if (log.isLoggable(PlatformLogger.Level.FINE)) {
                     log.fine("Assertion failed: unknown orient");
                 }
             }
@@ -231,7 +231,7 @@ class WScrollPanePeer extends WPanelPeer implements ScrollPanePeer {
                   newpos = this.pos;
                   break;
               default:
-                  if (log.isLoggable(PlatformLogger.FINE)) {
+                  if (log.isLoggable(PlatformLogger.Level.FINE)) {
                       log.fine("Assertion failed: unknown type");
                   }
                   return;
@@ -247,8 +247,9 @@ class WScrollPanePeer extends WPanelPeer implements ScrollPanePeer {
             // Fix for 4075484 - consider type information when creating AdjustmentEvent
             // We can't just call adj.setValue() because it creates AdjustmentEvent with type=TRACK
             // Instead, we call private method setTypedValue of ScrollPaneAdjustable.
-            // Because ScrollPaneAdjustable is in another package we should call it through native code.
-            setTypedValue(adj, newpos, type);
+            AWTAccessor.getScrollPaneAdjustableAccessor().setTypedValue(adj,
+                                                                        newpos,
+                                                                        type);
 
             // Paint the exposed area right away.  To do this - find
             // the heavyweight ancestor of the scroll child.
@@ -258,7 +259,7 @@ class WScrollPanePeer extends WPanelPeer implements ScrollPanePeer {
             {
                 hwAncestor = hwAncestor.getParent();
             }
-            if (log.isLoggable(PlatformLogger.FINE)) {
+            if (log.isLoggable(PlatformLogger.Level.FINE)) {
                 if (hwAncestor == null) {
                     log.fine("Assertion (hwAncestor != null) failed, " +
                              "couldn't find heavyweight ancestor of scroll pane child");

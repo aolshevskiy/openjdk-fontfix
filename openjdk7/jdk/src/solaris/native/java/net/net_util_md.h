@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -102,10 +102,6 @@ void ThrowUnknownHostExceptionWithGaiError(JNIEnv *env,
                                            const char* hostname,
                                            int gai_error);
 
-/* do we have address translation support */
-
-extern jboolean NET_addrtransAvailable();
-
 #define NET_WAIT_READ   0x01
 #define NET_WAIT_WRITE  0x02
 #define NET_WAIT_CONNECT        0x04
@@ -148,7 +144,6 @@ extern jint NET_Wait(JNIEnv *env, jint fd, jint flags, jint timeout);
  *  Utilities
  */
 #ifdef __linux__
-extern int kernelIsV22();
 extern int kernelIsV24();
 #endif
 

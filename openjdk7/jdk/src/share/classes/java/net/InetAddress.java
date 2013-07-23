@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.ServiceLoader;
 import java.security.AccessController;
 import java.io.ObjectStreamException;
 import java.io.ObjectStreamField;
@@ -43,7 +44,6 @@ import java.io.ObjectOutputStream.PutField;
 import sun.security.action.*;
 import sun.net.InetAddressCachePolicy;
 import sun.net.util.IPAddressUtil;
-import sun.misc.Service;
 import sun.net.spi.nameservice.*;
 
 /**
@@ -65,7 +65,7 @@ import sun.net.spi.nameservice.*;
  * with a host name or whether it has already done reverse host name
  * resolution).
  *
- * <h4> Address types </h4>
+ * <h3> Address types </h3>
  *
  * <blockquote><table cellspacing=2 summary="Description of unicast and multicast address types">
  *   <tr><th valign=top><i>unicast</i></th>
@@ -165,7 +165,6 @@ import sun.net.spi.nameservice.*;
  * <p>
  * A value of -1 indicates "cache forever".
  * </dd>
- * <p>
  * <dt><b>networkaddress.cache.negative.ttl</b> (default: 10)</dt>
  * <dd>Indicates the caching policy for un-successful name lookups
  * from the name service. The value is specified as as integer to
@@ -239,7 +238,8 @@ class InetAddress implements java.io.Serializable {
         }
     }
 
-    final transient InetAddressHolder holder;
+    /* Used to store the serializable fields of InetAddress */
+    private final transient InetAddressHolder holder;
 
     InetAddressHolder holder() {
         return holder;
@@ -260,7 +260,13 @@ class InetAddress implements java.io.Serializable {
     static {
         preferIPv6Address = java.security.AccessController.doPrivileged(
             new GetBooleanAction("java.net.preferIPv6Addresses")).booleanValue();
-        AccessController.doPrivileged(new LoadLibraryAction("net"));
+        AccessController.doPrivileged(
+            new java.security.PrivilegedAction<Void>() {
+                public Void run() {
+                    System.loadLibrary("net");
+                    return null;
+                }
+            });
         init();
     }
 
@@ -904,10 +910,11 @@ class InetAddress implements java.io.Serializable {
                 nameService = java.security.AccessController.doPrivileged(
                     new java.security.PrivilegedExceptionAction<NameService>() {
                         public NameService run() {
-                            Iterator itr = Service.providers(NameServiceDescriptor.class);
+                            Iterator<NameServiceDescriptor> itr =
+                                ServiceLoader.load(NameServiceDescriptor.class)
+                                    .iterator();
                             while (itr.hasNext()) {
-                                NameServiceDescriptor nsd
-                                    = (NameServiceDescriptor)itr.next();
+                                NameServiceDescriptor nsd = itr.next();
                                 if (providerName.
                                     equalsIgnoreCase(nsd.getType()+","
                                         +nsd.getProviderName())) {
@@ -1590,9 +1597,9 @@ class InetAddress implements java.io.Serializable {
             throw new SecurityException ("invalid address type");
         }
         PutField pf = s.putFields();
-        pf.put("hostName", holder().hostName);
-        pf.put("address", holder().address);
-        pf.put("family", holder().family);
+        pf.put("hostName", holder().getHostName());
+        pf.put("address", holder().getAddress());
+        pf.put("family", holder().getFamily());
         s.writeFields();
         s.flush();
     }

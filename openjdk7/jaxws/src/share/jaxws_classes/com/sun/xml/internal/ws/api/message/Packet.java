@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,40 +25,53 @@
 
 package com.sun.xml.internal.ws.api.message;
 
+import com.oracle.webservices.internal.api.message.ContentType;
+import com.oracle.webservices.internal.api.message.PropertySet;
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
 import com.sun.xml.internal.bind.marshaller.SAX2DOMEx;
+import com.sun.xml.internal.ws.addressing.WsaPropertyBag;
+import com.sun.xml.internal.ws.addressing.WsaServerTube;
 import com.sun.xml.internal.ws.addressing.WsaTubeHelper;
-import com.sun.xml.internal.ws.addressing.model.InvalidAddressingHeaderException;
-import com.sun.xml.internal.ws.api.DistributedPropertySet;
+import com.sun.xml.internal.ws.api.Component;
 import com.sun.xml.internal.ws.api.EndpointAddress;
-import com.sun.xml.internal.ws.api.PropertySet;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
 import com.sun.xml.internal.ws.api.addressing.WSEndpointReference;
-import com.sun.xml.internal.ws.api.model.SEIModel;
 import com.sun.xml.internal.ws.api.model.JavaMethod;
+import com.sun.xml.internal.ws.api.model.SEIModel;
+import com.sun.xml.internal.ws.api.model.WSDLOperationMapping;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLOperation;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLPort;
+import com.sun.xml.internal.ws.api.pipe.Codec;
 import com.sun.xml.internal.ws.api.pipe.Tube;
+import com.sun.xml.internal.ws.api.server.Adapter;
 import com.sun.xml.internal.ws.api.server.TransportBackChannel;
 import com.sun.xml.internal.ws.api.server.WSEndpoint;
 import com.sun.xml.internal.ws.api.server.WebServiceContextDelegate;
+import com.sun.xml.internal.ws.api.streaming.XMLStreamWriterFactory;
 import com.sun.xml.internal.ws.client.*;
 import com.sun.xml.internal.ws.developer.JAXWSProperties;
+import com.sun.xml.internal.ws.encoding.MtomCodec;
 import com.sun.xml.internal.ws.message.RelatesToHeader;
 import com.sun.xml.internal.ws.message.StringHeader;
 import com.sun.xml.internal.ws.util.DOMUtil;
 import com.sun.xml.internal.ws.util.xml.XmlUtil;
-import com.sun.xml.internal.ws.server.WSEndpointImpl;
 import com.sun.xml.internal.ws.wsdl.DispatchException;
 import com.sun.xml.internal.ws.wsdl.OperationDispatcher;
+import com.sun.xml.internal.ws.resources.AddressingMessages;
+
+
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.SAXException;
 
+import javax.xml.namespace.QName;
+import javax.xml.soap.SOAPException;
 import javax.xml.soap.SOAPMessage;
+import javax.xml.stream.XMLStreamWriter;
+import javax.xml.stream.XMLStreamException;
 import javax.xml.ws.BindingProvider;
 import javax.xml.ws.Dispatch;
 import javax.xml.ws.WebServiceContext;
@@ -66,16 +79,14 @@ import javax.xml.ws.WebServiceException;
 import javax.xml.ws.handler.LogicalMessageContext;
 import javax.xml.ws.handler.MessageContext;
 import javax.xml.ws.handler.soap.SOAPMessageContext;
-import javax.xml.namespace.QName;
-import javax.xml.ws.soap.AddressingFeature;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import javax.xml.ws.soap.MTOMFeature;
+
+import java.util.*;
 import java.util.logging.Logger;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.channels.WritableByteChannel;
 
 /**
  * Represents a container of a {@link Message}.
@@ -137,14 +148,18 @@ import java.util.logging.Logger;
  *  <li>this class needs to be cloneable since Message is copiable.
  *  <li>The three live views aren't implemented correctly. It will be
  *      more work to do so, although I'm sure it's possible.
- *  <li>{@link Property} annotation is to make it easy
+ *  <li>{@link PropertySet.Property} annotation is to make it easy
  *      for {@link MessageContext} to export properties on this object,
  *      but it probably needs some clean up.
  * </ol>
  *
  * @author Kohsuke Kawaguchi
  */
-public final class Packet extends DistributedPropertySet {
+public final class Packet
+        // Packet must continue to extend/implement deprecated interfaces until downstream
+        // usage is updated.
+    extends com.oracle.webservices.internal.api.message.BaseDistributedPropertySet
+    implements com.oracle.webservices.internal.api.message.MessageContext, MessageMetadata {
 
     /**
      * Creates a {@link Packet} that wraps a given {@link Message}.
@@ -159,35 +174,22 @@ public final class Packet extends DistributedPropertySet {
     public Packet(Message request) {
         this();
         this.message = request;
+        if (message != null) message.setMessageMedadata(this);
     }
 
     /**
      * Creates an empty {@link Packet} that doesn't have any {@link Message}.
      */
     public Packet() {
-        this.invocationProperties = new HashMap<String,Object>();
+        this.invocationProperties = new HashMap<String, Object>();
     }
 
     /**
      * Used by {@link #createResponse(Message)} and {@link #copy(boolean)}.
      */
     private Packet(Packet that) {
-        that.copySatelliteInto(this);
-        this.handlerConfig = that.handlerConfig;
+        relatePackets(that, true);
         this.invocationProperties = that.invocationProperties;
-        this.handlerScopePropertyNames = that.handlerScopePropertyNames;
-        this.contentNegotiation = that.contentNegotiation;
-        this.wasTransportSecure = that.wasTransportSecure;
-        this.endpointAddress = that.endpointAddress;
-        this.wsdlOperation = that.wsdlOperation;
-
-        this.acceptableMimeTypes = that.acceptableMimeTypes;
-        this.endpoint = that.endpoint;
-        this.proxy = that.proxy;
-        this.webServiceContextDelegate = that.webServiceContextDelegate;
-        this.soapAction = that.soapAction;
-        this.expectReply = that.expectReply;
-        // copy other properties that need to be copied. is there any?
     }
 
     /**
@@ -205,7 +207,7 @@ public final class Packet extends DistributedPropertySet {
         if (copyMessage && this.message != null) {
             copy.message = this.message.copy();
         }
-
+        if (copy.message != null) copy.message.setMessageMedadata(copy);
         return copy;
     }
 
@@ -214,22 +216,39 @@ public final class Packet extends DistributedPropertySet {
     /**
      * Gets the last {@link Message} set through {@link #setMessage(Message)}.
      *
-     * @return
-     *      may null. See the class javadoc for when it's null.
+     * @return may null. See the class javadoc for when it's null.
      */
     public Message getMessage() {
-        return message;
+        if (message != null && !(message instanceof MessageWrapper)) {
+            message = new MessageWrapper(this, message);
+        }
+        return  message;
     }
 
+    public Message getInternalMessage() {
+        return (message instanceof MessageWrapper)? ((MessageWrapper)message).delegate : message;
+    }
+
+    public WSBinding getBinding() {
+        if (endpoint != null) {
+            return endpoint.getBinding();
+        }
+        if (proxy != null) {
+            return (WSBinding) proxy.getBinding();
+        }
+        return null;
+    }
     /**
      * Sets a {@link Message} to this packet.
      *
-     * @param message
-     *      Can be null.
+     * @param message Can be null.
      */
     public void setMessage(Message message) {
         this.message = message;
+        if (message != null) this.message.setMessageMedadata(this);
     }
+
+    private WSDLOperationMapping wsdlOperationMapping = null;
 
     private QName wsdlOperation;
 
@@ -240,29 +259,36 @@ public final class Packet extends DistributedPropertySet {
      * enabled on the particular port.
      *
      * @return null if there is no WSDL model or
-     *              runtime cannot uniquely identify the wsdl operation from the information in the packet.
+     *         runtime cannot uniquely identify the wsdl operation from the information in the packet.
      */
     @Property(MessageContext.WSDL_OPERATION)
-    public final @Nullable QName getWSDLOperation(){
-        if(wsdlOperation != null)
-            return wsdlOperation;
+    public final
+    @Nullable
+    QName getWSDLOperation() {
+        if (wsdlOperation != null) return wsdlOperation;
+        if ( wsdlOperationMapping == null)  wsdlOperationMapping = getWSDLOperationMapping();
+        if ( wsdlOperationMapping != null ) wsdlOperation = wsdlOperationMapping.getOperationName();
+        return wsdlOperation;
+    }
 
+    public WSDLOperationMapping getWSDLOperationMapping() {
+        if (wsdlOperationMapping != null) return wsdlOperationMapping;
         OperationDispatcher opDispatcher = null;
-        if(endpoint != null) {
-            opDispatcher = ((WSEndpointImpl)endpoint).getOperationDispatcher();
+        if (endpoint != null) {
+            opDispatcher = endpoint.getOperationDispatcher();
         } else if (proxy != null) {
-            opDispatcher = ((Stub)proxy).getOperationDispatcher();
+            opDispatcher = ((Stub) proxy).getOperationDispatcher();
         }
         //OpDispatcher is null when there is no WSDLModel
-        if(opDispatcher != null) {
+        if (opDispatcher != null) {
             try {
-                wsdlOperation = opDispatcher.getWSDLOperationQName(this);
+                wsdlOperationMapping = opDispatcher.getWSDLOperationMapping(this);
             } catch (DispatchException e) {
                 //Ignore, this might be a protocol message which may not have a wsdl operation
                 //LOGGER.info("Cannot resolve wsdl operation that this Packet is targeted for.");
             }
         }
-        return wsdlOperation;
+        return wsdlOperationMapping;
     }
 
     /**
@@ -292,7 +318,6 @@ public final class Packet extends DistributedPropertySet {
      * Transports are expected to fill this data after creating a Packet.
      * <p>
      * {@link SOAPMessage#getMimeHeaders()} would return these headers.
-     *
      */
     public static final String INBOUND_TRANSPORT_HEADERS = "com.sun.xml.internal.ws.api.message.packet.inbound.transport.headers";
 
@@ -309,7 +334,7 @@ public final class Packet extends DistributedPropertySet {
     /**
      *
      */
-     public static final String HA_INFO = "com.sun.xml.internal.ws.api.message.packet.hainfo";
+    public static final String HA_INFO = "com.sun.xml.internal.ws.api.message.packet.hainfo";
 
 
     /**
@@ -328,6 +353,25 @@ public final class Packet extends DistributedPropertySet {
      */
     @Property(BindingProviderProperties.JAXWS_CLIENT_HANDLE_PROPERTY)
     public BindingProvider proxy;
+
+    /**
+     * Determines if the governing {@link Adapter} or {@link com.sun.xml.internal.ws.api.pipe.Fiber.CompletionCallback}
+     * will handle delivering response messages targeted at non-anonymous endpoint
+     * addresses.  Prior to the introduction of this flag
+     * the {@link WsaServerTube} would deliver non-anonymous responses.
+     */
+    public boolean isAdapterDeliversNonAnonymousResponse;
+
+    /**
+     * During invocation of a client Stub or Dispatch a Packet is
+     * created then the Stub's RequestContext is copied into the
+     * Packet.  On certain internal cases the Packet is created
+     * *before* the invocation.  In those cases we want the contents
+     * of the Packet to take precedence when ever any key/value pairs
+     * collide : if the Packet contains a value for a key use it,
+     * otherwise copy as usual from Stub.
+     */
+    public boolean packetTakesPriorityOverRequestContext = false;
 
     /**
      * The endpoint address to which this message is sent to.
@@ -350,23 +394,25 @@ public final class Packet extends DistributedPropertySet {
      */
     @Property(BindingProvider.ENDPOINT_ADDRESS_PROPERTY)
     public String getEndPointAddressString() {
-        if(endpointAddress==null)
+        if (endpointAddress == null) {
             return null;
-        else
+        } else {
             return endpointAddress.toString();
+        }
     }
 
     public void setEndPointAddressString(String s) {
-        if(s==null)
+        if (s == null) {
             this.endpointAddress = null;
-        else
+        } else {
             this.endpointAddress = EndpointAddress.create(s);
+        }
     }
 
     /**
      * The value of {@link ContentNegotiation#PROPERTY}
      * property.
-     *
+     * <p/>
      * This property is used only on the client side.
      */
     public ContentNegotiation contentNegotiation;
@@ -377,9 +423,9 @@ public final class Packet extends DistributedPropertySet {
     }
 
     public void setContentNegotiationString(String s) {
-        if(s==null)
+        if (s == null) {
             contentNegotiation = null;
-        else {
+        } else {
             try {
                 contentNegotiation = ContentNegotiation.valueOf(s);
             } catch (IllegalArgumentException e) {
@@ -397,12 +443,18 @@ public final class Packet extends DistributedPropertySet {
      *<p>
      */
     @Property(MessageContext.REFERENCE_PARAMETERS)
-    public @NotNull List<Element> getReferenceParameters() {
-        List<Element> refParams =  new ArrayList<Element>();
-        HeaderList hl = message.getHeaders();
-        for(Header h :hl) {
-            String attr = h.getAttribute(AddressingVersion.W3C.nsUri,"IsReferenceParameter");
-            if(attr!=null && (attr.equals("true") || attr.equals("1"))) {
+    public
+    @NotNull
+    List<Element> getReferenceParameters() {
+        Message msg = getMessage();
+        List<Element> refParams = new ArrayList<Element>();
+        if (msg == null) {
+            return refParams;
+        }
+        MessageHeaders hl = msg.getHeaders();
+        for (Header h : hl.asList()) {
+            String attr = h.getAttribute(AddressingVersion.W3C.nsUri, "IsReferenceParameter");
+            if (attr != null && (attr.equals("true") || attr.equals("1"))) {
                 Document d = DOMUtil.createDom();
                 SAX2DOMEx s2d = new SAX2DOMEx(d);
                 try {
@@ -427,14 +479,16 @@ public final class Packet extends DistributedPropertySet {
     }
 
     /**
-     * @deprecated
      *      This method is for exposing header list through {@link PropertySet#get(Object)},
      *      for user applications, and should never be invoked directly from within the JAX-WS RI.
      */
     @Property(JAXWSProperties.INBOUND_HEADER_LIST_PROPERTY)
-    /*package*/ HeaderList getHeaderList() {
-        if(message==null)   return null;
-        return message.getHeaders();
+    /*package*/ MessageHeaders getHeaderList() {
+        Message msg = getMessage();
+        if (msg == null) {
+            return null;
+        }
+        return msg.getHeaders();
     }
 
     /**
@@ -449,7 +503,6 @@ public final class Packet extends DistributedPropertySet {
      * <p>The list of content types will be obtained from the transport
      * meta-data of a inbound message in a request/response message exchange.
      * Hence this property will be set by the service-side transport pipe.
-     *
      */
     public String acceptableMimeTypes;
 
@@ -479,7 +532,9 @@ public final class Packet extends DistributedPropertySet {
      * This property is set from the parameter
      * of {@link WSEndpoint.PipeHead#process}.
      */
-    public @Nullable TransportBackChannel transportBackChannel;
+    public
+    @Nullable
+    TransportBackChannel transportBackChannel;
 
     /**
      * Keeps the transport back channel open (by seeting {@link #transportBackChannel} to null.)
@@ -492,6 +547,12 @@ public final class Packet extends DistributedPropertySet {
         transportBackChannel = null;
         return r;
     }
+
+    /**
+      * The governing owner of this packet.  On the service-side this is the {@link Adapter} and on the client it is the {@link Stub}.
+      *
+      */
+     public Component component;
 
     /**
      * The governing {@link WSEndpoint} in which this message is floating.
@@ -521,7 +582,7 @@ public final class Packet extends DistributedPropertySet {
      * <p>
      * Note that the way the transport sends this value out depends on
      * transport and SOAP version.
-     *
+     * <p/>
      * For HTTP transport and SOAP 1.1, BP requires that SOAPAction
      * header is present (See {@BP R2744} and {@BP R2745}.) For SOAP 1.2,
      * this is moved to the parameter of the "application/soap+xml".
@@ -604,6 +665,37 @@ public final class Packet extends DistributedPropertySet {
     public Boolean isOneWay;
 
     /**
+     * Indicates whether is invoking a synchronous pattern. If true, no
+     * async client programming model (e.g. AsyncResponse or AsyncHandler)
+     * were used to make the request that created this packet.
+     */
+    public Boolean isSynchronousMEP;
+
+    /**
+     * Indicates whether a non-null AsyncHandler was given at the point of
+     * making the request that created this packet. This flag can be used
+     * by Tube implementations to decide how to react when isSynchronousMEP
+     * is false. If true, the client gave a non-null AsyncHandler instance
+     * at the point of request, and will be expecting a response on that
+     * handler when this request has been processed.
+     */
+    public Boolean nonNullAsyncHandlerGiven;
+
+    /**
+     * USE-CASE:
+     * WS-AT is enabled, but there is no WSDL available.
+     * If Packet.isRequestReplyMEP() is Boolean.TRUE then WS-AT should
+     * add the TX context.
+     *
+     * This value is exposed to users via facades at higher abstraction layers.
+     * The user should NEVER use Packet directly.
+     * This value should ONLY be set by users.
+     */
+    private Boolean isRequestReplyMEP;
+    public Boolean isRequestReplyMEP() { return isRequestReplyMEP; }
+    public void setRequestReplyMEP(final Boolean x) { isRequestReplyMEP = x; }
+
+    /**
      * Lazily created set of handler-scope property names.
      *
      * <p>
@@ -627,7 +719,7 @@ public final class Packet extends DistributedPropertySet {
      *
      * @see #getHandlerScopePropertyNames(boolean)
      */
-    public final Map<String,Object> invocationProperties;
+    public final Map<String, Object> invocationProperties;
 
     /**
      * Gets a {@link Set} that stores handler-scope properties.
@@ -646,11 +738,12 @@ public final class Packet extends DistributedPropertySet {
      * @return
      *      always non-null, possibly empty set that stores property names.
      */
-    public final Set<String> getHandlerScopePropertyNames( boolean readOnly ) {
+    public final Set<String> getHandlerScopePropertyNames(boolean readOnly) {
         Set<String> o = this.handlerScopePropertyNames;
-        if(o==null) {
-            if(readOnly)
+        if (o == null) {
+            if (readOnly) {
                 return Collections.emptySet();
+            }
             o = new HashSet<String>();
             this.handlerScopePropertyNames = o;
         }
@@ -664,7 +757,7 @@ public final class Packet extends DistributedPropertySet {
      *      Use {@link #getHandlerScopePropertyNames(boolean)}.
      *      To be removed once Tango components are updated.
      */
-    public final Set<String> getApplicationScopePropertyNames( boolean readOnly ) {
+    public final Set<String> getApplicationScopePropertyNames(boolean readOnly) {
         assert false;
         return new HashSet<String>();
     }
@@ -703,9 +796,23 @@ public final class Packet extends DistributedPropertySet {
      */
     public Packet createClientResponse(Message msg) {
         Packet response = new Packet(this);
-        response.soapAction = null; // de-initializing
         response.setMessage(msg);
+        finishCreateRelateClientResponse(response);
         return response;
+    }
+
+    /**
+     * For use cases that start with an existing Packet.
+     */
+    public Packet relateClientResponse(final Packet response) {
+        response.relatePackets(this, true);
+        finishCreateRelateClientResponse(response);
+        return response;
+    }
+
+    private void finishCreateRelateClientResponse(final Packet response) {
+        response.soapAction = null; // de-initializing
+        response.setState(State.ClientResponse);
     }
 
     /**
@@ -726,22 +833,96 @@ public final class Packet extends DistributedPropertySet {
      */
     public Packet createServerResponse(@Nullable Message responseMessage, @Nullable WSDLPort wsdlPort, @Nullable SEIModel seiModel, @NotNull WSBinding binding) {
         Packet r = createClientResponse(responseMessage);
+        return relateServerResponse(r, wsdlPort, seiModel, binding);
+    }
 
+    /**
+     * Copy all properties from ({@code this}) packet into a input {@link Packet}
+     * @param response packet
+     */
+    public void copyPropertiesTo(@Nullable Packet response){
+        relatePackets(response, false);
+    }
+
+
+    /**
+     * A common method to make members related between input packet and this packet
+     *
+     * @param packet
+     * @param isCopy 'true' means copying all properties from input packet;
+     *               'false' means copying all properties from this packet to input packet.
+     */
+    private void relatePackets(@Nullable Packet packet, boolean isCopy)
+    {
+        Packet request;
+            Packet response;
+
+        if (!isCopy) { //is relate
+          request = this;
+          response = packet;
+
+          // processing specific properties
+          response.soapAction = null;
+          response.invocationProperties.putAll(request.invocationProperties);
+          if (this.getState().equals(State.ServerRequest)) {
+              response.setState(State.ServerResponse);
+          }
+        } else { //is copy constructor
+          request = packet;
+          response = this;
+
+          // processing specific properties
+          response.soapAction = request.soapAction;
+          response.setState(request.getState());
+        }
+
+        request.copySatelliteInto(response);
+        response.isAdapterDeliversNonAnonymousResponse = request.isAdapterDeliversNonAnonymousResponse;
+        response.handlerConfig = request.handlerConfig;
+        response.handlerScopePropertyNames = request.handlerScopePropertyNames;
+        response.contentNegotiation = request.contentNegotiation;
+        response.wasTransportSecure = request.wasTransportSecure;
+        response.transportBackChannel = request.transportBackChannel;
+        response.endpointAddress = request.endpointAddress;
+        response.wsdlOperation = request.wsdlOperation;
+        response.wsdlOperationMapping = request.wsdlOperationMapping;
+        response.acceptableMimeTypes = request.acceptableMimeTypes;
+        response.endpoint = request.endpoint;
+        response.proxy = request.proxy;
+        response.webServiceContextDelegate = request.webServiceContextDelegate;
+        response.expectReply = request.expectReply;
+        response.component = request.component;
+        response.mtomAcceptable = request.mtomAcceptable;
+        response.mtomRequest = request.mtomRequest;
+        // copy other properties that need to be copied. is there any?
+    }
+
+
+    public Packet relateServerResponse(@Nullable Packet r, @Nullable WSDLPort wsdlPort, @Nullable SEIModel seiModel, @NotNull WSBinding binding) {
+        relatePackets(r, false);
+        r.setState(State.ServerResponse);
         AddressingVersion av = binding.getAddressingVersion();
         // populate WS-A headers only if WS-A is enabled
-        if (av == null)
+        if (av == null) {
             return r;
+        }
+
+        if (getMessage() == null) {
+            return r;
+        }
+
         //populate WS-A headers only if the request has addressing headers
-        String inputAction = this.getMessage().getHeaders().getAction(av, binding.getSOAPVersion());
+        String inputAction = AddressingUtils.getAction(getMessage().getHeaders(), av, binding.getSOAPVersion());
         if (inputAction == null) {
             return r;
         }
         // if one-way, then dont populate any WS-A headers
-        if (responseMessage == null || (wsdlPort != null && message.isOneWay(wsdlPort)))
+        if (r.getMessage() == null || (wsdlPort != null && getMessage().isOneWay(wsdlPort))) {
             return r;
+        }
 
         // otherwise populate WS-Addressing headers
-        populateAddressingHeaders(binding, r, wsdlPort,seiModel);
+        populateAddressingHeaders(binding, r, wsdlPort, seiModel);
         return r;
     }
 
@@ -763,12 +944,13 @@ public final class Packet extends DistributedPropertySet {
      */
     public Packet createServerResponse(@Nullable Message responseMessage, @NotNull AddressingVersion addressingVersion, @NotNull SOAPVersion soapVersion, @NotNull String action) {
         Packet responsePacket = createClientResponse(responseMessage);
-
+        responsePacket.setState(State.ServerResponse);
         // populate WS-A headers only if WS-A is enabled
-        if (addressingVersion == null)
+        if (addressingVersion == null) {
             return responsePacket;
+        }
         //populate WS-A headers only if the request has addressing headers
-        String inputAction = this.getMessage().getHeaders().getAction(addressingVersion, soapVersion);
+        String inputAction = AddressingUtils.getAction(this.getMessage().getHeaders(), addressingVersion, soapVersion);
         if (inputAction == null) {
             return responsePacket;
         }
@@ -788,8 +970,8 @@ public final class Packet extends DistributedPropertySet {
      * @see #createServerResponse(Message, AddressingVersion, SOAPVersion, String)
      */
     public void setResponseMessage(@NotNull Packet request, @Nullable Message responseMessage, @NotNull AddressingVersion addressingVersion, @NotNull SOAPVersion soapVersion, @NotNull String action) {
-       Packet temp = request.createServerResponse(responseMessage, addressingVersion, soapVersion, action);
-       setMessage(temp.getMessage());
+        Packet temp = request.createServerResponse(responseMessage, addressingVersion, soapVersion, action);
+        setMessage(temp.getMessage());
     }
 
     private void populateAddressingHeaders(Packet responsePacket, AddressingVersion av, SOAPVersion sv, String action, boolean mustUnderstand) {
@@ -800,66 +982,131 @@ public final class Packet extends DistributedPropertySet {
         if (responsePacket.getMessage() == null)
             return;
 
-        HeaderList hl = responsePacket.getMessage().getHeaders();
+        MessageHeaders hl = responsePacket.getMessage().getHeaders();
 
+        WsaPropertyBag wpb = getSatellite(WsaPropertyBag.class);
+        Message msg = getMessage();
         // wsa:To
-        WSEndpointReference replyTo;
-        try {
-        replyTo = message.getHeaders().getReplyTo(av, sv);
-        if (replyTo != null)
-            hl.add(new StringHeader(av.toTag, replyTo.getAddress()));
-        } catch (InvalidAddressingHeaderException e) {
-            replyTo = null;
+        WSEndpointReference replyTo = null;
+        Header replyToFromRequestMsg = AddressingUtils.getFirstHeader(msg.getHeaders(), av.replyToTag, true, sv);
+        Header replyToFromResponseMsg = hl.get(av.toTag, false);
+        boolean replaceToTag = true;
+        try{
+            if (replyToFromRequestMsg != null){
+                replyTo = replyToFromRequestMsg.readAsEPR(av);
+            }
+            if (replyToFromResponseMsg != null && replyTo == null) {
+                replaceToTag = false;
+            }
+        } catch (XMLStreamException e) {
+            throw new WebServiceException(AddressingMessages.REPLY_TO_CANNOT_PARSE(), e);
+        }
+        if (replyTo == null) {
+              replyTo = AddressingUtils.getReplyTo(msg.getHeaders(), av, sv);
         }
 
         // wsa:Action, add if the message doesn't already contain it,
         // generally true for SEI case where there is SEIModel or WSDLModel
         //           false for Provider with no wsdl, Expects User to set the coresponding header on the Message.
-        if(responsePacket.getMessage().getHeaders().getAction(av,sv) == null) {
+        if (AddressingUtils.getAction(responsePacket.getMessage().getHeaders(), av, sv) == null) {
             //wsa:Action header is not set in the message, so use the wsa:Action  passed as the parameter.
             hl.add(new StringHeader(av.actionTag, action, sv, mustUnderstand));
         }
 
         // wsa:MessageID
-        hl.add(new StringHeader(av.messageIDTag, responsePacket.getMessage().getID(av, sv)));
+        if (responsePacket.getMessage().getHeaders().get(av.messageIDTag, false) == null) {
+            // if header doesn't exist, method getID creates a new random id
+            String newID = Message.generateMessageID();
+            hl.add(new StringHeader(av.messageIDTag, newID));
+        }
 
         // wsa:RelatesTo
-        String mid = getMessage().getHeaders().getMessageID(av,sv);
-        if (mid != null)
-            hl.add(new RelatesToHeader(av.relatesToTag, mid));
+        String mid = null;
+        if (wpb != null) {
+            mid = wpb.getMessageID();
+        }
+        if (mid == null) {
+            mid = AddressingUtils.getMessageID(msg.getHeaders(), av, sv);
+        }
+        if (mid != null) {
+            hl.addOrReplace(new RelatesToHeader(av.relatesToTag, mid));
+        }
+
 
         // populate reference parameters
-        WSEndpointReference refpEPR;
+        WSEndpointReference refpEPR = null;
         if (responsePacket.getMessage().isFault()) {
             // choose FaultTo
-            refpEPR = message.getHeaders().getFaultTo(av, sv);
-
+            if (wpb != null) {
+                refpEPR = wpb.getFaultToFromRequest();
+            }
+            if (refpEPR == null) {
+                refpEPR = AddressingUtils.getFaultTo(msg.getHeaders(), av, sv);
+            }
             // if FaultTo is null, then use ReplyTo
-            if (refpEPR == null)
+            if (refpEPR == null) {
                 refpEPR = replyTo;
+            }
         } else {
             // choose ReplyTo
             refpEPR = replyTo;
         }
-        if (refpEPR != null) {
-            refpEPR.addReferenceParameters(hl);
+        if (replaceToTag && refpEPR != null) {
+            hl.addOrReplace(new StringHeader(av.toTag, refpEPR.getAddress()));
+            refpEPR.addReferenceParametersToList(hl);
         }
     }
 
     private void populateAddressingHeaders(WSBinding binding, Packet responsePacket, WSDLPort wsdlPort, SEIModel seiModel) {
         AddressingVersion addressingVersion = binding.getAddressingVersion();
 
-        if (addressingVersion == null)  return;
+        if (addressingVersion == null) {
+            return;
+        }
 
-        WsaTubeHelper wsaHelper = addressingVersion.getWsaHelper(wsdlPort,seiModel, binding);
-        String action = responsePacket.message.isFault() ?
+        WsaTubeHelper wsaHelper = addressingVersion.getWsaHelper(wsdlPort, seiModel, binding);
+        String action = responsePacket.getMessage().isFault() ?
                 wsaHelper.getFaultAction(this, responsePacket) :
                 wsaHelper.getOutputAction(this);
-        if(action == null) {
+        if (action == null) {
             LOGGER.info("WSA headers are not added as value for wsa:Action cannot be resolved for this message");
             return;
         }
-        populateAddressingHeaders(responsePacket, addressingVersion, binding.getSOAPVersion(), action, addressingVersion.isRequired(binding));
+        populateAddressingHeaders(responsePacket, addressingVersion, binding.getSOAPVersion(), action, AddressingVersion.isRequired(binding));
+    }
+
+    public String toShortString() {
+      return super.toString();
+    }
+
+    // For use only in a debugger
+    @Override
+    public String toString() {
+      StringBuilder buf = new StringBuilder();
+      buf.append(super.toString());
+      String content;
+        try {
+            Message msg = getMessage();
+        if (msg != null) {
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        XMLStreamWriter xmlWriter = XMLStreamWriterFactory.create(baos, "UTF-8");
+                        msg.copy().writeTo(xmlWriter);
+                        xmlWriter.flush();
+                        xmlWriter.close();
+                        baos.flush();
+                        XMLStreamWriterFactory.recycle(xmlWriter);
+
+                        byte[] bytes = baos.toByteArray();
+                        //message = Messages.create(XMLStreamReaderFactory.create(null, new ByteArrayInputStream(bytes), "UTF-8", true));
+                        content = new String(bytes, "UTF-8");
+                } else {
+                    content = "<none>";
+        }
+        } catch (Throwable t) {
+                throw new WebServiceException(t);
+        }
+      buf.append(" Content: ").append(content);
+      return buf.toString();
     }
 
     // completes TypedMap
@@ -869,9 +1116,357 @@ public final class Packet extends DistributedPropertySet {
         model = parse(Packet.class);
     }
 
+    @Override
     protected PropertyMap getPropertyMap() {
         return model;
     }
 
+    public Map<String, Object> asMapIncludingInvocationProperties() {
+        final Map<String, Object> asMap = asMap();
+        return new AbstractMap<String, Object>() {
+            @Override
+            public Object get(Object key) {
+                Object o = asMap.get(key);
+                if (o != null)
+                    return o;
+
+                return invocationProperties.get(key);
+            }
+
+            @Override
+            public int size() {
+                return asMap.size() + invocationProperties.size();
+            }
+
+            @Override
+            public boolean containsKey(Object key) {
+                if (asMap.containsKey(key))
+                    return true;
+                return invocationProperties.containsKey(key);
+            }
+
+            @Override
+            public Set<Entry<String, Object>> entrySet() {
+                final Set<Entry<String, Object>> asMapEntries = asMap.entrySet();
+                final Set<Entry<String, Object>> ipEntries = invocationProperties.entrySet();
+
+                return new AbstractSet<Entry<String, Object>>() {
+                    @Override
+                    public Iterator<Entry<String, Object>> iterator() {
+                        final Iterator<Entry<String, Object>> asMapIt = asMapEntries.iterator();
+                        final Iterator<Entry<String, Object>> ipIt = ipEntries.iterator();
+
+                        return new Iterator<Entry<String, Object>>() {
+                            @Override
+                            public boolean hasNext() {
+                                return asMapIt.hasNext() || ipIt.hasNext();
+                            }
+
+                            @Override
+                            public java.util.Map.Entry<String, Object> next() {
+                                if (asMapIt.hasNext())
+                                    return asMapIt.next();
+                                return ipIt.next();
+                            }
+
+                            @Override
+                            public void remove() {
+                                throw new UnsupportedOperationException();
+                            }
+                        };
+                    }
+
+                    @Override
+                    public int size() {
+                        return asMap.size() + invocationProperties.size();
+                    }
+                };
+            }
+
+            @Override
+            public Object put(String key, Object value) {
+                if (supports(key))
+                    return asMap.put(key, value);
+
+                return invocationProperties.put(key, value);
+            }
+
+            @Override
+            public void clear() {
+                asMap.clear();
+                invocationProperties.clear();
+            }
+
+            @Override
+            public Object remove(Object key) {
+                if (supports(key))
+                    return asMap.remove(key);
+
+                return invocationProperties.remove(key);
+            }
+        };
+    }
+
     private static final Logger LOGGER = Logger.getLogger(Packet.class.getName());
+
+    @Override
+    public SOAPMessage getSOAPMessage() throws SOAPException {
+        return getAsSOAPMessage();
+    }
+
+    //TODO replace the message to a SAAJMEssage issue - JRFSAAJMessage or SAAJMessage?
+    @Override
+    public SOAPMessage getAsSOAPMessage() throws SOAPException {
+        Message msg = this.getMessage();
+        if (msg == null)
+            return null;
+        if (msg instanceof MessageWritable)
+            ((MessageWritable) msg).setMTOMConfiguration(mtomFeature);
+        return msg.readAsSOAPMessage(this, this.getState().isInbound());
+    }
+
+    public
+    Codec codec = null;
+    public Codec getCodec() {
+        if (codec != null) {
+            return codec;
+        }
+        if (endpoint != null) {
+            codec = endpoint.createCodec();
+        }
+        WSBinding wsb = getBinding();
+        if (wsb != null) {
+            codec = wsb.getBindingId().createEncoder(wsb);
+        }
+        return codec;
+    }
+
+    @Override
+    public com.oracle.webservices.internal.api.message.ContentType writeTo( OutputStream out ) throws IOException {
+        Message msg = getInternalMessage();
+        if (msg instanceof MessageWritable) {
+            ((MessageWritable) msg).setMTOMConfiguration(mtomFeature);
+            return ((MessageWritable)msg).writeTo(out);
+        }
+        return getCodec().encode(this, out);
+    }
+
+    public com.oracle.webservices.internal.api.message.ContentType writeTo( WritableByteChannel buffer ) {
+        return getCodec().encode(this, buffer);
+    }
+
+    private ContentType contentType;
+
+    /**
+     * If the request's Content-Type is multipart/related; type=application/xop+xml, then this set to to true
+     *
+     * Used on server-side, for encoding the repsonse.
+     */
+    private Boolean mtomRequest;
+
+    /**
+     * Based on request's Accept header this is set.
+     * Currently only set if MTOMFeature is enabled.
+     *
+     * Should be used on server-side, for encoding the response.
+     */
+    private Boolean mtomAcceptable;
+
+    private MTOMFeature mtomFeature;
+
+    public Boolean getMtomRequest() {
+        return mtomRequest;
+    }
+
+    public void setMtomRequest(Boolean mtomRequest) {
+        this.mtomRequest = mtomRequest;
+    }
+
+    public Boolean getMtomAcceptable() {
+        return mtomAcceptable;
+    }
+
+    Boolean checkMtomAcceptable;
+    public void checkMtomAcceptable() {
+        if (checkMtomAcceptable == null) {
+            if (acceptableMimeTypes == null || isFastInfosetDisabled) {
+                checkMtomAcceptable = false;
+            } else {
+                checkMtomAcceptable = (acceptableMimeTypes.indexOf(MtomCodec.XOP_XML_MIME_TYPE) != -1);
+//                StringTokenizer st = new StringTokenizer(acceptableMimeTypes, ",");
+//                while (st.hasMoreTokens()) {
+//                    final String token = st.nextToken().trim();
+//                    if (token.toLowerCase().contains(MtomCodec.XOP_XML_MIME_TYPE)) {
+//                        mtomAcceptable = true;
+//                    }
+//                }
+//                if (mtomAcceptable == null) mtomAcceptable = false;
+            }
+        }
+        mtomAcceptable = checkMtomAcceptable;
+    }
+
+    private Boolean fastInfosetAcceptable;
+
+    public Boolean getFastInfosetAcceptable(String fiMimeType) {
+        if (fastInfosetAcceptable == null) {
+            if (acceptableMimeTypes == null || isFastInfosetDisabled) {
+                fastInfosetAcceptable = false;
+            } else {
+                fastInfosetAcceptable = (acceptableMimeTypes.indexOf(fiMimeType) != -1);
+            }
+//        if (accept == null || isFastInfosetDisabled) return false;
+//
+//        StringTokenizer st = new StringTokenizer(accept, ",");
+//        while (st.hasMoreTokens()) {
+//            final String token = st.nextToken().trim();
+//            if (token.equalsIgnoreCase(fiMimeType)) {
+//                return true;
+//            }
+//        }
+//        return false;
+        }
+        return fastInfosetAcceptable;
+    }
+
+
+    public void setMtomFeature(MTOMFeature mtomFeature) {
+        this.mtomFeature = mtomFeature;
+    }
+
+    public MTOMFeature getMtomFeature() {
+        //If we have a binding, use that in preference to an explicitly
+        //set MTOMFeature
+        WSBinding binding = getBinding();
+        if (binding != null) {
+            return binding.getFeature(MTOMFeature.class);
+        }
+        return mtomFeature;
+    }
+
+    @Override
+    public com.oracle.webservices.internal.api.message.ContentType getContentType() {
+        if (contentType == null) {
+            contentType = getInternalContentType();
+        }
+        if (contentType == null) {
+            contentType = getCodec().getStaticContentType(this);
+        }
+        if (contentType == null) {
+            //TODO write to buffer
+        }
+        return contentType;
+    }
+
+    public ContentType getInternalContentType() {
+        Message msg = getInternalMessage();
+        if (msg instanceof MessageWritable) {
+            return ((MessageWritable)msg).getContentType();
+        }
+        return contentType;
+    }
+
+    public void setContentType(ContentType contentType) {
+        this.contentType = contentType;
+    }
+
+    public enum Status {
+        Request, Response, Unknown;
+        public boolean isRequest()  { return Request.equals(this); }
+        public boolean isResponse() { return Response.equals(this); }
+    }
+
+    public enum State {
+        ServerRequest(true), ClientRequest(false), ServerResponse(false), ClientResponse(true);
+        private boolean inbound;
+        State(boolean inbound) {
+            this.inbound = inbound;
+        }
+        public boolean isInbound() {
+            return inbound;
+        }
+    }
+
+//    private Status status = Status.Unknown;
+
+    //Default state is ServerRequest - some custom adapters may not set the value of state
+    //upon server request - all other code paths should set it
+    private State state = State.ServerRequest;
+
+//    public Status getStatus() { return status; }
+
+    public State getState() { return state; }
+    public void setState(State state) { this.state = state; }
+
+    public boolean shouldUseMtom() {
+        if (getState().isInbound()) {
+            return isMtomContentType();
+        } else {
+            return shouldUseMtomOutbound();
+        }
+    }
+
+    private boolean shouldUseMtomOutbound() {
+        //Use the getter to make sure all the logic is executed correctly
+        MTOMFeature myMtomFeature = getMtomFeature();
+        if(myMtomFeature != null && myMtomFeature.isEnabled()) {
+            //On client, always use XOP encoding if MTOM is enabled
+            //On Server, mtomAcceptable and mtomRequest will be set - use XOP encoding
+            //if either request is XOP encoded (mtomRequest) or
+            //client accepts XOP encoding (mtomAcceptable)
+            if (getMtomAcceptable() == null && getMtomRequest() == null) {
+                return true;
+            } else {
+                if (getMtomAcceptable() != null &&  getMtomAcceptable() && getState().equals(State.ServerResponse)) {
+                    return true;
+                }
+                if (getMtomRequest() != null && getMtomRequest() && getState().equals(State.ServerResponse)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isMtomContentType() {
+        return (getInternalContentType() != null) &&
+        (getInternalContentType().getContentType().contains("application/xop+xml"));
+    }
+
+    /**
+     * @deprecated
+     */
+    public void addSatellite(@NotNull com.sun.xml.internal.ws.api.PropertySet satellite) {
+        super.addSatellite(satellite);
+    }
+
+    /**
+     * @deprecated
+     */
+    public void addSatellite(@NotNull Class keyClass, @NotNull com.sun.xml.internal.ws.api.PropertySet satellite) {
+        super.addSatellite(keyClass, satellite);
+    }
+
+    /**
+     * @deprecated
+     */
+    public void copySatelliteInto(@NotNull com.sun.xml.internal.ws.api.DistributedPropertySet r) {
+        super.copySatelliteInto(r);
+    }
+
+    /**
+     * @deprecated
+     */
+    public void removeSatellite(com.sun.xml.internal.ws.api.PropertySet satellite) {
+        super.removeSatellite(satellite);
+    }
+
+    /**
+     * This is propogated from SOAPBindingCodec and will affect isMtomAcceptable and isFastInfosetAcceptable
+     */
+    private boolean isFastInfosetDisabled;
+
+    public void setFastInfosetDisabled(boolean b) {
+        isFastInfosetDisabled = b;
+    }
 }

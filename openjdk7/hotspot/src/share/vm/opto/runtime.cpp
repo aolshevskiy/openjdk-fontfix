@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -126,17 +126,15 @@ ExceptionBlob* OptoRuntime::_exception_blob;
 
 // This should be called in an assertion at the start of OptoRuntime routines
 // which are entered from compiled code (all of them)
-#ifndef PRODUCT
+#ifdef ASSERT
 static bool check_compiled_frame(JavaThread* thread) {
   assert(thread->last_frame().is_runtime_frame(), "cannot call runtime directly from compiled code");
-#ifdef ASSERT
   RegisterMap map(thread, false);
   frame caller = thread->last_frame().sender(&map);
   assert(caller.is_compiled_frame(), "not being called from compiled like code");
-#endif  /* ASSERT */
   return true;
 }
-#endif
+#endif // ASSERT
 
 
 #define gen(env, var, type_func_gen, c_func, fancy_jump, pass_tls, save_arg_regs, return_pc) \
@@ -228,7 +226,7 @@ void OptoRuntime::new_store_pre_barrier(JavaThread* thread) {
 }
 
 // object allocation
-JRT_BLOCK_ENTRY(void, OptoRuntime::new_instance_C(klassOopDesc* klass, JavaThread* thread))
+JRT_BLOCK_ENTRY(void, OptoRuntime::new_instance_C(Klass* klass, JavaThread* thread))
   JRT_BLOCK;
 #ifndef PRODUCT
   SharedRuntime::_new_instance_ctr++;         // new instance requires GC
@@ -236,13 +234,13 @@ JRT_BLOCK_ENTRY(void, OptoRuntime::new_instance_C(klassOopDesc* klass, JavaThrea
   assert(check_compiled_frame(thread), "incorrect caller");
 
   // These checks are cheap to make and support reflective allocation.
-  int lh = Klass::cast(klass)->layout_helper();
+  int lh = klass->layout_helper();
   if (Klass::layout_helper_needs_slow_path(lh)
-      || !instanceKlass::cast(klass)->is_initialized()) {
+      || !InstanceKlass::cast(klass)->is_initialized()) {
     KlassHandle kh(THREAD, klass);
     kh->check_valid_for_instantiation(false, THREAD);
     if (!HAS_PENDING_EXCEPTION) {
-      instanceKlass::cast(kh())->initialize(THREAD);
+      InstanceKlass::cast(kh())->initialize(THREAD);
     }
     if (!HAS_PENDING_EXCEPTION) {
       klass = kh();
@@ -253,7 +251,7 @@ JRT_BLOCK_ENTRY(void, OptoRuntime::new_instance_C(klassOopDesc* klass, JavaThrea
 
   if (klass != NULL) {
     // Scavenge and allocate an instance.
-    oop result = instanceKlass::cast(klass)->allocate_instance(THREAD);
+    oop result = InstanceKlass::cast(klass)->allocate_instance(THREAD);
     thread->set_vm_result(result);
 
     // Pass oops back through thread local storage.  Our apparent type to Java
@@ -273,7 +271,7 @@ JRT_END
 
 
 // array allocation
-JRT_BLOCK_ENTRY(void, OptoRuntime::new_array_C(klassOopDesc* array_type, int len, JavaThread *thread))
+JRT_BLOCK_ENTRY(void, OptoRuntime::new_array_C(Klass* array_type, int len, JavaThread *thread))
   JRT_BLOCK;
 #ifndef PRODUCT
   SharedRuntime::_new_array_ctr++;            // new array requires GC
@@ -283,16 +281,16 @@ JRT_BLOCK_ENTRY(void, OptoRuntime::new_array_C(klassOopDesc* array_type, int len
   // Scavenge and allocate an instance.
   oop result;
 
-  if (Klass::cast(array_type)->oop_is_typeArray()) {
+  if (array_type->oop_is_typeArray()) {
     // The oopFactory likes to work with the element type.
     // (We could bypass the oopFactory, since it doesn't add much value.)
-    BasicType elem_type = typeArrayKlass::cast(array_type)->element_type();
+    BasicType elem_type = TypeArrayKlass::cast(array_type)->element_type();
     result = oopFactory::new_typeArray(elem_type, len, THREAD);
   } else {
     // Although the oopFactory likes to work with the elem_type,
     // the compiler prefers the array_type, since it must already have
     // that latter value in hand for the fast path.
-    klassOopDesc* elem_type = objArrayKlass::cast(array_type)->element_klass();
+    Klass* elem_type = ObjArrayKlass::cast(array_type)->element_klass();
     result = oopFactory::new_objArray(elem_type, len, THREAD);
   }
 
@@ -311,7 +309,7 @@ JRT_BLOCK_ENTRY(void, OptoRuntime::new_array_C(klassOopDesc* array_type, int len
 JRT_END
 
 // array allocation without zeroing
-JRT_BLOCK_ENTRY(void, OptoRuntime::new_array_nozero_C(klassOopDesc* array_type, int len, JavaThread *thread))
+JRT_BLOCK_ENTRY(void, OptoRuntime::new_array_nozero_C(Klass* array_type, int len, JavaThread *thread))
   JRT_BLOCK;
 #ifndef PRODUCT
   SharedRuntime::_new_array_ctr++;            // new array requires GC
@@ -321,9 +319,9 @@ JRT_BLOCK_ENTRY(void, OptoRuntime::new_array_nozero_C(klassOopDesc* array_type, 
   // Scavenge and allocate an instance.
   oop result;
 
-  assert(Klass::cast(array_type)->oop_is_typeArray(), "should be called only for type array");
+  assert(array_type->oop_is_typeArray(), "should be called only for type array");
   // The oopFactory likes to work with the element type.
-  BasicType elem_type = typeArrayKlass::cast(array_type)->element_type();
+  BasicType elem_type = TypeArrayKlass::cast(array_type)->element_type();
   result = oopFactory::new_typeArray_nozero(elem_type, len, THREAD);
 
   // Pass oops back through thread local storage.  Our apparent type to Java
@@ -344,7 +342,7 @@ JRT_BLOCK_ENTRY(void, OptoRuntime::new_array_nozero_C(klassOopDesc* array_type, 
       is_deoptimized_caller_frame(thread)) {
     // Zero array here if the caller is deoptimized.
     int size = ((typeArrayOop)result)->object_size();
-    BasicType elem_type = typeArrayKlass::cast(array_type)->element_type();
+    BasicType elem_type = TypeArrayKlass::cast(array_type)->element_type();
     const size_t hs = arrayOopDesc::header_size(elem_type);
     // Align to next 8 bytes to avoid trashing arrays's length.
     const size_t aligned_hs = align_object_offset(hs);
@@ -361,74 +359,74 @@ JRT_END
 // Note: multianewarray for one dimension is handled inline by GraphKit::new_array.
 
 // multianewarray for 2 dimensions
-JRT_ENTRY(void, OptoRuntime::multianewarray2_C(klassOopDesc* elem_type, int len1, int len2, JavaThread *thread))
+JRT_ENTRY(void, OptoRuntime::multianewarray2_C(Klass* elem_type, int len1, int len2, JavaThread *thread))
 #ifndef PRODUCT
   SharedRuntime::_multi2_ctr++;                // multianewarray for 1 dimension
 #endif
   assert(check_compiled_frame(thread), "incorrect caller");
-  assert(oop(elem_type)->is_klass(), "not a class");
+  assert(elem_type->is_klass(), "not a class");
   jint dims[2];
   dims[0] = len1;
   dims[1] = len2;
-  oop obj = arrayKlass::cast(elem_type)->multi_allocate(2, dims, THREAD);
+  oop obj = ArrayKlass::cast(elem_type)->multi_allocate(2, dims, THREAD);
   deoptimize_caller_frame(thread, HAS_PENDING_EXCEPTION);
   thread->set_vm_result(obj);
 JRT_END
 
 // multianewarray for 3 dimensions
-JRT_ENTRY(void, OptoRuntime::multianewarray3_C(klassOopDesc* elem_type, int len1, int len2, int len3, JavaThread *thread))
+JRT_ENTRY(void, OptoRuntime::multianewarray3_C(Klass* elem_type, int len1, int len2, int len3, JavaThread *thread))
 #ifndef PRODUCT
   SharedRuntime::_multi3_ctr++;                // multianewarray for 1 dimension
 #endif
   assert(check_compiled_frame(thread), "incorrect caller");
-  assert(oop(elem_type)->is_klass(), "not a class");
+  assert(elem_type->is_klass(), "not a class");
   jint dims[3];
   dims[0] = len1;
   dims[1] = len2;
   dims[2] = len3;
-  oop obj = arrayKlass::cast(elem_type)->multi_allocate(3, dims, THREAD);
+  oop obj = ArrayKlass::cast(elem_type)->multi_allocate(3, dims, THREAD);
   deoptimize_caller_frame(thread, HAS_PENDING_EXCEPTION);
   thread->set_vm_result(obj);
 JRT_END
 
 // multianewarray for 4 dimensions
-JRT_ENTRY(void, OptoRuntime::multianewarray4_C(klassOopDesc* elem_type, int len1, int len2, int len3, int len4, JavaThread *thread))
+JRT_ENTRY(void, OptoRuntime::multianewarray4_C(Klass* elem_type, int len1, int len2, int len3, int len4, JavaThread *thread))
 #ifndef PRODUCT
   SharedRuntime::_multi4_ctr++;                // multianewarray for 1 dimension
 #endif
   assert(check_compiled_frame(thread), "incorrect caller");
-  assert(oop(elem_type)->is_klass(), "not a class");
+  assert(elem_type->is_klass(), "not a class");
   jint dims[4];
   dims[0] = len1;
   dims[1] = len2;
   dims[2] = len3;
   dims[3] = len4;
-  oop obj = arrayKlass::cast(elem_type)->multi_allocate(4, dims, THREAD);
+  oop obj = ArrayKlass::cast(elem_type)->multi_allocate(4, dims, THREAD);
   deoptimize_caller_frame(thread, HAS_PENDING_EXCEPTION);
   thread->set_vm_result(obj);
 JRT_END
 
 // multianewarray for 5 dimensions
-JRT_ENTRY(void, OptoRuntime::multianewarray5_C(klassOopDesc* elem_type, int len1, int len2, int len3, int len4, int len5, JavaThread *thread))
+JRT_ENTRY(void, OptoRuntime::multianewarray5_C(Klass* elem_type, int len1, int len2, int len3, int len4, int len5, JavaThread *thread))
 #ifndef PRODUCT
   SharedRuntime::_multi5_ctr++;                // multianewarray for 1 dimension
 #endif
   assert(check_compiled_frame(thread), "incorrect caller");
-  assert(oop(elem_type)->is_klass(), "not a class");
+  assert(elem_type->is_klass(), "not a class");
   jint dims[5];
   dims[0] = len1;
   dims[1] = len2;
   dims[2] = len3;
   dims[3] = len4;
   dims[4] = len5;
-  oop obj = arrayKlass::cast(elem_type)->multi_allocate(5, dims, THREAD);
+  oop obj = ArrayKlass::cast(elem_type)->multi_allocate(5, dims, THREAD);
   deoptimize_caller_frame(thread, HAS_PENDING_EXCEPTION);
   thread->set_vm_result(obj);
 JRT_END
 
-JRT_ENTRY(void, OptoRuntime::multianewarrayN_C(klassOopDesc* elem_type, arrayOopDesc* dims, JavaThread *thread))
+JRT_ENTRY(void, OptoRuntime::multianewarrayN_C(Klass* elem_type, arrayOopDesc* dims, JavaThread *thread))
   assert(check_compiled_frame(thread), "incorrect caller");
-  assert(oop(elem_type)->is_klass(), "not a class");
+  assert(elem_type->is_klass(), "not a class");
   assert(oop(dims)->is_typeArray(), "not an array");
 
   ResourceMark rm;
@@ -438,7 +436,7 @@ JRT_ENTRY(void, OptoRuntime::multianewarrayN_C(klassOopDesc* elem_type, arrayOop
   jint *c_dims = NEW_RESOURCE_ARRAY(jint, len);
   Copy::conjoint_jints_atomic(j_dims, c_dims, len);
 
-  oop obj = arrayKlass::cast(elem_type)->multi_allocate(len, c_dims, THREAD);
+  oop obj = ArrayKlass::cast(elem_type)->multi_allocate(len, c_dims, THREAD);
   deoptimize_caller_frame(thread, HAS_PENDING_EXCEPTION);
   thread->set_vm_result(obj);
 JRT_END
@@ -831,6 +829,28 @@ const TypeFunc* OptoRuntime::aescrypt_block_Type() {
   return TypeFunc::make(domain, range);
 }
 
+/**
+ * int updateBytesCRC32(int crc, byte* b, int len)
+ */
+const TypeFunc* OptoRuntime::updateBytesCRC32_Type() {
+  // create input type (domain)
+  int num_args      = 3;
+  int argcnt = num_args;
+  const Type** fields = TypeTuple::fields(argcnt);
+  int argp = TypeFunc::Parms;
+  fields[argp++] = TypeInt::INT;        // crc
+  fields[argp++] = TypePtr::NOTNULL;    // src
+  fields[argp++] = TypeInt::INT;        // len
+  assert(argp == TypeFunc::Parms+argcnt, "correct decoding");
+  const TypeTuple* domain = TypeTuple::make(TypeFunc::Parms+argcnt, fields);
+
+  // result type needed
+  fields = TypeTuple::fields(1);
+  fields[TypeFunc::Parms+0] = TypeInt::INT; // crc result
+  const TypeTuple* range = TypeTuple::make(TypeFunc::Parms+1, fields);
+  return TypeFunc::make(domain, range);
+}
+
 // for cipherBlockChaining calls of aescrypt encrypt/decrypt, four pointers and a length, returning void
 const TypeFunc* OptoRuntime::cipherBlockChaining_aescrypt_Type() {
   // create input type (domain)
@@ -886,7 +906,7 @@ const TypeFunc* OptoRuntime::profile_receiver_type_Type() {
 
 JRT_LEAF(void, OptoRuntime::profile_receiver_type_C(DataLayout* data, oopDesc* receiver))
   if (receiver == NULL) return;
-  klassOop receiver_klass = receiver->klass();
+  Klass* receiver_klass = receiver->klass();
 
   intptr_t* mdp = ((intptr_t*)(data)) + DataLayout::header_size_in_cells();
   int empty_row = -1;           // free row, if any is encountered
@@ -1195,7 +1215,7 @@ const TypeFunc *OptoRuntime::dtrace_method_entry_exit_Type() {
   // create input type (domain)
   const Type **fields = TypeTuple::fields(2);
   fields[TypeFunc::Parms+0] = TypeRawPtr::BOTTOM; // Thread-local storage
-  fields[TypeFunc::Parms+1] = TypeInstPtr::NOTNULL;  // methodOop;    Method we are entering
+  fields[TypeFunc::Parms+1] = TypeMetadataPtr::BOTTOM;  // Method*;    Method we are entering
   const TypeTuple *domain = TypeTuple::make(TypeFunc::Parms+2,fields);
 
   // create result type (range)
@@ -1225,8 +1245,8 @@ const TypeFunc *OptoRuntime::dtrace_object_alloc_Type() {
 
 JRT_ENTRY_NO_ASYNC(void, OptoRuntime::register_finalizer(oopDesc* obj, JavaThread* thread))
   assert(obj->is_oop(), "must be a valid oop");
-  assert(obj->klass()->klass_part()->has_finalizer(), "shouldn't be here otherwise");
-  instanceKlass::register_finalizer(instanceOop(obj), CHECK);
+  assert(obj->klass()->has_finalizer(), "shouldn't be here otherwise");
+  InstanceKlass::register_finalizer(instanceOop(obj), CHECK);
 JRT_END
 
 //-----------------------------------------------------------------------------

@@ -48,8 +48,7 @@ abstract class KrbAppMessage {
                HostAddress rAddress,
                boolean timestampRequired,
                boolean seqNumberRequired,
-               PrincipalName packetPrincipal,
-               Realm packetRealm)
+               PrincipalName packetPrincipal)
         throws KrbApErrException {
 
         if (!Krb5.AP_EMPTY_ADDRESSES_ALLOWED || sAddress != null) {
@@ -72,12 +71,18 @@ abstract class KrbAppMessage {
         }
 
         if (packetTimestamp != null) {
-            packetTimestamp.setMicroSeconds(packetUsec);
-            if (!packetTimestamp.inClockSkew())
+            if (packetUsec != null) {
+                packetTimestamp =
+                    packetTimestamp.withMicroSeconds(packetUsec.intValue());
+            }
+            if (!packetTimestamp.inClockSkew()) {
                 throw new KrbApErrException(Krb5.KRB_AP_ERR_SKEW);
-        } else
-            if (timestampRequired)
+            }
+        } else {
+            if (timestampRequired) {
                 throw new KrbApErrException(Krb5.KRB_AP_ERR_SKEW);
+            }
+        }
 
         // XXX check replay cache
         // if (rcache.repeated(packetTimestamp, packetUsec, packetSAddress))

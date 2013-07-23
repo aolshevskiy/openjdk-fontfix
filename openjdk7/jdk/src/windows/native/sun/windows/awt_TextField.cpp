@@ -237,7 +237,15 @@ AwtTextField::HandleEvent(MSG *msg, BOOL synthetic)
               }
               break;
           }
+    } else if (msg->message == WM_SETTINGCHANGE) {
+        if (msg->wParam == SPI_SETBEEP) {
+            SystemParametersInfo(SPI_GETBEEP, 0, &systemBeeperEnabled, 0);
+            if(systemBeeperEnabled){
+                SystemParametersInfo(SPI_SETBEEP, 1, NULL, 0);
+            }
+        }
     }
+
     /*
      * Store the 'synthetic' parameter so that the WM_PASTE security check
      * happens only for synthetic events.
@@ -247,7 +255,7 @@ AwtTextField::HandleEvent(MSG *msg, BOOL synthetic)
     m_synthetic = FALSE;
 
     if(systemBeeperEnabled){
-      SystemParametersInfo(SPI_SETBEEP, 1, NULL, 0);
+        SystemParametersInfo(SPI_SETBEEP, 1, NULL, 0);
     }
 
     return returnVal;

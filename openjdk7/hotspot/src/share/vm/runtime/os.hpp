@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -78,6 +78,10 @@ enum ThreadPriority {        // JLS 20.20.1-3
   CriticalPriority = 11      // Critical thread priority
 };
 
+// Executable parameter flag for os::commit_memory() and
+// os::commit_memory_or_exit().
+const bool ExecMem = true;
+
 // Typedef for structured exception handling support
 typedef void (*java_call_t)(JavaValue* value, methodHandle* method, JavaCallArguments* args, Thread* thread);
 
@@ -104,9 +108,16 @@ class os: AllStatic {
   static char*  pd_attempt_reserve_memory_at(size_t bytes, char* addr);
   static void   pd_split_reserved_memory(char *base, size_t size,
                                       size_t split, bool realloc);
-  static bool   pd_commit_memory(char* addr, size_t bytes, bool executable = false);
+  static bool   pd_commit_memory(char* addr, size_t bytes, bool executable);
   static bool   pd_commit_memory(char* addr, size_t size, size_t alignment_hint,
-                              bool executable = false);
+                                 bool executable);
+  // Same as pd_commit_memory() that either succeeds or calls
+  // vm_exit_out_of_memory() with the specified mesg.
+  static void   pd_commit_memory_or_exit(char* addr, size_t bytes,
+                                         bool executable, const char* mesg);
+  static void   pd_commit_memory_or_exit(char* addr, size_t size,
+                                         size_t alignment_hint,
+                                         bool executable, const char* mesg);
   static bool   pd_uncommit_memory(char* addr, size_t bytes);
   static bool   pd_release_memory(char* addr, size_t bytes);
 
@@ -180,11 +191,11 @@ class os: AllStatic {
   // Interface for detecting multiprocessor system
   static inline bool is_MP() {
     assert(_processor_count > 0, "invalid processor count");
-    return _processor_count > 1;
+    return _processor_count > 1 || AssumeMP;
   }
   static julong available_memory();
   static julong physical_memory();
-  static julong allocatable_physical_memory(julong size);
+  static bool has_allocatable_memory_limit(julong* limit);
   static bool is_server_class_machine();
 
   // number of CPUs
@@ -255,13 +266,22 @@ class os: AllStatic {
   static int    vm_allocation_granularity();
   static char*  reserve_memory(size_t bytes, char* addr = 0,
                                size_t alignment_hint = 0);
+  static char*  reserve_memory(size_t bytes, char* addr,
+                               size_t alignment_hint, MEMFLAGS flags);
   static char*  reserve_memory_aligned(size_t size, size_t alignment);
   static char*  attempt_reserve_memory_at(size_t bytes, char* addr);
   static void   split_reserved_memory(char *base, size_t size,
                                       size_t split, bool realloc);
-  static bool   commit_memory(char* addr, size_t bytes, bool executable = false);
+  static bool   commit_memory(char* addr, size_t bytes, bool executable);
   static bool   commit_memory(char* addr, size_t size, size_t alignment_hint,
-                              bool executable = false);
+                              bool executable);
+  // Same as commit_memory() that either succeeds or calls
+  // vm_exit_out_of_memory() with the specified mesg.
+  static void   commit_memory_or_exit(char* addr, size_t bytes,
+                                      bool executable, const char* mesg);
+  static void   commit_memory_or_exit(char* addr, size_t size,
+                                      size_t alignment_hint,
+                                      bool executable, const char* mesg);
   static bool   uncommit_memory(char* addr, size_t bytes);
   static bool   release_memory(char* addr, size_t bytes);
 
@@ -454,6 +474,7 @@ class os: AllStatic {
   // File i/o operations
   static const int default_file_open_flags();
   static int open(const char *path, int oflag, int mode);
+  static FILE* open(int fd, const char* mode);
   static int close(int fd);
   static jlong lseek(int fd, jlong offset, int whence);
   static char* native_path(char *path);
@@ -477,24 +498,25 @@ class os: AllStatic {
   static const char*    dll_file_extension();
 
   static const char*    get_temp_directory();
-  static const char*    get_current_directory(char *buf, int buflen);
+  static const char*    get_current_directory(char *buf, size_t buflen);
 
   // Builds a platform-specific full library path given a ld path and lib name
-  static void           dll_build_name(char* buffer, size_t size,
+  // Returns true if buffer contains full path to existing file, false otherwise
+  static bool           dll_build_name(char* buffer, size_t size,
                                        const char* pathname, const char* fname);
 
   // Symbol lookup, find nearest function name; basically it implements
   // dladdr() for all platforms. Name of the nearest function is copied
-  // to buf. Distance from its base address is returned as offset.
+  // to buf. Distance from its base address is optionally returned as offset.
   // If function name is not found, buf[0] is set to '\0' and offset is
-  // set to -1.
+  // set to -1 (if offset is non-NULL).
   static bool dll_address_to_function_name(address addr, char* buf,
                                            int buflen, int* offset);
 
   // Locate DLL/DSO. On success, full path of the library is copied to
-  // buf, and offset is set to be the distance between addr and the
-  // library's base address. On failure, buf[0] is set to '\0' and
-  // offset is set to -1.
+  // buf, and offset is optionally set to be the distance between addr
+  // and the library's base address. On failure, buf[0] is set to '\0'
+  // and offset is set to -1 (if offset is non-NULL).
   static bool dll_address_to_library_name(address addr, char* buf,
                                           int buflen, int* offset);
 
@@ -639,10 +661,6 @@ class os: AllStatic {
   static int get_host_name(char* name, int namelen);
 
   static struct hostent* get_host_by_name(char* name);
-
-  // Printing 64 bit integers
-  static const char* jlong_format_specifier();
-  static const char* julong_format_specifier();
 
   // Support for signals (see JVM_RaiseSignal, JVM_RegisterSignal)
   static void  signal_init();
@@ -837,14 +855,7 @@ class os: AllStatic {
     /* try to switch state from state "from" to state "to"
      * returns the state set after the method is complete
      */
-    State switch_state(State from, State to) {
-      State result = (State) Atomic::cmpxchg((jint) to, (jint *) &_state, (jint) from);
-      if (result == from) {
-        // success
-        return to;
-      }
-      return result;
-    }
+    State switch_state(State from, State to);
 
   public:
     SuspendResume() : _state(SR_RUNNING) { }
@@ -904,8 +915,6 @@ class os: AllStatic {
 // of the global SpinPause() with C linkage.
 // It'd also be eligible for inlining on many platforms.
 
-extern "C" int SpinPause () ;
-extern "C" int SafeFetch32 (int * adr, int errValue) ;
-extern "C" intptr_t SafeFetchN (intptr_t * adr, intptr_t errValue) ;
+extern "C" int SpinPause();
 
 #endif // SHARE_VM_RUNTIME_OS_HPP

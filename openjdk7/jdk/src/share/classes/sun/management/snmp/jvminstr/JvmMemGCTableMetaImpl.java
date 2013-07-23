@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,6 +57,8 @@ import sun.management.snmp.util.JvmContextFactory;
  * The class is used for implementing the "JvmMemGCTable" table.
  */
 public class JvmMemGCTableMetaImpl extends  JvmMemGCTableMeta {
+
+    static final long serialVersionUID = 8250461197108867607L;
 
     /**
      * This class acts as a filter over the SnmpTableHandler

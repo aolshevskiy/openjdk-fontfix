@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package com.sun.crypto.provider;
 
-import java.math.BigInteger;
 import java.security.*;
 import java.security.spec.*;
 import javax.crypto.spec.DHParameterSpec;
@@ -68,10 +67,10 @@ extends AlgorithmParameterGeneratorSpi {
      * @param random the source of randomness
      */
     protected void engineInit(int keysize, SecureRandom random) {
-        if ((keysize < 512) || (keysize > 1024) || (keysize % 64 != 0)) {
+        if ((keysize < 512) || (keysize > 2048) || (keysize % 64 != 0)) {
             throw new InvalidParameterException("Keysize must be multiple "
                                                 + "of 64, and can only range "
-                                                + "from 512 to 1024 "
+                                                + "from 512 to 2048 "
                                                 + "(inclusive)");
         }
         this.primeSize = keysize;
@@ -100,10 +99,10 @@ extends AlgorithmParameterGeneratorSpi {
             DHGenParameterSpec dhParamSpec = (DHGenParameterSpec)genParamSpec;
 
             primeSize = dhParamSpec.getPrimeSize();
-            if ((primeSize<512) || (primeSize>1024) || (primeSize%64 != 0)) {
+            if ((primeSize<512) || (primeSize>2048) || (primeSize%64 != 0)) {
                 throw new InvalidAlgorithmParameterException
                     ("Modulus size must be multiple of 64, and can only range "
-                     + "from 512 to 1024 (inclusive)");
+                     + "from 512 to 2048 (inclusive)");
             }
 
             exponentSize = dhParamSpec.getExponentSize();
@@ -132,7 +131,7 @@ extends AlgorithmParameterGeneratorSpi {
         }
 
         if (this.random == null)
-            this.random = SunJCE.RANDOM;
+            this.random = SunJCE.getRandom();
 
         try {
             AlgorithmParameterGenerator paramGen;
@@ -141,8 +140,7 @@ extends AlgorithmParameterGeneratorSpi {
             paramGen = AlgorithmParameterGenerator.getInstance("DSA");
             paramGen.init(this.primeSize, random);
             algParams = paramGen.generateParameters();
-            dsaParamSpec = (DSAParameterSpec)
-                algParams.getParameterSpec(DSAParameterSpec.class);
+            dsaParamSpec = algParams.getParameterSpec(DSAParameterSpec.class);
 
             DHParameterSpec dhParamSpec;
             if (this.exponentSize > 0) {
@@ -153,7 +151,8 @@ extends AlgorithmParameterGeneratorSpi {
                 dhParamSpec = new DHParameterSpec(dsaParamSpec.getP(),
                                                   dsaParamSpec.getG());
             }
-            algParams = AlgorithmParameters.getInstance("DH", "SunJCE");
+            algParams = AlgorithmParameters.getInstance("DH",
+                    SunJCE.getInstance());
             algParams.init(dhParamSpec);
         } catch (InvalidParameterSpecException e) {
             // this should never happen
@@ -161,11 +160,7 @@ extends AlgorithmParameterGeneratorSpi {
         } catch (NoSuchAlgorithmException e) {
             // this should never happen, because we provide it
             throw new RuntimeException(e.getMessage());
-        } catch (NoSuchProviderException e) {
-            // this should never happen, because we provide it
-            throw new RuntimeException(e.getMessage());
         }
-
         return algParams;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 package com.sun.xml.internal.ws.transport.http;
 
 import com.sun.istack.internal.NotNull;
-import com.sun.xml.internal.ws.api.server.EndpointComponent;
+import com.sun.xml.internal.ws.api.Component;
 import com.sun.xml.internal.ws.api.server.WSEndpoint;
 
 import java.io.IOException;
@@ -35,11 +35,11 @@ import java.io.IOException;
  * Intercepts GET HTTP requests to process the requests.
  *
  * <p>
- * {@link HttpAdapter} looks for this SPI in {@link WSEndpoint#getComponentRegistry()}
+ * {@link HttpAdapter} looks for this SPI in {@link WSEndpoint#getComponents()}
  * to allow components to expose additional information through HTTP.
  *
  * @author Kohsuke Kawaguchi
- * @see EndpointComponent#getSPI(Class)
+ * @see Component#getSPI(Class)
  * @since 2.1.2
  */
 public abstract class HttpMetadataPublisher {

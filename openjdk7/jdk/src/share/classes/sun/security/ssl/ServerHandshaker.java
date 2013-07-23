@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,7 +43,6 @@ import javax.security.auth.Subject;
 import sun.security.ssl.HandshakeMessage.*;
 import sun.security.ssl.CipherSuite.*;
 import sun.security.ssl.SignatureAndHashAlgorithm.*;
-import static sun.security.ssl.CipherSuite.*;
 import static sun.security.ssl.CipherSuite.KeyExchange.*;
 
 /**
@@ -63,7 +62,7 @@ final class ServerHandshaker extends Handshaker {
     private X509Certificate[]   certs;
     private PrivateKey          privateKey;
 
-    private SecretKey[]       kerberosKeys;
+    private Object              serviceCreds;
 
     // flag to check for clientCertificateVerify message
     private boolean             needClientVerify = false;
@@ -144,6 +143,7 @@ final class ServerHandshaker extends Handshaker {
      * It updates the state machine as each message is processed, and writes
      * responses as needed using the connection in the constructor.
      */
+    @Override
     void processMessage(byte type, int message_len)
             throws IOException {
         //
@@ -200,7 +200,8 @@ final class ServerHandshaker extends Handshaker {
                             clientRequestedVersion,
                             sslContext.getSecureRandom(),
                             input,
-                            kerberosKeys));
+                            this.getAccSE(),
+                            serviceCreds));
                     break;
                 case K_DHE_RSA:
                 case K_DHE_DSS:
@@ -276,6 +277,35 @@ final class ServerHandshaker extends Handshaker {
     private void clientHello(ClientHello mesg) throws IOException {
         if (debug != null && Debug.isOn("handshake")) {
             mesg.print(System.out);
+        }
+
+        // Reject client initiated renegotiation?
+        //
+        // If server side should reject client-initiated renegotiation,
+        // send an alert_handshake_failure fatal alert, not a no_renegotiation
+        // warning alert (no_renegotiation must be a warning: RFC 2246).
+        // no_renegotiation might seem more natural at first, but warnings
+        // are not appropriate because the sending party does not know how
+        // the receiving party will behave.  This state must be treated as
+        // a fatal server condition.
+        //
+        // This will not have any impact on server initiated renegotiation.
+        if (rejectClientInitiatedRenego && !isInitialHandshake &&
+                state != HandshakeMessage.ht_hello_request) {
+            fatalSE(Alerts.alert_handshake_failure,
+                "Client initiated renegotiation is not allowed");
+        }
+
+        // check the server name indication if required
+        ServerNameExtension clientHelloSNIExt = (ServerNameExtension)
+                    mesg.extensions.get(ExtensionType.EXT_SERVER_NAME);
+        if (!sniMatchers.isEmpty()) {
+            // we do not reject client without SNI extension
+            if (clientHelloSNIExt != null &&
+                        !clientHelloSNIExt.isMatched(sniMatchers)) {
+                fatalSE(Alerts.alert_unrecognized_name,
+                    "Unrecognized server name indication");
+            }
         }
 
         // Does the message include security renegotiation indication?
@@ -356,7 +386,7 @@ final class ServerHandshaker extends Handshaker {
             } else if (!allowUnsafeRenegotiation) {
                 // abort the handshake
                 if (activeProtocolVersion.v >= ProtocolVersion.TLS10.v) {
-                    // response with a no_renegotiation warning,
+                    // respond with a no_renegotiation warning
                     warningSE(Alerts.alert_no_renegotiation);
 
                     // invalidate the handshake so that the caller can
@@ -476,6 +506,26 @@ final class ServerHandshaker extends Handshaker {
                     }
                 }
 
+                // cannot resume session with different server name indication
+                if (resumingSession) {
+                    List<SNIServerName> oldServerNames =
+                            previous.getRequestedServerNames();
+                    if (clientHelloSNIExt != null) {
+                        if (!clientHelloSNIExt.isIdentical(oldServerNames)) {
+                            resumingSession = false;
+                        }
+                    } else if (!oldServerNames.isEmpty()) {
+                        resumingSession = false;
+                    }
+
+                    if (!resumingSession &&
+                            debug != null && Debug.isOn("handshake")) {
+                        System.out.println(
+                            "The requested server name indication " +
+                            "is not identical to the previous one");
+                    }
+                }
+
                 if (resumingSession &&
                         (doClientAuth == SSLEngineImpl.clauth_required)) {
                     try {
@@ -496,6 +546,7 @@ final class ServerHandshaker extends Handshaker {
                         try {
                             subject = AccessController.doPrivileged(
                                 new PrivilegedExceptionAction<Subject>() {
+                                @Override
                                 public Subject run() throws Exception {
                                     return
                                         Krb5Helper.getServerSubject(getAccSE());
@@ -510,18 +561,15 @@ final class ServerHandshaker extends Handshaker {
 
                         if (subject != null) {
                             // Eliminate dependency on KerberosPrincipal
-                            Set<Principal> principals =
-                                subject.getPrincipals(Principal.class);
-                            if (!principals.contains(localPrincipal)) {
-                                resumingSession = false;
-                                if (debug != null && Debug.isOn("session")) {
-                                    System.out.println("Subject identity" +
-                                                        " is not the same");
-                                }
-                            } else {
+                            if (Krb5Helper.isRelated(subject, localPrincipal)) {
                                 if (debug != null && Debug.isOn("session"))
-                                    System.out.println("Subject identity" +
-                                                        " is same");
+                                    System.out.println("Subject can" +
+                                            " provide creds for princ");
+                            } else {
+                                resumingSession = false;
+                                if (debug != null && Debug.isOn("session"))
+                                    System.out.println("Subject cannot" +
+                                            " provide creds for princ");
                             }
                         } else {
                             resumingSession = false;
@@ -615,6 +663,14 @@ final class ServerHandshaker extends Handshaker {
                     // algorithms in chooseCipherSuite()
             }
 
+            // set the server name indication in the session
+            List<SNIServerName> clientHelloSNI =
+                    Collections.<SNIServerName>emptyList();
+            if (clientHelloSNIExt != null) {
+                clientHelloSNI = clientHelloSNIExt.getServerNames();
+            }
+            session.setRequestedServerNames(clientHelloSNI);
+
             // set the handshake session
             setHandshakeSessionSE(session);
 
@@ -631,9 +687,6 @@ final class ServerHandshaker extends Handshaker {
         }
 
         if (protocolVersion.v >= ProtocolVersion.TLS12.v) {
-            if (resumingSession) {
-                handshakeHash.setCertificateVerifyAlg(null);
-            }
             handshakeHash.setFinishedAlg(cipherSuite.prfAlg.getPRFHashAlg());
         }
 
@@ -654,6 +707,15 @@ final class ServerHandshaker extends Handshaker {
             HelloExtension serverHelloRI = new RenegotiationInfoExtension(
                                         clientVerifyData, serverVerifyData);
             m1.extensions.add(serverHelloRI);
+        }
+
+        if (!sniMatchers.isEmpty() && clientHelloSNIExt != null) {
+            // When resuming a session, the server MUST NOT include a
+            // server_name extension in the server hello.
+            if (!resumingSession) {
+                ServerNameExtension serverHelloSNI = new ServerNameExtension();
+                m1.extensions.add(serverHelloSNI);
+            }
         }
 
         if (debug != null && Debug.isOn("handshake")) {
@@ -834,7 +896,6 @@ final class ServerHandshaker extends Handshaker {
                     throw new SSLHandshakeException(
                             "No supported signature algorithm");
                 }
-                handshakeHash.restrictCertificateVerifyAlgs(localHashAlgs);
             }
 
             caCerts = sslContext.getX509TrustManager().getAcceptedIssuers();
@@ -845,10 +906,6 @@ final class ServerHandshaker extends Handshaker {
                 m4.print(System.out);
             }
             m4.write(output);
-        } else {
-            if (protocolVersion.v >= ProtocolVersion.TLS12.v) {
-                handshakeHash.setCertificateVerifyAlg(null);
-            }
         }
 
         /*
@@ -1274,48 +1331,51 @@ final class ServerHandshaker extends Handshaker {
      * @return true if successful, false if not available or invalid
      */
     private boolean setupKerberosKeys() {
-        if (kerberosKeys != null) {
+        if (serviceCreds != null) {
             return true;
         }
         try {
             final AccessControlContext acc = getAccSE();
-            kerberosKeys = AccessController.doPrivileged(
+            serviceCreds = AccessController.doPrivileged(
                 // Eliminate dependency on KerberosKey
-                new PrivilegedExceptionAction<SecretKey[]>() {
-                public SecretKey[] run() throws Exception {
+                new PrivilegedExceptionAction<Object>() {
+                @Override
+                public Object run() throws Exception {
                     // get kerberos key for the default principal
-                    return Krb5Helper.getServerKeys(acc);
+                    return Krb5Helper.getServiceCreds(acc);
                         }});
 
             // check permission to access and use the secret key of the
             // Kerberized "host" service
-            if (kerberosKeys != null && kerberosKeys.length > 0) {
+            if (serviceCreds != null) {
                 if (debug != null && Debug.isOn("handshake")) {
-                    for (SecretKey k: kerberosKeys) {
-                        System.out.println("Using Kerberos key: " +
-                            k);
+                    System.out.println("Using Kerberos creds");
+                }
+                String serverPrincipal =
+                        Krb5Helper.getServerPrincipalName(serviceCreds);
+                if (serverPrincipal != null) {
+                    // When service is bound, we check ASAP. Otherwise,
+                    // will check after client request is received
+                    // in in Kerberos ClientKeyExchange
+                    SecurityManager sm = System.getSecurityManager();
+                    try {
+                        if (sm != null) {
+                            // Eliminate dependency on ServicePermission
+                            sm.checkPermission(Krb5Helper.getServicePermission(
+                                    serverPrincipal, "accept"), acc);
+                        }
+                    } catch (SecurityException se) {
+                        serviceCreds = null;
+                        // Do not destroy keys. Will affect Subject
+                        if (debug != null && Debug.isOn("handshake")) {
+                            System.out.println("Permission to access Kerberos"
+                                    + " secret key denied");
+                        }
+                        return false;
                     }
                 }
-
-                String serverPrincipal =
-                    Krb5Helper.getServerPrincipalName(kerberosKeys[0]);
-                SecurityManager sm = System.getSecurityManager();
-                try {
-                   if (sm != null) {
-                      // Eliminate dependency on ServicePermission
-                      sm.checkPermission(Krb5Helper.getServicePermission(
-                          serverPrincipal, "accept"), acc);
-                   }
-                } catch (SecurityException se) {
-                   kerberosKeys = null;
-                   // %%% destroy keys? or will that affect Subject?
-                   if (debug != null && Debug.isOn("handshake"))
-                      System.out.println("Permission to access Kerberos"
-                                + " secret key denied");
-                   return false;
-                }
             }
-            return (kerberosKeys != null && kerberosKeys.length > 0);
+            return serviceCreds != null;
         } catch (PrivilegedActionException e) {
             // Likely exception here is LoginExceptin
             if (debug != null && Debug.isOn("handshake")) {
@@ -1407,8 +1467,6 @@ final class ServerHandshaker extends Handshaker {
                 throw new SSLHandshakeException(
                         "No supported hash algorithm");
             }
-
-            handshakeHash.setCertificateVerifyAlg(hashAlg);
         }
 
         try {
@@ -1553,6 +1611,7 @@ final class ServerHandshaker extends Handshaker {
     /*
      * Returns a HelloRequest message to kickstart renegotiations
      */
+    @Override
     HandshakeMessage getKickstartMessage() {
         return new HelloRequest();
     }
@@ -1561,6 +1620,7 @@ final class ServerHandshaker extends Handshaker {
     /*
      * Fault detected during handshake.
      */
+    @Override
     void handshakeAlert(byte description) throws SSLProtocolException {
 
         String message = Alerts.alertDescription(description);
@@ -1621,11 +1681,6 @@ final class ServerHandshaker extends Handshaker {
              * not *REQUIRED*, this is an acceptable condition.)
              */
             if (doClientAuth == SSLEngineImpl.clauth_requested) {
-                // Smart (aka stupid) to forecast that no CertificateVerify
-                // message will be received.
-                if (protocolVersion.v >= ProtocolVersion.TLS12.v) {
-                    handshakeHash.setCertificateVerifyAlg(null);
-                }
                 return;
             } else {
                 fatalSE(Alerts.alert_bad_certificate,

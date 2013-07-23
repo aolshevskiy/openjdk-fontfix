@@ -31,6 +31,7 @@ import java.awt.GraphicsConfiguration;
 import java.awt.Image;
 import java.awt.ImageCapabilities;
 import java.awt.image.BufferedImage;
+import java.awt.image.VolatileImage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Iterator;
 import sun.java2d.SurfaceData;
@@ -88,7 +89,7 @@ public abstract class SurfaceManager {
         imgaccessor.setSurfaceManager(img, mgr);
     }
 
-    private ConcurrentHashMap cacheMap;
+    private ConcurrentHashMap<Object,Object> cacheMap;
 
     /**
      * Return an arbitrary cached object for an arbitrary cache key.
@@ -123,7 +124,7 @@ public abstract class SurfaceManager {
         if (cacheMap == null) {
             synchronized (this) {
                 if (cacheMap == null) {
-                    cacheMap = new ConcurrentHashMap(2);
+                    cacheMap = new ConcurrentHashMap<>(2);
                 }
             }
         }
@@ -245,7 +246,7 @@ public abstract class SurfaceManager {
 
     synchronized void flush(boolean deaccelerate) {
         if (cacheMap != null) {
-            Iterator i = cacheMap.values().iterator();
+            Iterator<Object> i = cacheMap.values().iterator();
             while (i.hasNext()) {
                 Object o = i.next();
                 if (o instanceof FlushableCacheData) {
@@ -286,5 +287,19 @@ public abstract class SurfaceManager {
         if (priority == 0.0f) {
             flush(true);
         }
+    }
+
+    /**
+     * Returns a scale factor of the image. This is utility method, which
+     * fetches information from the SurfaceData of the image.
+     *
+     * @see SurfaceData#getDefaultScale
+     */
+    public static int getImageScale(final Image img) {
+        if (!(img instanceof VolatileImage)) {
+            return 1;
+        }
+        final SurfaceManager sm = getManager(img);
+        return sm.getPrimarySurfaceData().getDefaultScale();
     }
 }

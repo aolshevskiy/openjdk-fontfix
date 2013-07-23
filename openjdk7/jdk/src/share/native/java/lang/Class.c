@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,7 +55,7 @@ extern jboolean VerifyFixClassname(char *utf_name);
 static JNINativeMethod methods[] = {
     {"getName0",         "()" STR,          (void *)&JVM_GetClassName},
     {"getSuperclass",    "()" CLS,          NULL},
-    {"getInterfaces",    "()[" CLS,         (void *)&JVM_GetClassInterfaces},
+    {"getInterfaces0",   "()[" CLS,         (void *)&JVM_GetClassInterfaces},
     {"getClassLoader0",  "()" JCL,          (void *)&JVM_GetClassLoader},
     {"isInterface",      "()Z",             (void *)&JVM_IsInterface},
     {"getSigners",       "()[" OBJ,         (void *)&JVM_GetClassSigners},
@@ -68,14 +68,14 @@ static JNINativeMethod methods[] = {
     {"getDeclaredMethods0","(Z)[" MHD,      (void *)&JVM_GetClassDeclaredMethods},
     {"getDeclaredConstructors0","(Z)[" CTR, (void *)&JVM_GetClassDeclaredConstructors},
     {"getProtectionDomain0", "()" PD,       (void *)&JVM_GetProtectionDomain},
-    {"setProtectionDomain0", "(" PD ")V",   (void *)&JVM_SetProtectionDomain},
     {"getDeclaredClasses0",  "()[" CLS,      (void *)&JVM_GetDeclaredClasses},
     {"getDeclaringClass",   "()" CLS,      (void *)&JVM_GetDeclaringClass},
-    {"getGenericSignature", "()" STR,       (void *)&JVM_GetClassSignature},
+    {"getGenericSignature0", "()" STR,      (void *)&JVM_GetClassSignature},
     {"getRawAnnotations",      "()" BA,        (void *)&JVM_GetClassAnnotations},
     {"getConstantPool",     "()" CPL,       (void *)&JVM_GetClassConstantPool},
     {"desiredAssertionStatus0","("CLS")Z",(void *)&JVM_DesiredAssertionStatus},
-    {"getEnclosingMethod0", "()[" OBJ,      (void *)&JVM_GetEnclosingMethodInfo}
+    {"getEnclosingMethod0", "()[" OBJ,      (void *)&JVM_GetEnclosingMethodInfo},
+    {"getRawTypeAnnotations", "()" BA,      (void *)&JVM_GetClassTypeAnnotations},
 };
 
 #undef OBJ

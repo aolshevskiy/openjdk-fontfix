@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,7 +56,6 @@
  */
 
 import java.security.KeyStore;
-import sun.security.tools.KeyTool;
 import sun.security.x509.*;
 import java.io.*;
 import java.security.KeyPairGenerator;
@@ -149,12 +148,13 @@ public class KeyToolTest {
             System.setOut(new PrintStream(b1));
             System.setErr(new PrintStream(b2));
 
-            // since System.in is overrided, the KeyTool.main() method will
+            // since System.in is overrided, the
+            // sun.security.tools.keytool.Main.main() method will
             // never block at user input
 
-            // use -debug so that KeyTool.main() will throw an Exception
+            // use -debug so that main() will throw an Exception
             // instead of calling System.exit()
-            KeyTool.main(("-debug "+cmd).split("\\s+"));
+            sun.security.tools.keytool.Main.main(("-debug "+cmd).split("\\s+"));
         } finally {
             out = b1.toString();
             err = b2.toString();
@@ -453,12 +453,17 @@ public class KeyToolTest {
         assertTrue(err.indexOf("not imported") != -1, "Not imported");
         assertTrue(err.indexOf("Cannot store non-PrivateKeys") != -1, "Not imported");
 
+        // Importing a JCEKS keystore to a JKS one. Will warn for the 2 SecretKey entries
+
         remove("x.jks");
+        // Two "no" answers to bypass warnings
         testOK("\n\n", "-srcstorepass changeit -deststorepass changeit -importkeystore -srckeystore x.jceks -srcstoretype JCEKS -destkeystore x.jks -deststoretype JKS"); // normal
         assertTrue(err.indexOf("s1 not") != -1, "s1 not");
         assertTrue(err.indexOf("s2 not") != -1, "s2 not");
         assertTrue(err.indexOf("c1 success") != -1, "c1 success");
         assertTrue(err.indexOf("p1 success") != -1, "p1 success");
+        remove("x.jks");
+        // One "yes" to stop
         testOK("yes\n", "-srcstorepass changeit -deststorepass changeit -importkeystore -srckeystore x.jceks -srcstoretype JCEKS -destkeystore x.jks -deststoretype JKS"); // normal
         // maybe c1 or p1 has been imported before s1 or s2 is touched, anyway we know yesNo is only asked once.
 
@@ -1278,52 +1283,58 @@ public class KeyToolTest {
     }
 
     public static void main(String[] args) throws Exception {
-        // first test if HumanInputStream really acts like a human being
-        HumanInputStream.test();
-        KeyToolTest t = new KeyToolTest();
+        Locale reservedLocale = Locale.getDefault();
+        try {
+            // first test if HumanInputStream really acts like a human being
+            HumanInputStream.test();
+            KeyToolTest t = new KeyToolTest();
 
-        if (System.getProperty("file") != null) {
-            t.sqeTest();
-            t.testAll();
-            t.i18nTest();
-            t.v3extTest("RSA");
-            t.v3extTest("DSA");
-            boolean testEC = true;
-            try {
-                KeyPairGenerator.getInstance("EC");
-            } catch (NoSuchAlgorithmException nae) {
-                testEC = false;
+            if (System.getProperty("file") != null) {
+                t.sqeTest();
+                t.testAll();
+                t.i18nTest();
+                t.v3extTest("RSA");
+                t.v3extTest("DSA");
+                boolean testEC = true;
+                try {
+                    KeyPairGenerator.getInstance("EC");
+                } catch (NoSuchAlgorithmException nae) {
+                    testEC = false;
+                }
+                if (testEC) t.v3extTest("EC");
             }
-            if (testEC) t.v3extTest("EC");
+
+            if (System.getProperty("nss") != null) {
+                t.srcP11Arg = NSS_SRC_P11_ARG;
+                t.p11Arg = NSS_P11_ARG;
+
+                t.testPKCS11();
+
+                // FAIL:
+                // 1. we still don't have srcprovidername yet
+                // 2. cannot store privatekey into NSS keystore
+                //    java.security.KeyStoreException: sun.security.pkcs11.wrapper.PKCS11Exception: CKR_TEMPLATE_INCOMPLETE.
+                //t.testPKCS11ImportKeyStore();
+
+                t.i18nPKCS11Test();
+                //FAIL: currently PKCS11-NSS does not support 2 NSS KeyStores to be loaded at the same time
+                //t.sszzTest();
+            }
+
+            if (System.getProperty("solaris") != null) {
+                // For Solaris Cryptography Framework
+                t.srcP11Arg = SUN_SRC_P11_ARG;
+                t.p11Arg = SUN_P11_ARG;
+                t.testPKCS11();
+                t.testPKCS11ImportKeyStore();
+                t.i18nPKCS11Test();
+            }
+
+            System.out.println("Test pass!!!");
+        } finally {
+            // restore the reserved locale
+            Locale.setDefault(reservedLocale);
         }
-
-        if (System.getProperty("nss") != null) {
-            t.srcP11Arg = NSS_SRC_P11_ARG;
-            t.p11Arg = NSS_P11_ARG;
-
-            t.testPKCS11();
-
-            // FAIL:
-            // 1. we still don't have srcprovidername yet
-            // 2. cannot store privatekey into NSS keystore
-            //    java.security.KeyStoreException: sun.security.pkcs11.wrapper.PKCS11Exception: CKR_TEMPLATE_INCOMPLETE.
-            //t.testPKCS11ImportKeyStore();
-
-            t.i18nPKCS11Test();
-            //FAIL: currently PKCS11-NSS does not support 2 NSS KeyStores to be loaded at the same time
-            //t.sszzTest();
-        }
-
-        if (System.getProperty("solaris") != null) {
-            // For Solaris Cryptography Framework
-            t.srcP11Arg = SUN_SRC_P11_ARG;
-            t.p11Arg = SUN_P11_ARG;
-            t.testPKCS11();
-            t.testPKCS11ImportKeyStore();
-            t.i18nPKCS11Test();
-        }
-
-        System.out.println("Test pass!!!");
     }
 }
 

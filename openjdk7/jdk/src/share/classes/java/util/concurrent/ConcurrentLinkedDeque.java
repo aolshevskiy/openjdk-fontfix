@@ -42,6 +42,9 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Queue;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.function.Consumer;
 
 /**
  * An unbounded concurrent {@linkplain Deque deque} based on linked nodes.
@@ -90,7 +93,6 @@ import java.util.Queue;
  * @author Martin Buchholz
  * @param <E> the type of elements held in this collection
  */
-
 public class ConcurrentLinkedDeque<E>
     extends AbstractCollection<E>
     implements Deque<E>, java.io.Serializable {
@@ -335,7 +337,7 @@ public class ConcurrentLinkedDeque<E>
         static {
             try {
                 UNSAFE = sun.misc.Unsafe.getUnsafe();
-                Class k = Node.class;
+                Class<?> k = Node.class;
                 prevOffset = UNSAFE.objectFieldOffset
                     (k.getDeclaredField("prev"));
                 itemOffset = UNSAFE.objectFieldOffset
@@ -817,7 +819,7 @@ public class ConcurrentLinkedDeque<E>
      * Creates an array list and fills it with elements of this list.
      * Used by toArray.
      *
-     * @return the arrayList
+     * @return the array list
      */
     private ArrayList<E> toArrayList() {
         ArrayList<E> list = new ArrayList<E>();
@@ -1025,11 +1027,27 @@ public class ConcurrentLinkedDeque<E>
     }
 
     public E poll()           { return pollFirst(); }
-    public E remove()         { return removeFirst(); }
     public E peek()           { return peekFirst(); }
-    public E element()        { return getFirst(); }
-    public void push(E e)     { addFirst(e); }
+
+    /**
+     * @throws NoSuchElementException {@inheritDoc}
+     */
+    public E remove()         { return removeFirst(); }
+
+    /**
+     * @throws NoSuchElementException {@inheritDoc}
+     */
     public E pop()            { return removeFirst(); }
+
+    /**
+     * @throws NoSuchElementException {@inheritDoc}
+     */
+    public E element()        { return getFirst(); }
+
+    /**
+     * @throws NullPointerException {@inheritDoc}
+     */
+    public void push(E e)     { addFirst(e); }
 
     /**
      * Removes the first element {@code e} such that
@@ -1250,8 +1268,7 @@ public class ConcurrentLinkedDeque<E>
      * The following code can be used to dump the deque into a newly
      * allocated array of {@code String}:
      *
-     * <pre>
-     *     String[] y = x.toArray(new String[0]);</pre>
+     *  <pre> {@code String[] y = x.toArray(new String[0]);}</pre>
      *
      * Note that {@code toArray(new Object[0])} is identical in function to
      * {@code toArray()}.
@@ -1387,12 +1404,104 @@ public class ConcurrentLinkedDeque<E>
         Node<E> nextNode(Node<E> p) { return pred(p); }
     }
 
+    /** A customized variant of Spliterators.IteratorSpliterator */
+    static final class CLDSpliterator<E> implements Spliterator<E> {
+        static final int MAX_BATCH = 1 << 25;  // max batch array size;
+        final ConcurrentLinkedDeque<E> queue;
+        Node<E> current;    // current node; null until initialized
+        int batch;          // batch size for splits
+        boolean exhausted;  // true when no more nodes
+        CLDSpliterator(ConcurrentLinkedDeque<E> queue) {
+            this.queue = queue;
+        }
+
+        public Spliterator<E> trySplit() {
+            Node<E> p;
+            final ConcurrentLinkedDeque<E> q = this.queue;
+            int b = batch;
+            int n = (b <= 0) ? 1 : (b >= MAX_BATCH) ? MAX_BATCH : b + 1;
+            if (!exhausted &&
+                ((p = current) != null || (p = q.first()) != null)) {
+                if (p.item == null && p == (p = p.next))
+                    current = p = q.first();
+                if (p != null && p.next != null) {
+                    Object[] a = new Object[n];
+                    int i = 0;
+                    do {
+                        if ((a[i] = p.item) != null)
+                            ++i;
+                        if (p == (p = p.next))
+                            p = q.first();
+                    } while (p != null && i < n);
+                    if ((current = p) == null)
+                        exhausted = true;
+                    if (i > 0) {
+                        batch = i;
+                        return Spliterators.spliterator
+                            (a, 0, i, Spliterator.ORDERED | Spliterator.NONNULL |
+                             Spliterator.CONCURRENT);
+                    }
+                }
+            }
+            return null;
+        }
+
+        public void forEachRemaining(Consumer<? super E> action) {
+            Node<E> p;
+            if (action == null) throw new NullPointerException();
+            final ConcurrentLinkedDeque<E> q = this.queue;
+            if (!exhausted &&
+                ((p = current) != null || (p = q.first()) != null)) {
+                exhausted = true;
+                do {
+                    E e = p.item;
+                    if (p == (p = p.next))
+                        p = q.first();
+                    if (e != null)
+                        action.accept(e);
+                } while (p != null);
+            }
+        }
+
+        public boolean tryAdvance(Consumer<? super E> action) {
+            Node<E> p;
+            if (action == null) throw new NullPointerException();
+            final ConcurrentLinkedDeque<E> q = this.queue;
+            if (!exhausted &&
+                ((p = current) != null || (p = q.first()) != null)) {
+                E e;
+                do {
+                    e = p.item;
+                    if (p == (p = p.next))
+                        p = q.first();
+                } while (e == null && p != null);
+                if ((current = p) == null)
+                    exhausted = true;
+                if (e != null) {
+                    action.accept(e);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public long estimateSize() { return Long.MAX_VALUE; }
+
+        public int characteristics() {
+            return Spliterator.ORDERED | Spliterator.NONNULL |
+                Spliterator.CONCURRENT;
+        }
+    }
+
+    public Spliterator<E> spliterator() {
+        return new CLDSpliterator<E>(this);
+    }
+
     /**
-     * Saves the state to a stream (that is, serializes it).
+     * Saves this deque to a stream (that is, serializes it).
      *
      * @serialData All of the elements (each an {@code E}) in
      * the proper order, followed by a null
-     * @param s the stream
      */
     private void writeObject(java.io.ObjectOutputStream s)
         throws java.io.IOException {
@@ -1412,8 +1521,7 @@ public class ConcurrentLinkedDeque<E>
     }
 
     /**
-     * Reconstitutes the instance from a stream (that is, deserializes it).
-     * @param s the stream
+     * Reconstitutes this deque from a stream (that is, deserializes it).
      */
     private void readObject(java.io.ObjectInputStream s)
         throws java.io.IOException, ClassNotFoundException {
@@ -1436,7 +1544,6 @@ public class ConcurrentLinkedDeque<E>
         initHeadTail(h, t);
     }
 
-
     private boolean casHead(Node<E> cmp, Node<E> val) {
         return UNSAFE.compareAndSwapObject(this, headOffset, cmp, val);
     }
@@ -1457,7 +1564,7 @@ public class ConcurrentLinkedDeque<E>
         NEXT_TERMINATOR.prev = NEXT_TERMINATOR;
         try {
             UNSAFE = sun.misc.Unsafe.getUnsafe();
-            Class k = ConcurrentLinkedDeque.class;
+            Class<?> k = ConcurrentLinkedDeque.class;
             headOffset = UNSAFE.objectFieldOffset
                 (k.getDeclaredField("head"));
             tailOffset = UNSAFE.objectFieldOffset

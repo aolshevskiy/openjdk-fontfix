@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,40 +27,38 @@
  * <h1>JAX-WS 2.1 Tools</h1>
  * This document describes the tools included with JAX-WS 2.0.1.
  *
- * {@DotDiagram
-     digraph G {
-       // external tools
-       APT;
+ * {@DotDiagram digraph G {
+// external tools
+AP;
 
-       // ANT tasks
-       node [style=filled,color=lightyellow];
-       "WsGen ANT Task"; "WsImport ANT Task"; "Apt ANT Task";
+// ANT tasks
+node [style=filled,color=lightyellow];
+"WsGen ANT Task"; "WsImport ANT Task";
 
-      // commandline
-       node [style=filled,color=lightpink];
-       wsgen; wsimport;
+// commandline
+node [style=filled,color=lightpink];
+wsgen; wsimport;
 
-       // libraries
-      node [style=filled,color=lightblue];
-      WsimportTool; WsgenTool;"WSAP"; WebServiceAP; WSDLModeler;WSDLParser;SeiGenerator;ServiceGenerator;ExceptionGenerator;"JAXB XJC APIs";CodeModel;
+// libraries
+node [style=filled,color=lightblue];
+WsimportTool; WsgenTool;"WSAP"; WebServiceAp; WSDLModeler;WSDLParser;SeiGenerator;ServiceGenerator;ExceptionGenerator;"JAXB XJC APIs";CodeModel;
 
-       // aps
+// aps
 #       node [style=filled,color=lightpink];
 #       "JAX-WS"; tools; runtime; SPI; "Annotation Processor";
 
-       "Apt ANT Task" -> APT;
-       "WsGen ANT Task" -> wsgen -> WsgenTool;
-       "WsImport ANT Task" -> wsimport -> WsimportTool;
+"WsGen ANT Task" -> wsgen -> WsgenTool;
+"WsImport ANT Task" -> wsimport -> WsimportTool;
 
-       WsgenTool -> APT -> WSAP -> WebServiceAP;
-       WsimportTool -> WSDLModeler;
-       WSDLModeler->WSDLParser;
-       WSDLModeler->"JAXB XJC APIs"
-       WsimportTool->SeiGenerator->CodeModel;
-       WsimportTool->ServiceGenerator->CodeModel;
-       WsimportTool->ExceptionGenerator->CodeModel;
-       WebServiceAP->CodeModel
-     }
+WsgenTool -> Annotation Processing -> WSAP -> WebServiceAp;
+WsimportTool -> WSDLModeler;
+WSDLModeler->WSDLParser;
+WSDLModeler->"JAXB XJC APIs"
+WsimportTool->SeiGenerator->CodeModel;
+WsimportTool->ServiceGenerator->CodeModel;
+WsimportTool->ExceptionGenerator->CodeModel;
+WebServiceAp->CodeModel
+}
  * }
  * <div align=right>
  * <b>Legend:</b> blue: implementation classes, pink: command-line toosl, white: external tool, yellow: ANT tasks
@@ -68,8 +66,8 @@
  *
  * <h2>ANT Tasks</h2>
    <d1>
- *  <dt>{@link com.sun.tools.internal.ws.ant.Apt Apt}
- *  <dd>An ANT task to invoke <a href="http://java.sun.com/j2se/1.5.0/docs/tooldocs/share/apt.html">APT</a>.
+ *  <dt>{@link com.sun.tools.internal.ws.ant.AnnotationProcessingTask AnnotationProcessing}
+ *  <dd>An ANT task to invoke <a href="http://download.oracle.com/javase/6/docs/api/javax/annotation/processing/package-summary.html">Annotation Processing</a>.
 
  *  <dt>{@link com.sun.tools.internal.ws.ant.WsGen2 WsGen}
  *  <dd>
@@ -82,10 +80,10 @@
  *  </d1>
  * <h2>Command-line Tools</h2>
    <d1>
- *  <dt><a href="http://java.sun.com/j2se/1.5.0/docs/tooldocs/share/apt.html">APT</a>
-     <dd>A Java SE tool and framework for processing annotations. APT will invoke a JAX-WS AnnotationProcossor for
+ *  <dt><a href="http://download.oracle.com/javase/6/docs/api/javax/annotation/processing/package-summary.html">AP</a>
+ <dd>A Java SE tool and framework for processing annotations. Annotation processing will invoke a JAX-WS AnnotationProcossor for
  *   processing Java source  files with javax.jws.* annotations and making them web services.
- *   APT will compile the Java source files and generate any additional classes needed to make an javax.jws.WebService
+ *   Annotation processing will compile the Java source files and generate any additional classes needed to make an javax.jws.WebService
  *   annotated class a Web service.
  *
  *  <dt>{@link com.sun.tools.internal.ws.WsGen WsGen}
@@ -112,14 +110,10 @@
  *    <dt>{@link com.sun.tools.internal.ws.processor.modeler.wsdl.WSDLModeler WSDLModeler}
  *    <dd>The WSDLModeler processes a WSDL to create a Model.
  *
- *    <dt>{@link com.sun.tools.internal.ws.processor.modeler.annotation.WebServiceAP WebServiceAP}
- *    <dd>WebServiceAP is a APT AnnotationProcessor for processing javax.jws.* and
+ *    <dt>{@link com.sun.tools.internal.ws.processor.modeler.annotation.WebServiceAp WebServiceAp}
+ *    <dd>WebServiceAp is a AnnotationProcessor for processing javax.jws.* and
  *    javax.xml.ws.* annotations. This class is used either by the WsGen (CompileTool) tool or
- *    idirectly via the {@link com.sun.istack.internal.ws.WSAP WSAP} when invoked by APT.
- *
- *    <dt>{@link com.sun.istack.internal.ws.AnnotationProcessorFactoryImpl WSAP}
- *    <dd>This is the entry point for the WebServiceAP when APT is invoked on a SEI
- *    annotated with the javax.jws.WebService annotation.
+ *    idirectly via the {@link com.sun.istack.internal.ws.WSAP WSAP} when invoked by Annotation Processing.
  *   </d1>
  *
  * @ArchitectureDocument

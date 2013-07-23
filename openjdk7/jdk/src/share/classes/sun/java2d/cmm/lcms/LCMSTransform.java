@@ -56,8 +56,10 @@ import static sun.java2d.cmm.lcms.LCMSImageLayout.ImageLayoutException;
 
 public class LCMSTransform implements ColorTransform {
     long ID;
-    private int inFormatter;
-    private int outFormatter;
+    private int inFormatter = 0;
+    private boolean isInIntPacked = false;
+    private int outFormatter = 0;
+    private boolean isOutIntPacked = false;
 
     ICC_Profile[] profiles;
     long [] profileIDs;
@@ -136,18 +138,23 @@ public class LCMSTransform implements ColorTransform {
                                           LCMSImageLayout out) {
         // update native transfrom if needed
         if (ID == 0L ||
-            inFormatter != in.pixelType ||
-            outFormatter != out.pixelType) {
+            inFormatter != in.pixelType || isInIntPacked != in.isIntPacked ||
+            outFormatter != out.pixelType || isOutIntPacked != out.isIntPacked)
+        {
 
             if (ID != 0L) {
                 // Disposer will destroy forgotten transform
                 disposerReferent = new Object();
             }
             inFormatter = in.pixelType;
+            isInIntPacked = in.isIntPacked;
+
             outFormatter = out.pixelType;
+            isOutIntPacked = out.isIntPacked;
 
             ID = LCMS.createNativeTransform(profileIDs, renderType,
-                                            inFormatter, outFormatter,
+                                            inFormatter, isInIntPacked,
+                                            outFormatter, isOutIntPacked,
                                             disposerReferent);
         }
 
@@ -155,17 +162,23 @@ public class LCMSTransform implements ColorTransform {
     }
 
     public void colorConvert(BufferedImage src, BufferedImage dst) {
-        if (LCMSImageLayout.isSupported(src) &&
-            LCMSImageLayout.isSupported(dst))
-        {
-            try {
-                doTransform(new LCMSImageLayout(src), new LCMSImageLayout(dst));
-                return;
-            } catch (ImageLayoutException e) {
-                throw new CMMException("Unable to convert images");
-            }
-        }
         LCMSImageLayout srcIL, dstIL;
+        try {
+            if (!dst.getColorModel().hasAlpha()) {
+                dstIL = LCMSImageLayout.createImageLayout(dst);
+
+                if (dstIL != null) {
+                    srcIL = LCMSImageLayout.createImageLayout(src);
+                    if (srcIL != null) {
+                        doTransform(srcIL, dstIL);
+                        return;
+                    }
+                }
+            }
+        }  catch (ImageLayoutException e) {
+            throw new CMMException("Unable to convert images");
+        }
+
         Raster srcRas = src.getRaster();
         WritableRaster dstRas = dst.getRaster();
         ColorModel srcCM = src.getColorModel();
@@ -447,6 +460,14 @@ public class LCMSTransform implements ColorTransform {
     public void colorConvert(Raster src, WritableRaster dst) {
 
         LCMSImageLayout srcIL, dstIL;
+        dstIL = LCMSImageLayout.createImageLayout(dst);
+        if (dstIL != null) {
+            srcIL = LCMSImageLayout.createImageLayout(src);
+            if (srcIL != null) {
+                doTransform(srcIL, dstIL);
+                return;
+            }
+        }
         // Can't pass src and dst directly to CMM, so process per scanline
         SampleModel srcSM = src.getSampleModel();
         SampleModel dstSM = dst.getSampleModel();

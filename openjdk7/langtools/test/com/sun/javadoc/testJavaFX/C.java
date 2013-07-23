@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,6 +57,7 @@ public class C {
      * Defines the direction/speed at which the {@code Timeline} is expected to
      * be played.
      * @defaultValue 11
+     * @since JavaFX 8.0
      */
     private DoubleProperty rate;
 

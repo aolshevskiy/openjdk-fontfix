@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,8 +37,7 @@ import sun.net.www.ParseUtil;
  * The abstract class <code>URLStreamHandler</code> is the common
  * superclass for all stream protocol handlers. A stream protocol
  * handler knows how to make a connection for a particular protocol
- * type, such as <code>http</code>, <code>ftp</code>, or
- * <code>gopher</code>.
+ * type, such as <code>http</code> or <code>https</code>.
  * <p>
  * In most cases, an instance of a <code>URLStreamHandler</code>
  * subclass is not created directly by an application. Rather, the
@@ -510,8 +509,8 @@ public abstract class URLStreamHandler {
 
     /**
      * Sets the fields of the <code>URL</code> argument to the indicated values.
-     * Only classes derived from URLStreamHandler are supposed to be able
-     * to call the set method on a URL.
+     * Only classes derived from URLStreamHandler are able
+     * to use this method to set the values of the URL fields.
      *
      * @param   u         the URL to modify.
      * @param   protocol  the protocol name.
@@ -540,8 +539,8 @@ public abstract class URLStreamHandler {
 
     /**
      * Sets the fields of the <code>URL</code> argument to the indicated values.
-     * Only classes derived from URLStreamHandler are supposed to be able
-     * to call the set method on a URL.
+     * Only classes derived from URLStreamHandler are able
+     * to use this method to set the values of the URL fields.
      *
      * @param   u         the URL to modify.
      * @param   protocol  the protocol name. This value is ignored since 1.2.

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,10 +26,10 @@
 package com.sun.xml.internal.ws.server.provider;
 
 import com.sun.istack.internal.NotNull;
-import com.sun.xml.internal.bind.api.JAXBRIContext;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.server.AsyncProvider;
 import com.sun.xml.internal.ws.resources.ServerMessages;
+import com.sun.xml.internal.ws.spi.db.BindingHelper;
 
 import javax.activation.DataSource;
 import javax.xml.soap.SOAPMessage;
@@ -83,7 +83,7 @@ final class ProviderEndpointModel<T> {
 
 
         Class<? extends Object> baseType = isAsync ? AsyncProvider.class : Provider.class;
-        Type baseParam = JAXBRIContext.getBaseType(implementorClass, baseType);
+        Type baseParam = BindingHelper.getBaseType(implementorClass, baseType);
         if (baseParam==null)
             throw new WebServiceException(ServerMessages.NOT_IMPLEMENT_PROVIDER(implementorClass.getName()));
         if (!(baseParam instanceof ParameterizedType))

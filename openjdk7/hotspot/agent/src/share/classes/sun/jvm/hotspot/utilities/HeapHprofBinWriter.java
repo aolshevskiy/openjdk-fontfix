@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -477,8 +477,8 @@ public class HeapHprofBinWriter extends AbstractHeapGraphWriter {
         if (k instanceof InstanceKlass) {
             InstanceKlass ik = (InstanceKlass) k;
             writeObjectID(ik.getClassLoader());
-            writeObjectID(ik.getSigners());
-            writeObjectID(ik.getProtectionDomain());
+            writeObjectID(null);  // ik.getJavaMirror().getSigners());
+            writeObjectID(null);  // ik.getJavaMirror().getProtectionDomain());
             // two reserved id fields
             writeObjectID(null);
             writeObjectID(null);
@@ -516,8 +516,8 @@ public class HeapHprofBinWriter extends AbstractHeapGraphWriter {
                 if (bottomKlass instanceof InstanceKlass) {
                     InstanceKlass ik = (InstanceKlass) bottomKlass;
                     writeObjectID(ik.getClassLoader());
-                    writeObjectID(ik.getSigners());
-                    writeObjectID(ik.getProtectionDomain());
+                    writeObjectID(null); // ik.getJavaMirror().getSigners());
+                    writeObjectID(null); // ik.getJavaMirror().getProtectionDomain());
                 } else {
                     writeObjectID(null);
                     writeObjectID(null);
@@ -721,7 +721,7 @@ public class HeapHprofBinWriter extends AbstractHeapGraphWriter {
 
         ClassData cd = (ClassData) classDataCache.get(klass);
         if (Assert.ASSERTS_ENABLED) {
-            Assert.that(cd != null, "can not get class data for " + klass.getName().asString() + klass.getHandle());
+            Assert.that(cd != null, "can not get class data for " + klass.getName().asString() + klass.getAddress());
         }
         List fields = cd.fields;
         int size = cd.instSize;

@@ -158,8 +158,7 @@ public class ScrollPaneAdjustable implements Adjustable, Serializable {
         if (!GraphicsEnvironment.isHeadless()) {
             initIDs();
         }
-        AWTAccessor.setScrollPaneAdjustableAccessor(
-                new AWTAccessor.ScrollPaneAdjustableAccessor() {
+        AWTAccessor.setScrollPaneAdjustableAccessor(new AWTAccessor.ScrollPaneAdjustableAccessor() {
             public void setTypedValue(final ScrollPaneAdjustable adj,
                                       final int v, final int type) {
                 adj.setTypedValue(v, type);

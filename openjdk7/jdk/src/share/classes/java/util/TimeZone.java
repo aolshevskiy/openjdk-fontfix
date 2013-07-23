@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,13 +42,14 @@ import java.io.Serializable;
 import java.lang.ref.SoftReference;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.time.ZoneId;
 import java.util.concurrent.ConcurrentHashMap;
-import sun.misc.SharedSecrets;
 import sun.misc.JavaAWTAccess;
+import sun.misc.SharedSecrets;
 import sun.security.action.GetPropertyAction;
-import sun.util.TimeZoneNameUtility;
 import sun.util.calendar.ZoneInfo;
 import sun.util.calendar.ZoneInfoFile;
+import sun.util.locale.provider.TimeZoneNameUtility;
 
 /**
  * <code>TimeZone</code> represents a time zone offset, and also figures out daylight
@@ -221,7 +222,7 @@ abstract public class TimeZone implements Serializable, Cloneable {
      * @param date the milliseconds (since January 1, 1970,
      * 00:00:00.000 GMT) at which the time zone offset and daylight
      * saving amount are found
-     * @param offset an array of int where the raw GMT offset
+     * @param offsets an array of int where the raw GMT offset
      * (offset[0]) and daylight saving amount (offset[1]) are stored,
      * or null if those values are not needed. The method assumes that
      * the length of the given array is two or larger.
@@ -399,65 +400,27 @@ abstract public class TimeZone implements Serializable, Cloneable {
         if (style != SHORT && style != LONG) {
             throw new IllegalArgumentException("Illegal style: " + style);
         }
-
         String id = getID();
-        String[] names = getDisplayNames(id, locale);
-        if (names == null) {
-            if (id.startsWith("GMT")) {
-                char sign = id.charAt(3);
-                if (sign == '+' || sign == '-') {
-                    return id;
-                }
-            }
-            int offset = getRawOffset();
-            if (daylight) {
-                offset += getDSTSavings();
-            }
-            return ZoneInfoFile.toCustomID(offset);
+        String name = TimeZoneNameUtility.retrieveDisplayName(id, daylight, style, locale);
+        if (name != null) {
+            return name;
         }
 
-        int index = daylight ? 3 : 1;
-        if (style == SHORT) {
-            index++;
+        if (id.startsWith("GMT") && id.length() > 3) {
+            char sign = id.charAt(3);
+            if (sign == '+' || sign == '-') {
+                return id;
+            }
         }
-        return names[index];
+        int offset = getRawOffset();
+        if (daylight) {
+            offset += getDSTSavings();
+        }
+        return ZoneInfoFile.toCustomID(offset);
     }
 
-    private static class DisplayNames {
-        // Cache for managing display names per timezone per locale
-        // The structure is:
-        //   Map(key=id, value=SoftReference(Map(key=locale, value=displaynames)))
-        private static final Map<String, SoftReference<Map<Locale, String[]>>> CACHE =
-            new ConcurrentHashMap<String, SoftReference<Map<Locale, String[]>>>();
-    }
-
-    private static final String[] getDisplayNames(String id, Locale locale) {
-        Map<String, SoftReference<Map<Locale, String[]>>> displayNames = DisplayNames.CACHE;
-
-        SoftReference<Map<Locale, String[]>> ref = displayNames.get(id);
-        if (ref != null) {
-            Map<Locale, String[]> perLocale = ref.get();
-            if (perLocale != null) {
-                String[] names = perLocale.get(locale);
-                if (names != null) {
-                    return names;
-                }
-                names = TimeZoneNameUtility.retrieveDisplayNames(id, locale);
-                if (names != null) {
-                    perLocale.put(locale, names);
-                }
-                return names;
-            }
-        }
-
-        String[] names = TimeZoneNameUtility.retrieveDisplayNames(id, locale);
-        if (names != null) {
-            Map<Locale, String[]> perLocale = new ConcurrentHashMap<Locale, String[]>();
-            perLocale.put(locale, names);
-            ref = new SoftReference<Map<Locale, String[]>>(perLocale);
-            displayNames.put(id, ref);
-        }
-        return names;
+    private static String[] getDisplayNames(String id, Locale locale) {
+        return TimeZoneNameUtility.retrieveDisplayNames(id, locale);
     }
 
     /**
@@ -557,6 +520,37 @@ abstract public class TimeZone implements Serializable, Cloneable {
         return getTimeZone(ID, true);
     }
 
+    /**
+     * Gets the {@code TimeZone} for the given {@code zoneId}.
+     *
+     * @param zoneId a {@link ZoneId} from which the time zone ID is obtained
+     * @return the specified {@code TimeZone}, or the GMT zone if the given ID
+     *         cannot be understood.
+     * @throws NullPointerException if {@code zoneId} is {@code null}
+     * @since 1.8
+     */
+    public static TimeZone getTimeZone(ZoneId zoneId) {
+        String tzid = zoneId.getId(); // throws an NPE if null
+        char c = tzid.charAt(0);
+        if (c == '+' || c == '-') {
+            tzid = "GMT" + tzid;
+        } else if (c == 'Z' && tzid.length() == 1) {
+            tzid = "UTC";
+        }
+        return getTimeZone(tzid, true);
+    }
+
+    /**
+     * Converts this {@code TimeZone} object to a {@code ZoneId}.
+     *
+     * @return a {@code ZoneId} representing the same time zone as this
+     *         {@code TimeZone}
+     * @since 1.8
+     */
+    public ZoneId toZoneId() {
+        return ZoneId.of(getID(), ZoneId.SHORT_IDS);
+    }
+
     private static TimeZone getTimeZone(String ID, boolean fallback) {
         TimeZone tz = ZoneInfo.getTimeZone(ID);
         if (tz == null) {
@@ -631,14 +625,14 @@ abstract public class TimeZone implements Serializable, Cloneable {
     }
 
     private static synchronized TimeZone setDefaultZone() {
-        TimeZone tz = null;
+        TimeZone tz;
         // get the time zone ID from the system properties
         String zoneID = AccessController.doPrivileged(
                 new GetPropertyAction("user.timezone"));
 
         // if the time zone ID is not set (yet), perform the
         // platform to Java time zone ID mapping.
-        if (zoneID == null || zoneID.equals("")) {
+        if (zoneID == null || zoneID.isEmpty()) {
             String country = AccessController.doPrivileged(
                     new GetPropertyAction("user.country"));
             String javaHome = AccessController.doPrivileged(
@@ -670,8 +664,9 @@ abstract public class TimeZone implements Serializable, Cloneable {
         assert tz != null;
 
         final String id = zoneID;
-        AccessController.doPrivileged(new PrivilegedAction<Object>() {
-                public Object run() {
+        AccessController.doPrivileged(new PrivilegedAction<Void>() {
+            @Override
+                public Void run() {
                     System.setProperty("user.timezone", id);
                     return null;
                 }
@@ -728,6 +723,7 @@ abstract public class TimeZone implements Serializable, Cloneable {
     private static TimeZone getDefaultInAppContext() {
         // JavaAWTAccess provides access implementation-private methods without using reflection.
         JavaAWTAccess javaAWTAccess = SharedSecrets.getJavaAWTAccess();
+
         if (javaAWTAccess == null) {
             return mainAppContextDefault;
         } else {
@@ -758,6 +754,7 @@ abstract public class TimeZone implements Serializable, Cloneable {
     private static void setDefaultInAppContext(TimeZone tz) {
         // JavaAWTAccess provides access implementation-private methods without using reflection.
         JavaAWTAccess javaAWTAccess = SharedSecrets.getJavaAWTAccess();
+
         if (javaAWTAccess == null) {
             mainAppContextDefault = tz;
         } else {
@@ -796,7 +793,7 @@ abstract public class TimeZone implements Serializable, Cloneable {
             other.ID = ID;
             return other;
         } catch (CloneNotSupportedException e) {
-            throw new InternalError();
+            throw new InternalError(e);
         }
     }
 

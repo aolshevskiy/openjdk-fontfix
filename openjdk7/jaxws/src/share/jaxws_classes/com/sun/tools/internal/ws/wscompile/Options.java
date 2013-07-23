@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,11 +28,15 @@ package com.sun.tools.internal.ws.wscompile;
 import com.sun.tools.internal.ws.resources.WscompileMessages;
 import com.sun.tools.internal.ws.Invoker;
 
+import javax.annotation.processing.Filer;
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.charset.Charset;
+import java.nio.charset.IllegalCharsetNameException;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.StringTokenizer;
@@ -71,6 +75,16 @@ public class Options {
      */
     public File sourceDir;
 
+    /**
+     * The filer that can use used to write out the generated files
+     */
+    public Filer filer;
+
+    /**
+     * -encoding
+     */
+    public String encoding;
+
     public String classpath = System.getProperty("java.class.path");
 
 
@@ -78,6 +92,12 @@ public class Options {
      * -Xnocompile
      */
     public boolean nocompile;
+
+    /**
+     * Disable secure xml processing.
+     * -XdisableSecureXmlProcessing
+     */
+    public boolean disableSecureXmlProcessing = false;
 
     public enum Target {
         V2_0, V2_1, V2_2;
@@ -167,13 +187,6 @@ public class Options {
         return compatibilityMode == EXTENSION;
     }
 
-    /**
-     * Target direcoty when producing files.
-     */
-    public File targetDir = new File(".");
-
-
-
     public boolean debug = false;
 
     /**
@@ -200,7 +213,10 @@ public class Options {
     public void removeGeneratedFiles(){
         for(File file : generatedFiles){
             if (file.getName().endsWith(".java")) {
-                file.delete();
+                boolean deleted = file.delete();
+                if (verbose && !deleted) {
+                    System.out.println(MessageFormat.format("{0} could not be deleted.", file));
+                }
             }
         }
         generatedFiles.clear();
@@ -222,7 +238,10 @@ public class Options {
         synchronized (generatedFiles) {
             for (File file : generatedFiles) {
                 if (file.getName().endsWith(".java")) {
-                    file.delete();
+                    boolean deleted = file.delete();
+                    if (verbose && !deleted) {
+                        System.out.println(MessageFormat.format("{0} could not be deleted.", file));
+                    }
                 }
             }
             generatedFiles.clear();
@@ -298,7 +317,10 @@ public class Options {
             if(target == null)
                 throw new BadCommandLineException(WscompileMessages.WSIMPORT_ILLEGAL_TARGET_VERSION(token));
             return 2;
-        }else if (args[i].equals("-d")) {
+        } else if (args[i].equals("-classpath") || args[i].equals("-cp")) {
+            classpath = requireArgument("-classpath", args, ++i) + File.pathSeparator + System.getProperty("java.class.path");
+            return 2;
+        } else if (args[i].equals("-d")) {
             destDir = new File(requireArgument("-d", args, ++i));
             if (!destDir.exists())
                 throw new BadCommandLineException(WscompileMessages.WSCOMPILE_NO_SUCH_DIRECTORY(destDir.getPath()));
@@ -321,6 +343,19 @@ public class Options {
             // -nocompile implies -keep. this is undocumented switch.
             nocompile = true;
             keep = true;
+            return 1;
+        } else if (args[i].equals("-encoding")) {
+            encoding = requireArgument("-encoding", args, ++i);
+            try {
+                if (!Charset.isSupported(encoding)) {
+                    throw new BadCommandLineException(WscompileMessages.WSCOMPILE_UNSUPPORTED_ENCODING(encoding));
+                }
+            } catch (IllegalCharsetNameException icne) {
+                throw new BadCommandLineException(WscompileMessages.WSCOMPILE_UNSUPPORTED_ENCODING(encoding));
+            }
+            return 2;
+        } else if (args[i].equals("-XdisableSecureXmlProcessing")) {
+            disableSecureXmlProcessing= true;
             return 1;
         }
         return 0;

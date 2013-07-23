@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -19,7 +19,7 @@
 # Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
 # or visit www.oracle.com if you need additional information or have any
 # questions.
-#  
+#
 #
 
 # Sets make macros for making debug version of VM
@@ -37,6 +37,8 @@ ifeq ("${Platform_compiler}", "sparcWorks")
 OPT_CFLAGS/SLOWER = -xO2
 
 ifeq ($(COMPILER_REV_NUMERIC), 510)
+# Avoid apparent crash because of corrupted methodHandle in a tail call
+OPT_CFLAGS/simpleThresholdPolicy.o = $(OPT_CFLAGS/DEFAULT) $(OPT_CCFLAGS/NO_TAIL_CALL_OPT)
 # CC 5.10 has bug XXXXX with -xO4
 OPT_CFLAGS/jvmtiClassFileReconstituter.o = $(OPT_CFLAGS/SLOWER)
 endif # COMPILER_REV_NUMERIC == 510
@@ -49,6 +51,8 @@ endif # COMPILER_NUMERIC_REV == 509
 ifeq ($(shell expr $(COMPILER_REV_NUMERIC) \>= 509), 1)
 # dtrace cannot handle tail call optimization (6672627, 6693876)
 OPT_CFLAGS/jni.o = $(OPT_CFLAGS/DEFAULT) $(OPT_CCFLAGS/NO_TAIL_CALL_OPT)
+# this hangs in iropt now (7113504)
+OPT_CFLAGS/compileBroker.o = $(OPT_CFLAGS/SLOWER)
 endif # COMPILER_NUMERIC_REV >= 509
 
 ifeq ($(COMPILER_REV_NUMERIC), 505)
@@ -114,11 +118,10 @@ CFLAGS += $(DEBUG_CFLAGS/BYFILE)
 MAPFILE = $(GAMMADIR)/make/solaris/makefiles/mapfile-vers \
 	  $(GAMMADIR)/make/solaris/makefiles/mapfile-vers-debug
 
-# This mapfile is only needed when compiling with dtrace support, 
+# This mapfile is only needed when compiling with dtrace support,
 # and mustn't be otherwise.
 MAPFILE_DTRACE = $(GAMMADIR)/make/solaris/makefiles/mapfile-vers-$(TYPE)
 
-G_SUFFIX = _g
 VERSION = optimized
-SYSDEFS += -DASSERT -DFASTDEBUG -DCHECK_UNHANDLED_OOPS
+SYSDEFS += -DASSERT -DCHECK_UNHANDLED_OOPS
 PICFLAGS = DEFAULT

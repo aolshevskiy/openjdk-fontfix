@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,9 +36,10 @@
 #include "runtime/interfaceSupport.hpp"
 #include "utilities/dtrace.hpp"
 #include "utilities/preserveException.hpp"
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/g1/g1CollectedHeap.inline.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 #ifndef USDT2
 HS_DTRACE_PROBE_DECL1(hotspot, gc__begin, bool);
@@ -70,13 +71,13 @@ void VM_GC_Operation::notify_gc_end() {
 
 void VM_GC_Operation::acquire_pending_list_lock() {
   // we may enter this with pending exception set
-  instanceRefKlass::acquire_pending_list_lock(&_pending_list_basic_lock);
+  InstanceRefKlass::acquire_pending_list_lock(&_pending_list_basic_lock);
 }
 
 
 void VM_GC_Operation::release_and_notify_pending_list_lock() {
 
-  instanceRefKlass::release_and_notify_pending_list_lock(&_pending_list_basic_lock);
+  InstanceRefKlass::release_and_notify_pending_list_lock(&_pending_list_basic_lock);
 }
 
 // Allocations may fail in several threads at about the same time,
@@ -172,7 +173,9 @@ void VM_GC_HeapInspection::doit() {
       warning("GC locker is held; pre-dump GC was skipped");
     }
   }
-  HeapInspection::heap_inspection(_out, _need_prologue /* need_prologue */);
+  HeapInspection inspect(_csv_format, _print_help, _print_class_stats,
+                         _columns);
+  inspect.heap_inspection(_out);
 }
 
 
@@ -197,31 +200,58 @@ void VM_GenCollectFull::doit() {
   gch->do_full_collection(gch->must_clear_all_soft_refs(), _max_level);
 }
 
-void VM_GenCollectForPermanentAllocation::doit() {
+void VM_CollectForMetadataAllocation::doit() {
   SvcGCMarker sgcm(SvcGCMarker::FULL);
 
-  SharedHeap* heap = (SharedHeap*)Universe::heap();
+  CollectedHeap* heap = Universe::heap();
   GCCauseSetter gccs(heap, _gc_cause);
-  switch (heap->kind()) {
-    case (CollectedHeap::GenCollectedHeap): {
-      GenCollectedHeap* gch = (GenCollectedHeap*)heap;
-      gch->do_full_collection(gch->must_clear_all_soft_refs(),
-                              gch->n_gens() - 1);
-      break;
+
+  // Check again if the space is available.  Another thread
+  // may have similarly failed a metadata allocation and induced
+  // a GC that freed space for the allocation.
+  if (!MetadataAllocationFailALot) {
+    _result = _loader_data->metaspace_non_null()->allocate(_size, _mdtype);
     }
-#ifndef SERIALGC
-    case (CollectedHeap::G1CollectedHeap): {
-      G1CollectedHeap* g1h = (G1CollectedHeap*)heap;
-      g1h->do_full_collection(_gc_cause == GCCause::_last_ditch_collection);
-      break;
+
+  if (_result == NULL) {
+    if (UseConcMarkSweepGC) {
+      if (CMSClassUnloadingEnabled) {
+        MetaspaceGC::set_should_concurrent_collect(true);
+      }
+      // For CMS expand since the collection is going to be concurrent.
+      _result =
+        _loader_data->metaspace_non_null()->expand_and_allocate(_size, _mdtype);
     }
-#endif // SERIALGC
-    default:
-      ShouldNotReachHere();
+    if (_result == NULL) {
+      // Don't clear the soft refs.  This GC is for reclaiming metadata
+      // and is unrelated to the fullness of the Java heap which should
+      // be the criteria for clearing SoftReferences.
+      if (Verbose && PrintGCDetails && UseConcMarkSweepGC) {
+        gclog_or_tty->print_cr("\nCMS full GC for Metaspace");
+      }
+      heap->collect_as_vm_thread(GCCause::_metadata_GC_threshold);
+      // After a GC try to allocate without expanding.  Could fail
+      // and expansion will be tried below.
+      _result =
+        _loader_data->metaspace_non_null()->allocate(_size, _mdtype);
+    }
+    if (_result == NULL && !UseConcMarkSweepGC /* CMS already tried */) {
+      // If still failing, allow the Metaspace to expand.
+      // See delta_capacity_until_GC() for explanation of the
+      // amount of the expansion.
+      // This should work unless there really is no more space
+      // or a MaxMetaspaceSize has been specified on the command line.
+      _result =
+        _loader_data->metaspace_non_null()->expand_and_allocate(_size, _mdtype);
+
+    }
+    if (Verbose && PrintGCDetails && _result == NULL) {
+      gclog_or_tty->print_cr("\nAfter Metaspace GC failed to allocate size "
+                             SIZE_FORMAT, _size);
+    }
   }
-  _res = heap->perm_gen()->allocate(_size, false);
-  assert(heap->is_in_reserved_or_null(_res), "result not in heap");
-  if (_res == NULL && GC_locker::is_active_and_needs_gc()) {
+
+  if (_result == NULL && GC_locker::is_active_and_needs_gc()) {
     set_gc_locked();
   }
 }

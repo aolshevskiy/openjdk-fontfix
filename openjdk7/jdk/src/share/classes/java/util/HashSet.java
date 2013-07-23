@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -247,13 +247,14 @@ public class HashSet<E>
      *
      * @return a shallow copy of this set
      */
+    @SuppressWarnings("unchecked")
     public Object clone() {
         try {
             HashSet<E> newSet = (HashSet<E>) super.clone();
             newSet.map = (HashMap<E, Object>) map.clone();
             return newSet;
         } catch (CloneNotSupportedException e) {
-            throw new InternalError();
+            throw new InternalError(e);
         }
     }
 
@@ -296,7 +297,7 @@ public class HashSet<E>
         // Read in HashMap capacity and load factor and create backing HashMap
         int capacity = s.readInt();
         float loadFactor = s.readFloat();
-        map = (((HashSet)this) instanceof LinkedHashSet ?
+        map = (((HashSet<?>)this) instanceof LinkedHashSet ?
                new LinkedHashMap<E,Object>(capacity, loadFactor) :
                new HashMap<E,Object>(capacity, loadFactor));
 
@@ -305,8 +306,13 @@ public class HashSet<E>
 
         // Read in all elements in the proper order.
         for (int i=0; i<size; i++) {
-            E e = (E) s.readObject();
+            @SuppressWarnings("unchecked")
+                E e = (E) s.readObject();
             map.put(e, PRESENT);
         }
+    }
+
+    public Spliterator<E> spliterator() {
+        return new HashMap.KeySpliterator<E,Object>(map, 0, -1, 0, 0);
     }
 }

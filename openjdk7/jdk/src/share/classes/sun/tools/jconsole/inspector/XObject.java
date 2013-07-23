@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package sun.tools.jconsole.inspector;
 
 // java import
 import javax.swing.*;
+import java.util.Objects;
 
 /**
  * This provides a wrapper to the Object class to allow it to be
@@ -48,16 +49,15 @@ public class XObject extends JLabel {
     }
 
     public boolean equals(Object o) {
-        try {
-            if (o instanceof XObject) {
-                return object.equals(((XObject)o).getObject());
-            }
-        }
-        catch (Throwable t) {
-            System.out.println("Error comparing XObjects"+
-                               t.getMessage());
+        if (o instanceof XObject) {
+            return Objects.equals(object, ((XObject)o).getObject());
         }
         return false;
+    }
+
+    @Override
+    public int hashCode() {
+        return object.hashCode();
     }
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,22 +28,11 @@
 #include "interpreter/bytecode.hpp"
 #include "interpreter/linkResolver.hpp"
 #include "memory/universe.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "runtime/frame.inline.hpp"
 #include "runtime/signature.hpp"
+#include "runtime/thread.inline.hpp"
 #include "utilities/top.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
 
 // The InterpreterRuntime is called by the interpreter for everything
 // that cannot/should not be dealt with in assembly and needs C support.
@@ -55,7 +44,7 @@ class InterpreterRuntime: AllStatic {
  private:
   // Helper functions to access current interpreter state
   static frame     last_frame(JavaThread *thread)    { return thread->last_frame(); }
-  static methodOop method(JavaThread *thread)        { return last_frame(thread).interpreter_frame_method(); }
+  static Method*   method(JavaThread *thread)        { return last_frame(thread).interpreter_frame_method(); }
   static address   bcp(JavaThread *thread)           { return last_frame(thread).interpreter_frame_bcp(); }
   static int       bci(JavaThread *thread)           { return last_frame(thread).interpreter_frame_bci(); }
   static void      set_bcp_and_mdp(address bcp, JavaThread*thread);
@@ -88,9 +77,9 @@ class InterpreterRuntime: AllStatic {
   static void    resolve_ldc   (JavaThread* thread, Bytecodes::Code bytecode);
 
   // Allocation
-  static void    _new          (JavaThread* thread, constantPoolOopDesc* pool, int index);
+  static void    _new          (JavaThread* thread, ConstantPool* pool, int index);
   static void    newarray      (JavaThread* thread, BasicType type, jint size);
-  static void    anewarray     (JavaThread* thread, constantPoolOopDesc* pool, int index, jint size);
+  static void    anewarray     (JavaThread* thread, ConstantPool* pool, int index, jint size);
   static void    multianewarray(JavaThread* thread, jint* first_size_address);
   static void    register_finalizer(JavaThread* thread, oopDesc* obj);
 
@@ -124,9 +113,9 @@ class InterpreterRuntime: AllStatic {
   static void    resolve_invokedynamic(JavaThread* thread);
 
   // Breakpoints
-  static void _breakpoint(JavaThread* thread, methodOopDesc* method, address bcp);
-  static Bytecodes::Code get_original_bytecode_at(JavaThread* thread, methodOopDesc* method, address bcp);
-  static void            set_original_bytecode_at(JavaThread* thread, methodOopDesc* method, address bcp, Bytecodes::Code new_code);
+  static void _breakpoint(JavaThread* thread, Method* method, address bcp);
+  static Bytecodes::Code get_original_bytecode_at(JavaThread* thread, Method* method, address bcp);
+  static void            set_original_bytecode_at(JavaThread* thread, Method* method, address bcp, Bytecodes::Code new_code);
   static bool is_breakpoint(JavaThread *thread) { return Bytecodes::code_or_bp_at(bcp(thread)) == Bytecodes::_breakpoint; }
 
   // Safepoints
@@ -142,9 +131,9 @@ class InterpreterRuntime: AllStatic {
   static int  interpreter_contains(address pc);
 
   // Native signature handlers
-  static void prepare_native_call(JavaThread* thread, methodOopDesc* method);
+  static void prepare_native_call(JavaThread* thread, Method* method);
   static address slow_signature_handler(JavaThread* thread,
-                                        methodOopDesc* method,
+                                        Method* method,
                                         intptr_t* from, intptr_t* to);
 
 #if defined(IA32) || defined(AMD64) || defined(ARM)
@@ -174,12 +163,13 @@ class InterpreterRuntime: AllStatic {
   static nmethod* frequency_counter_overflow(JavaThread* thread, address branch_bcp);
 
   // Interpreter profiling support
-  static jint    bcp_to_di(methodOopDesc* method, address cur_bcp);
+  static jint    bcp_to_di(Method* method, address cur_bcp);
   static void    profile_method(JavaThread* thread);
   static void    update_mdp_for_ret(JavaThread* thread, int bci);
 #ifdef ASSERT
-  static void    verify_mdp(methodOopDesc* method, address bcp, address mdp);
+  static void    verify_mdp(Method* method, address bcp, address mdp);
 #endif // ASSERT
+  static MethodCounters* build_method_counters(JavaThread* thread, Method* m);
 };
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,9 +28,10 @@
 #include "gc_implementation/shared/markSweep.hpp"
 #include "gc_interface/collectedHeap.hpp"
 #include "utilities/stack.inline.hpp"
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/parallelScavenge/psParallelCompact.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 inline void MarkSweep::mark_object(oop obj) {
   // some marks may contain information we need to preserve so we store them away
@@ -46,12 +47,6 @@ inline void MarkSweep::mark_object(oop obj) {
 template <class T> inline void MarkSweep::follow_root(T* p) {
   assert(!Universe::heap()->is_in_reserved(p),
          "roots shouldn't be things within the heap");
-#ifdef VALIDATE_MARK_SWEEP
-  if (ValidateMarkSweep) {
-    guarantee(!_root_refs_stack->contains(p), "should only be in here once");
-    _root_refs_stack->push(p);
-  }
-#endif
   T heap_oop = oopDesc::load_heap_oop(p);
   if (!oopDesc::is_null(heap_oop)) {
     oop obj = oopDesc::decode_heap_oop_not_null(heap_oop);
@@ -81,16 +76,15 @@ void MarkSweep::push_objarray(oop obj, size_t index) {
   _objarray_stack.push(task);
 }
 
-template <class T> inline void MarkSweep::adjust_pointer(T* p, bool isroot) {
+template <class T> inline void MarkSweep::adjust_pointer(T* p) {
   T heap_oop = oopDesc::load_heap_oop(p);
   if (!oopDesc::is_null(heap_oop)) {
     oop obj     = oopDesc::decode_heap_oop_not_null(heap_oop);
     oop new_obj = oop(obj->mark()->decode_pointer());
     assert(new_obj != NULL ||                         // is forwarding ptr?
            obj->mark() == markOopDesc::prototype() || // not gc marked?
-           (UseBiasedLocking && obj->mark()->has_bias_pattern()) ||
+           (UseBiasedLocking && obj->mark()->has_bias_pattern()),
                                                       // not gc marked?
-           obj->is_shared(),                          // never forwarded?
            "should be forwarded");
     if (new_obj != NULL) {
       assert(Universe::heap()->is_in_reserved(new_obj),
@@ -98,19 +92,9 @@ template <class T> inline void MarkSweep::adjust_pointer(T* p, bool isroot) {
       oopDesc::encode_store_heap_oop_not_null(p, new_obj);
     }
   }
-  VALIDATE_MARK_SWEEP_ONLY(track_adjusted_pointer(p, isroot));
 }
 
 template <class T> inline void MarkSweep::KeepAliveClosure::do_oop_work(T* p) {
-#ifdef VALIDATE_MARK_SWEEP
-  if (ValidateMarkSweep) {
-    if (!Universe::heap()->is_in_reserved(p)) {
-      _root_refs_stack->push(p);
-    } else {
-      _other_refs_stack->push(p);
-    }
-  }
-#endif
   mark_and_push(p);
 }
 

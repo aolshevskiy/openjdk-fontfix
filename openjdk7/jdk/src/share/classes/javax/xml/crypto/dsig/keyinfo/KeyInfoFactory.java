@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -305,6 +305,7 @@ public abstract class KeyInfoFactory {
      * @throws ClassCastException if <code>content</code> contains any entries
      *    that are not of type {@link XMLStructure}
      */
+    @SuppressWarnings("rawtypes")
     public abstract KeyInfo newKeyInfo(List content);
 
     /**
@@ -324,6 +325,7 @@ public abstract class KeyInfoFactory {
      * @throws ClassCastException if <code>content</code> contains any entries
      *    that are not of type {@link XMLStructure}
      */
+    @SuppressWarnings("rawtypes")
     public abstract KeyInfo newKeyInfo(List content, String id);
 
     /**
@@ -385,6 +387,7 @@ public abstract class KeyInfoFactory {
      * @throws ClassCastException if <code>other</code> contains any
      *    entries that are not of type {@link XMLStructure}
      */
+    @SuppressWarnings("rawtypes")
     public abstract PGPData newPGPData(byte[] keyId, byte[] keyPacket,
         List other);
 
@@ -408,6 +411,7 @@ public abstract class KeyInfoFactory {
      * @throws ClassCastException if <code>other</code> contains any
      *    entries that are not of type {@link XMLStructure}
      */
+    @SuppressWarnings("rawtypes")
     public abstract PGPData newPGPData(byte[] keyPacket, List other);
 
     /**
@@ -439,6 +443,7 @@ public abstract class KeyInfoFactory {
      * @throws ClassCastException if <code>transforms</code> contains any
      *    entries that are not of type {@link Transform}
      */
+    @SuppressWarnings("rawtypes")
     public abstract RetrievalMethod newRetrievalMethod(String uri, String type,
         List transforms);
 
@@ -464,6 +469,7 @@ public abstract class KeyInfoFactory {
      * @throws ClassCastException if <code>content</code> contains any entries
      *    that are not of one of the valid types mentioned above
      */
+    @SuppressWarnings("rawtypes")
     public abstract X509Data newX509Data(List content);
 
     /**

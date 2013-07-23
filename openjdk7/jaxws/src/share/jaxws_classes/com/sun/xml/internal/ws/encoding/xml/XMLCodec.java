@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,11 +31,14 @@ import com.sun.xml.internal.ws.api.pipe.Codec;
 import com.sun.xml.internal.ws.api.pipe.ContentType;
 import com.sun.xml.internal.ws.api.streaming.XMLStreamWriterFactory;
 import com.sun.xml.internal.ws.api.WSBinding;
+import com.sun.xml.internal.ws.api.WSFeatureList;
 import com.sun.xml.internal.ws.encoding.ContentTypeImpl;
 
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamWriter;
 import javax.xml.ws.WebServiceException;
+import javax.xml.ws.WebServiceFeature;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -49,10 +52,12 @@ public final class XMLCodec implements Codec {
 
     private static final ContentType contentType = new ContentTypeImpl(XML_TEXT_MIME_TYPE);
 
-    private final WSBinding binding;
+//  private final WSBinding binding;
+    private WSFeatureList features;
 
-    public XMLCodec(WSBinding binding) {
-        this.binding = binding;
+    public XMLCodec(WSFeatureList f) {
+//        this.binding = binding;
+        features = f;
     }
 
     public String getMimeType() {
@@ -64,9 +69,20 @@ public final class XMLCodec implements Codec {
     }
 
     public ContentType encode(Packet packet, OutputStream out) {
-        XMLStreamWriter writer = XMLStreamWriterFactory.create(out);
+                String encoding = (String) packet.invocationProperties
+                .get(XMLConstants.OUTPUT_XML_CHARACTER_ENCODING);
+
+        XMLStreamWriter writer = null;
+
+                if (encoding != null && encoding.length() > 0) {
+            writer = XMLStreamWriterFactory.create(out, encoding);
+        } else {
+            writer = XMLStreamWriterFactory.create(out);
+        }
+
         try {
             if (packet.getMessage().hasPayload()){
+                writer.writeStartDocument();
                 packet.getMessage().writePayloadTo(writer);
                 writer.flush();
             }
@@ -86,7 +102,7 @@ public final class XMLCodec implements Codec {
     }
 
     public void decode(InputStream in, String contentType, Packet packet) throws IOException {
-        Message message = XMLMessage.create(contentType, in, binding);
+        Message message = XMLMessage.create(contentType, in, features);
         packet.setMessage(message);
     }
 

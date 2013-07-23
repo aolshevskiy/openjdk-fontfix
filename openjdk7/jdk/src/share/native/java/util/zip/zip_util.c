@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -829,6 +829,14 @@ ZIP_Put_In_Cache0(const char *name, ZFILE zfd, char **pmsg, jlong lastModified,
             *pmsg = strdup(errbuf);
         freeZip(zip);
         return NULL;
+    }
+
+    // Assumption, zfd refers to start of file. Trivially, reuse errbuf.
+    if (readFully(zfd, errbuf, 4) != -1) {  // errors will be handled later
+        if (GETSIG(errbuf) == LOCSIG)
+            zip->locsig = JNI_TRUE;
+        else
+            zip->locsig = JNI_FALSE;
     }
 
     len = zip->len = IO_Lseek(zfd, 0, SEEK_END);

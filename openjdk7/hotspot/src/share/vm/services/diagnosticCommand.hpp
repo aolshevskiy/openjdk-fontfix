@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,7 @@
 #include "services/diagnosticCommand.hpp"
 #include "services/diagnosticFramework.hpp"
 #include "services/diagnosticCommand_ext.hpp"
+#include "utilities/macros.hpp"
 
 class HelpDCmd : public DCmdWithParser {
 protected:
@@ -50,7 +51,7 @@ public:
   }
   static const char* impact() { return "Low"; }
   static int num_arguments();
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 };
 
 class VersionDCmd : public DCmd {
@@ -61,8 +62,13 @@ public:
     return "Print JVM version information.";
   }
   static const char* impact() { return "Low"; }
+  static const JavaPermission permission() {
+    JavaPermission p = {"java.util.PropertyPermission",
+                        "java.vm.version", "read"};
+    return p;
+  }
   static int num_arguments() { return 0; }
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 };
 
 class CommandLineDCmd : public DCmd {
@@ -73,8 +79,13 @@ public:
     return "Print the command line used to start this VM instance.";
   }
   static const char* impact() { return "Low"; }
+  static const JavaPermission permission() {
+    JavaPermission p = {"java.lang.management.ManagementPermission",
+                        "monitor", NULL};
+    return p;
+  }
   static int num_arguments() { return 0; }
-  virtual void execute(TRAPS) {
+  virtual void execute(DCmdSource source, TRAPS) {
     Arguments::print_on(_output);
   }
 };
@@ -90,8 +101,13 @@ public:
     static const char* impact() {
       return "Low";
     }
+    static const JavaPermission permission() {
+      JavaPermission p = {"java.util.PropertyPermission",
+                          "*", "read"};
+      return p;
+    }
     static int num_arguments() { return 0; }
-    virtual void execute(TRAPS);
+    virtual void execute(DCmdSource source, TRAPS);
 };
 
 // See also: print_flag in attachListener.cpp
@@ -107,8 +123,13 @@ public:
   static const char* impact() {
     return "Low";
   }
+  static const JavaPermission permission() {
+    JavaPermission p = {"java.lang.management.ManagementPermission",
+                        "monitor", NULL};
+    return p;
+  }
   static int num_arguments();
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 };
 
 class VMUptimeDCmd : public DCmdWithParser {
@@ -124,7 +145,7 @@ public:
     return "Low";
   }
   static int num_arguments();
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 };
 
 class SystemGCDCmd : public DCmd {
@@ -138,7 +159,7 @@ public:
       return "Medium: Depends on Java heap size and content.";
     }
     static int num_arguments() { return 0; }
-    virtual void execute(TRAPS);
+    virtual void execute(DCmdSource source, TRAPS);
 };
 
 class RunFinalizationDCmd : public DCmd {
@@ -152,10 +173,10 @@ public:
       return "Medium: Depends on Java content.";
     }
     static int num_arguments() { return 0; }
-    virtual void execute(TRAPS);
+    virtual void execute(DCmdSource source, TRAPS);
 };
 
-#ifndef SERVICES_KERNEL   // Heap dumping not supported
+#if INCLUDE_SERVICES   // Heap dumping supported
 // See also: dump_heap in attachListener.cpp
 class HeapDumpDCmd : public DCmdWithParser {
 protected:
@@ -173,12 +194,17 @@ public:
     return "High: Depends on Java heap size and content. "
            "Request a full GC unless the '-all' option is specified.";
   }
+  static const JavaPermission permission() {
+    JavaPermission p = {"java.lang.management.ManagementPermission",
+                        "monitor", NULL};
+    return p;
+  }
   static int num_arguments();
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 };
-#endif // SERVICES_KERNEL
+#endif // INCLUDE_SERVICES
 
-// See also: inspeactheap in attachListener.cpp
+// See also: inspectheap in attachListener.cpp
 class ClassHistogramDCmd : public DCmdWithParser {
 protected:
   DCmdArgument<bool> _all;
@@ -193,8 +219,34 @@ public:
   static const char* impact() {
     return "High: Depends on Java heap size and content.";
   }
+  static const JavaPermission permission() {
+    JavaPermission p = {"java.lang.management.ManagementPermission",
+                        "monitor", NULL};
+    return p;
+  }
   static int num_arguments();
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
+};
+
+class ClassStatsDCmd : public DCmdWithParser {
+protected:
+  DCmdArgument<bool> _all;
+  DCmdArgument<bool> _csv;
+  DCmdArgument<bool> _help;
+  DCmdArgument<char*> _columns;
+public:
+  ClassStatsDCmd(outputStream* output, bool heap);
+  static const char* name() {
+    return "GC.class_stats";
+  }
+  static const char* description() {
+    return "Provide statistics about Java class meta data. Requires -XX:+UnlockDiagnosticVMOptions.";
+  }
+  static const char* impact() {
+    return "High: Depends on Java heap size and content.";
+  }
+  static int num_arguments();
+  virtual void execute(DCmdSource source, TRAPS);
 };
 
 // See also: thread_dump in attachListener.cpp
@@ -210,8 +262,13 @@ public:
   static const char* impact() {
     return "Medium: Depends on the number of threads.";
   }
+  static const JavaPermission permission() {
+    JavaPermission p = {"java.lang.management.ManagementPermission",
+                        "monitor", NULL};
+    return p;
+  }
   static int num_arguments();
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 };
 
 // Enhanced JMX Agent support
@@ -259,7 +316,7 @@ public:
 
   static int num_arguments();
 
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 
 };
 
@@ -280,7 +337,7 @@ public:
     return "Start local management agent.";
   }
 
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 
 };
 
@@ -299,7 +356,7 @@ public:
     return "Stop remote management agent.";
   }
 
-  virtual void execute(TRAPS);
+  virtual void execute(DCmdSource source, TRAPS);
 };
 
 #endif // SHARE_VM_SERVICES_DIAGNOSTICCOMMAND_HPP

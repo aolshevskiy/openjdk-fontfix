@@ -1,6 +1,5 @@
-
 /*
- * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +23,7 @@
 
 /*
  * @test
- * @bug 6712743 6991164
+ * @bug 6712743 6991164 7168401
  * @summary verify package versions
  * @compile -XDignore.symbol.file Utils.java PackageVersionTest.java
  * @run main PackageVersionTest
@@ -51,7 +50,10 @@ public class PackageVersionTest {
     public final static int JAVA6_PACKAGE_MAJOR_VERSION = 160;
     public final static int JAVA6_PACKAGE_MINOR_VERSION = 1;
 
-    public static void main(String... args) {
+    public final static int JAVA7_PACKAGE_MAJOR_VERSION = 170;
+    public final static int JAVA7_PACKAGE_MINOR_VERSION = 1;
+
+    public static void main(String... args) throws IOException {
         if (!javaHome.getName().endsWith("jre")) {
             throw new RuntimeException("Error: requires an SDK to run");
         }
@@ -68,13 +70,14 @@ public class PackageVersionTest {
         verifyPack("Test6.class", JAVA6_PACKAGE_MAJOR_VERSION,
                 JAVA6_PACKAGE_MINOR_VERSION);
 
-        // TODO: change this to the java7 package version as needed.
+        // a jar file devoid of indy classes must generate 160.1 package file
         verifyPack("Test7.class", JAVA6_PACKAGE_MAJOR_VERSION,
                 JAVA6_PACKAGE_MINOR_VERSION);
 
         // test for resource file, ie. no class files
         verifyPack("Test6.java", JAVA5_PACKAGE_MAJOR_VERSION,
                 JAVA5_PACKAGE_MINOR_VERSION);
+        Utils.cleanup();
     }
 
     static void verify6991164() {
@@ -82,7 +85,7 @@ public class PackageVersionTest {
         String versionStr = unpacker.toString();
         String expected = "Pack200, Vendor: " +
                 System.getProperty("java.vendor") + ", Version: " +
-                JAVA6_PACKAGE_MAJOR_VERSION + "." + JAVA6_PACKAGE_MINOR_VERSION;
+                JAVA7_PACKAGE_MAJOR_VERSION + "." + JAVA7_PACKAGE_MINOR_VERSION;
         if (!versionStr.equals(expected)) {
             System.out.println("Expected: " + expected);
             System.out.println("Obtained: " + versionStr);

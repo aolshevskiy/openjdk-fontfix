@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import com.sun.xml.internal.ws.api.pipe.helper.PipeAdapter;
 import com.sun.xml.internal.ws.transport.http.client.HttpTransportPipe;
 import com.sun.xml.internal.ws.util.ServiceFinder;
 import com.sun.xml.internal.ws.util.pipe.StandaloneTubeAssembler;
+import java.util.logging.Level;
 
 import javax.xml.ws.WebServiceException;
 import java.util.logging.Logger;
@@ -67,7 +68,7 @@ import java.util.logging.Logger;
  * <p>
  * {@link TransportTubeFactory} look-up follows the standard service
  * discovery mechanism, so you need
- * {@code META-INF/services/com.sun.xml.internal.ws.api.pipe.TransportTubeFactory}.
+ * {@code META-INF/services/com.sun.xml.internal.ws.api.pipe.BasicTransportTubeFactory}.
  *
  * @author Jitendra Kotamraju
  * @see StandaloneTubeAssembler
@@ -94,6 +95,16 @@ public abstract class TransportTubeFactory {
      */
     public abstract Tube doCreate(@NotNull ClientTubeAssemblerContext context);
 
+    private static final TransportTubeFactory DEFAULT = new DefaultTransportTubeFactory();
+    private static class DefaultTransportTubeFactory extends TransportTubeFactory {
+
+                @Override
+                public Tube doCreate(ClientTubeAssemblerContext context) {
+                        return createDefault(context);
+                }
+
+    }
+
     /**
      * Locates {@link TransportTubeFactory}s and create a suitable transport {@link Tube}.
      *
@@ -103,10 +114,12 @@ public abstract class TransportTubeFactory {
      *      Always non-null, since we fall back to our default {@link Tube}.
      */
     public static Tube create(@Nullable ClassLoader classLoader, @NotNull ClientTubeAssemblerContext context) {
-        for (TransportTubeFactory factory : ServiceFinder.find(TransportTubeFactory.class,classLoader)) {
+        for (TransportTubeFactory factory : ServiceFinder.find(TransportTubeFactory.class,classLoader, context.getContainer())) {
             Tube tube = factory.doCreate(context);
-            if(tube !=null) {
-                TransportTubeFactory.logger.fine(factory.getClass()+" successfully created "+tube);
+            if (tube !=null) {
+                if (logger.isLoggable(Level.FINE)) {
+                    TransportTubeFactory.logger.log(Level.FINE, "{0} successfully created {1}", new Object[]{factory.getClass(), tube});
+                }
                 return tube;
             }
         }
@@ -115,22 +128,32 @@ public abstract class TransportTubeFactory {
         ClientPipeAssemblerContext ctxt = new ClientPipeAssemblerContext(
                 context.getAddress(), context.getWsdlModel(), context.getService(),
                 context.getBinding(), context.getContainer());
+        ctxt.setCodec(context.getCodec());
         for (TransportPipeFactory factory : ServiceFinder.find(TransportPipeFactory.class,classLoader)) {
             Pipe pipe = factory.doCreate(ctxt);
             if (pipe!=null) {
-                logger.fine(factory.getClass()+" successfully created "+pipe);
+                if (logger.isLoggable(Level.FINE)) {
+                    logger.log(Level.FINE, "{0} successfully created {1}", new Object[]{factory.getClass(), pipe});
+                }
                 return PipeAdapter.adapt(pipe);
             }
         }
 
+        return DEFAULT.createDefault(ctxt);
+    }
+
+    protected Tube createDefault(ClientTubeAssemblerContext context) {
         // default built-in transports
         String scheme = context.getAddress().getURI().getScheme();
         if (scheme != null) {
             if(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))
-                return new HttpTransportPipe(context.getCodec(), context.getBinding());
+                return createHttpTransport(context);
         }
-
         throw new WebServiceException("Unsupported endpoint address: "+context.getAddress());    // TODO: i18n
+    }
+
+    protected Tube createHttpTransport(ClientTubeAssemblerContext context) {
+        return new HttpTransportPipe(context.getCodec(), context.getBinding());
     }
 
     private static final Logger logger = Logger.getLogger(TransportTubeFactory.class.getName());

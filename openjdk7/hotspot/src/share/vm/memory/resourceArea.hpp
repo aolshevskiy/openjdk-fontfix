@@ -26,18 +26,7 @@
 #define SHARE_VM_MEMORY_RESOURCEAREA_HPP
 
 #include "memory/allocation.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
+#include "runtime/thread.inline.hpp"
 
 // The resource area holds temporary data structures in the VM.
 // The actual allocation areas are thread local. Typical usage:
@@ -68,7 +57,7 @@ public:
     debug_only(_nesting = 0;);
   }
 
-  char* allocate_bytes(size_t size) {
+  char* allocate_bytes(size_t size, AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM) {
 #ifdef ASSERT
     if (_nesting < 1 && !_warned++)
       fatal("memory leak: allocating without ResourceMark");
@@ -78,7 +67,7 @@ public:
       return (*save = (char*)os::malloc(size, mtThread));
     }
 #endif
-    return (char*)Amalloc(size);
+    return (char*)Amalloc(size, alloc_failmode);
   }
 
   debug_only(int nesting() const { return _nesting; });

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,19 +24,10 @@
  */
 
 package javax.jws;
+import java.lang.annotation.*;
+import static java.lang.annotation.ElementType.*;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-import java.lang.annotation.Target;
-import java.lang.annotation.ElementType;
-
-/**
- * Indicates that the given @WebMethod has only an input message and no output.  Typically, a oneway method returns
- * the thread of control to the calling application prior to executing the actual business method.  A 181 processor
- * should report an error if an operation marked @Oneway has a return value or Holder parameters, or declares any
- * checked exceptions.
- */
-@Retention(value = RetentionPolicy.RUNTIME)
-@Target(value = {ElementType.METHOD})
+@Retention(value=RetentionPolicy.RUNTIME)
+@Target({METHOD})
 public @interface Oneway {
 }

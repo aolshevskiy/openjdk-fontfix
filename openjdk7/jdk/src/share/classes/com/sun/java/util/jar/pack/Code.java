@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -125,7 +125,7 @@ class Code extends Attribute.Holder {
         return expandInstructionMap(getInsnMap());
     }
 
-    void addFixups(Collection moreFixups) {
+    void addFixups(Collection<Fixups.Fixup> moreFixups) {
         if (fixups == null) {
             fixups = new Fixups(bytes);
         }
@@ -146,7 +146,6 @@ class Code extends Attribute.Holder {
         int verbose = getPackage().verbose;
         if (verbose > 2)
             System.out.println("Reference scan "+this);
-        Class cls = thisClass();
         refs.addAll(Arrays.asList(handler_class));
         if (fixups != null) {
             fixups.visitRefs(refs);

@@ -31,6 +31,7 @@ import javax.accessibility.*;
 import java.io.ObjectOutputStream;
 import java.io.ObjectInputStream;
 import java.io.IOException;
+import java.util.Objects;
 
 
 /**
@@ -66,6 +67,7 @@ import java.io.IOException;
  * @author Dave Moore
  * @author Rich Shiavi
  */
+@SuppressWarnings("serial")
 public class JToolTip extends JComponent implements Accessible {
     /**
      * @see #getUIClassID
@@ -127,6 +129,11 @@ public class JToolTip extends JComponent implements Accessible {
         String oldValue = this.tipText;
         this.tipText = tipText;
         firePropertyChange("tiptext", oldValue, tipText);
+
+        if (!Objects.equals(oldValue, tipText)) {
+            revalidate();
+            repaint();
+        }
     }
 
     /**
@@ -251,6 +258,7 @@ public class JToolTip extends JComponent implements Accessible {
      * has been added to the <code>java.beans</code> package.
      * Please see {@link java.beans.XMLEncoder}.
      */
+    @SuppressWarnings("serial")
     protected class AccessibleJToolTip extends AccessibleJComponent {
 
         /**

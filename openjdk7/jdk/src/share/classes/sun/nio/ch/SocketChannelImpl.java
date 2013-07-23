@@ -33,7 +33,7 @@ import java.nio.channels.*;
 import java.nio.channels.spi.*;
 import java.util.*;
 import sun.net.NetHooks;
-import sun.misc.IoTrace;
+
 
 /**
  * An implementation of SocketChannels
@@ -69,6 +69,9 @@ class SocketChannelImpl
     private final Object stateLock = new Object();
 
     // -- The following fields are protected by stateLock
+
+    // set true when exclusive binding is on and SO_REUSEADDR is emulated
+    private boolean isReuseAddress;
 
     // State, increases monotonically
     private static final int ST_UNINITIALIZED = -1;
@@ -143,7 +146,7 @@ class SocketChannelImpl
         synchronized (stateLock) {
             if (!isOpen())
                 throw new ClosedChannelException();
-            return localAddress;
+            return  Net.getRevealedLocalAddress(localAddress);
         }
     }
 
@@ -174,6 +177,12 @@ class SocketChannelImpl
                 if (!Net.isIPv6Available())
                     Net.setSocketOption(fd, StandardProtocolFamily.INET, name, value);
                 return this;
+            } else if (name == StandardSocketOptions.SO_REUSEADDR &&
+                           Net.useExclusiveBind())
+            {
+                // SO_REUSEADDR emulated when using exclusive bind
+                isReuseAddress = (Boolean)value;
+                return this;
             }
 
             // no options that require special handling
@@ -195,6 +204,13 @@ class SocketChannelImpl
         synchronized (stateLock) {
             if (!isOpen())
                 throw new ClosedChannelException();
+
+            if (name == StandardSocketOptions.SO_REUSEADDR &&
+                    Net.useExclusiveBind())
+            {
+                // SO_REUSEADDR emulated when using exclusive bind
+                return (T)Boolean.valueOf(isReuseAddress);
+            }
 
             // special handling for IP_TOS: always return 0 when IPv6
             if (name == StandardSocketOptions.IP_TOS) {
@@ -278,10 +294,6 @@ class SocketChannelImpl
         synchronized (readLock) {
             if (!ensureReadOpen())
                 return -1;
-            Object traceContext = null;
-            if (isBlocking()) {
-                traceContext = IoTrace.socketReadBegin();
-            }
             int n = 0;
             try {
 
@@ -371,12 +383,6 @@ class SocketChannelImpl
 
             } finally {
                 readerCleanup();        // Clear reader thread
-
-                if (isBlocking()) {
-                    IoTrace.socketReadEnd(traceContext, remoteAddress.getAddress(),
-                                          remoteAddress.getPort(), 0, n > 0 ? n : 0);
-                }
-
                 // The end method, which is defined in our superclass
                 // AbstractInterruptibleChannel, resets the interruption
                 // machinery.  If its argument is true then it returns
@@ -417,10 +423,6 @@ class SocketChannelImpl
             if (!ensureReadOpen())
                 return -1;
             long n = 0;
-            Object traceContext = null;
-            if (isBlocking()) {
-                traceContext = IoTrace.socketReadBegin();
-            }
             try {
                 begin();
                 synchronized (stateLock) {
@@ -437,10 +439,6 @@ class SocketChannelImpl
                 }
             } finally {
                 readerCleanup();
-                if (isBlocking()) {
-                    IoTrace.socketReadEnd(traceContext, remoteAddress.getAddress(),
-                                          remoteAddress.getPort(), 0, n > 0 ? n : 0);
-                }
                 end(n > 0 || (n == IOStatus.UNAVAILABLE));
                 synchronized (stateLock) {
                     if ((n <= 0) && (!isInputOpen))
@@ -457,9 +455,6 @@ class SocketChannelImpl
         synchronized (writeLock) {
             ensureWriteOpen();
             int n = 0;
-            Object traceContext =
-                IoTrace.socketWriteBegin();
-
             try {
                 begin();
                 synchronized (stateLock) {
@@ -475,8 +470,6 @@ class SocketChannelImpl
                 }
             } finally {
                 writerCleanup();
-                IoTrace.socketWriteEnd(traceContext, remoteAddress.getAddress(),
-                                       remoteAddress.getPort(), n > 0 ? n : 0);
                 end(n > 0 || (n == IOStatus.UNAVAILABLE));
                 synchronized (stateLock) {
                     if ((n <= 0) && (!isOutputOpen))
@@ -495,8 +488,6 @@ class SocketChannelImpl
         synchronized (writeLock) {
             ensureWriteOpen();
             long n = 0;
-            Object traceContext =
-                IoTrace.socketWriteBegin();
             try {
                 begin();
                 synchronized (stateLock) {
@@ -512,8 +503,6 @@ class SocketChannelImpl
                 }
             } finally {
                 writerCleanup();
-                IoTrace.socketWriteEnd(traceContext, remoteAddress.getAddress(),
-                                       remoteAddress.getPort(), n > 0 ? n : 0);
                 end((n > 0) || (n == IOStatus.UNAVAILABLE));
                 synchronized (stateLock) {
                     if ((n <= 0) && (!isOutputOpen))
@@ -558,7 +547,7 @@ class SocketChannelImpl
         IOUtil.configureBlocking(fd, block);
     }
 
-    public SocketAddress localAddress() {
+    public InetSocketAddress localAddress() {
         synchronized (stateLock) {
             return localAddress;
         }
@@ -941,6 +930,28 @@ class SocketChannelImpl
         return translateReadyOps(ops, 0, sk);
     }
 
+    // package-private
+    int poll(int events, long timeout) throws IOException {
+        assert Thread.holdsLock(blockingLock()) && !isBlocking();
+
+        synchronized (readLock) {
+            int n = 0;
+            try {
+                begin();
+                synchronized (stateLock) {
+                    if (!isOpen())
+                        return 0;
+                    readerThread = NativeThread.current();
+                }
+                n = Net.poll(fd, events, timeout);
+            } finally {
+                readerCleanup();
+                end(n > 0);
+            }
+            return n;
+        }
+    }
+
     /**
      * Translates an interest operation set into a native poll event set
      */
@@ -963,6 +974,7 @@ class SocketChannelImpl
         return fdVal;
     }
 
+    @Override
     public String toString() {
         StringBuffer sb = new StringBuffer();
         sb.append(this.getClass().getSuperclass().getName());
@@ -986,9 +998,10 @@ class SocketChannelImpl
                         sb.append(" oshut");
                     break;
                 }
-                if (localAddress() != null) {
+                InetSocketAddress addr = localAddress();
+                if (addr != null) {
                     sb.append(" local=");
-                    sb.append(localAddress().toString());
+                    sb.append(Net.getRevealedLocalAddressAsString(addr));
                 }
                 if (remoteAddress() != null) {
                     sb.append(" remote=");

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 1999, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -83,8 +83,8 @@ abstract class MirrorImpl extends Object implements Mirror {
      * Throw NullPointerException on null mirrors.
      * Throw VMMismatchException on wrong VM.
      */
-    void validateMirrors(Collection mirrors) {
-        Iterator iter = mirrors.iterator();
+    void validateMirrors(Collection<? extends Mirror> mirrors) {
+        Iterator<? extends Mirror> iter = mirrors.iterator();
         while (iter.hasNext()) {
             MirrorImpl mirror = (MirrorImpl)iter.next();
             if (!vm.equals(mirror.vm)) {
@@ -96,8 +96,8 @@ abstract class MirrorImpl extends Object implements Mirror {
      * Allow null mirrors.
      * Throw VMMismatchException on wrong VM.
      */
-    void validateMirrorsOrNulls(Collection mirrors) {
-        Iterator iter = mirrors.iterator();
+    void validateMirrorsOrNulls(Collection<? extends Mirror> mirrors) {
+        Iterator<? extends Mirror> iter = mirrors.iterator();
         while (iter.hasNext()) {
             MirrorImpl mirror = (MirrorImpl)iter.next();
             if ((mirror != null) && !vm.equals(mirror.vm)) {

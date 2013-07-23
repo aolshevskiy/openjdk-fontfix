@@ -116,9 +116,9 @@ public class Test1 extends Test {
         if (fixedLen) {
             urlc.setRequestProperty ("XFixed", "yes");
         }
+        InputStream is = urlc.getInputStream();
         File temp = File.createTempFile ("Test1", null);
         temp.deleteOnExit();
-        InputStream is = urlc.getInputStream();
         OutputStream fout = new BufferedOutputStream (new FileOutputStream(temp));
         int c, count = 0;
         while ((c=is.read(buf)) != -1) {

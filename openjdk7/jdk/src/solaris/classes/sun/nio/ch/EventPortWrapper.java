@@ -226,10 +226,7 @@ class EventPortWrapper {
                 try {
                     port_dissociate(pfd, PORT_SOURCE_FD, (long)fd);
                 } catch (IOException ioe) {
-                    InternalError x =
-                        new InternalError(ioe.getMessage());
-                    x.initCause(ioe);
-                    throw x;
+                    throw new InternalError(ioe);
                 }
                 registered.clear(fd);
             }
@@ -245,10 +242,7 @@ class EventPortWrapper {
         try {
             port_send(pfd, 0);
         } catch (IOException ioe) {
-            InternalError x =
-                new InternalError(ioe.getMessage());
-            x.initCause(ioe);
-            throw x;
+            throw new InternalError(ioe);
         }
     }
 

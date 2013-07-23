@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ import java.security.spec.AlgorithmParameterSpec;
 import javax.crypto.*;
 import javax.crypto.spec.*;
 
-import sun.security.internal.interfaces.TlsMasterSecret;
 import sun.security.internal.spec.*;
 
 import static com.sun.crypto.provider.TlsPrfGenerator.*;
@@ -166,16 +165,18 @@ public final class TlsKeyMaterialGenerator extends KeyGeneratorSpi {
         // partition keyblock into individual secrets
 
         int ofs = 0;
-        byte[] tmp = new byte[macLength];
+        if (macLength != 0) {
+            byte[] tmp = new byte[macLength];
 
-        // mac keys
-        System.arraycopy(keyBlock, ofs, tmp, 0, macLength);
-        ofs += macLength;
-        clientMacKey = new SecretKeySpec(tmp, "Mac");
+            // mac keys
+            System.arraycopy(keyBlock, ofs, tmp, 0, macLength);
+            ofs += macLength;
+            clientMacKey = new SecretKeySpec(tmp, "Mac");
 
-        System.arraycopy(keyBlock, ofs, tmp, 0, macLength);
-        ofs += macLength;
-        serverMacKey = new SecretKeySpec(tmp, "Mac");
+            System.arraycopy(keyBlock, ofs, tmp, 0, macLength);
+            ofs += macLength;
+            serverMacKey = new SecretKeySpec(tmp, "Mac");
+        }
 
         if (keyLength == 0) { // SSL_RSA_WITH_NULL_* ciphersuites
             return new TlsKeyMaterialSpec(clientMacKey, serverMacKey);
@@ -199,7 +200,7 @@ public final class TlsKeyMaterialGenerator extends KeyGeneratorSpi {
 
             // IV keys if needed.
             if (ivLength != 0) {
-                tmp = new byte[ivLength];
+                byte[] tmp = new byte[ivLength];
 
                 System.arraycopy(keyBlock, ofs, tmp, 0, ivLength);
                 ofs += ivLength;
@@ -221,8 +222,8 @@ public final class TlsKeyMaterialGenerator extends KeyGeneratorSpi {
                 // TLS 1.0
                 byte[] seed = concat(clientRandom, serverRandom);
 
-                tmp = doTLS10PRF(clientKeyBytes, LABEL_CLIENT_WRITE_KEY, seed,
-                            expandedKeyLength, md5, sha);
+                byte[] tmp = doTLS10PRF(clientKeyBytes,
+                    LABEL_CLIENT_WRITE_KEY, seed, expandedKeyLength, md5, sha);
                 clientCipherKey = new SecretKeySpec(tmp, alg);
 
                 tmp = doTLS10PRF(serverKeyBytes, LABEL_SERVER_WRITE_KEY, seed,
@@ -240,7 +241,7 @@ public final class TlsKeyMaterialGenerator extends KeyGeneratorSpi {
                 }
             } else {
                 // SSLv3
-                tmp = new byte[expandedKeyLength];
+                byte[] tmp = new byte[expandedKeyLength];
 
                 md5.update(clientKeyBytes);
                 md5.update(clientRandom);

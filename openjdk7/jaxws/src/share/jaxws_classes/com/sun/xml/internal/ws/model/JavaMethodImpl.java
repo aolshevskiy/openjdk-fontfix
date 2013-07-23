@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,14 +27,17 @@ package com.sun.xml.internal.ws.model;
 
 import com.sun.istack.internal.NotNull;
 import com.sun.xml.internal.bind.api.TypeReference;
+import com.sun.xml.internal.ws.api.databinding.MetadataReader;
 import com.sun.xml.internal.ws.api.model.JavaMethod;
 import com.sun.xml.internal.ws.api.model.MEP;
 import com.sun.xml.internal.ws.api.model.SEIModel;
+import com.sun.xml.internal.ws.api.model.wsdl.WSDLPort;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLBoundOperation;
-import com.sun.xml.internal.ws.model.soap.SOAPBindingImpl;
-import com.sun.xml.internal.ws.model.wsdl.WSDLBoundOperationImpl;
-import com.sun.xml.internal.ws.model.wsdl.WSDLPortImpl;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLFault;
+import com.sun.xml.internal.ws.api.model.soap.SOAPBinding;
+import com.sun.xml.internal.ws.model.soap.SOAPBindingImpl;
+import com.sun.xml.internal.ws.spi.db.TypeInfo;
+import com.sun.xml.internal.ws.wsdl.ActionBasedOperationSignature;
 import com.sun.istack.internal.Nullable;
 
 import javax.xml.namespace.QName;
@@ -62,12 +65,14 @@ public final class JavaMethodImpl implements JavaMethod {
     /*package*/ final List<ParameterImpl> responseParams = new ArrayList<ParameterImpl>();
     private final List<ParameterImpl> unmReqParams = Collections.unmodifiableList(requestParams);
     private final List<ParameterImpl> unmResParams = Collections.unmodifiableList(responseParams);
-    private SOAPBindingImpl binding;
+    private SOAPBinding binding;
     private MEP mep;
-    private String operationName;
-    private WSDLBoundOperationImpl wsdlOperation;
+    private QName operationName;
+    private WSDLBoundOperation wsdlOperation;
     /*package*/ final AbstractSEIModelImpl owner;
     private final Method seiMethod;
+    private QName requestPayloadName;
+    private String soapAction;
 
     /**
      * @param owner
@@ -75,23 +80,23 @@ public final class JavaMethodImpl implements JavaMethod {
      * @param seiMethod : corresponding SEI Method.
      *                  Is there is no SEI, it should be Implementation class method
      */
-    public JavaMethodImpl(AbstractSEIModelImpl owner, Method method, Method seiMethod) {
+    public JavaMethodImpl(AbstractSEIModelImpl owner, Method method, Method seiMethod, MetadataReader metadataReader) {
         this.owner = owner;
         this.method = method;
         this.seiMethod = seiMethod;
-        setWsaActions();
+        setWsaActions(metadataReader);
     }
 
-    private void setWsaActions() {
-        Action action = seiMethod.getAnnotation(Action.class);
+    private void setWsaActions(MetadataReader metadataReader) {
+        Action action = (metadataReader != null)? metadataReader.getAnnotation(Action.class, seiMethod):seiMethod.getAnnotation(Action.class);
         if(action != null) {
             inputAction = action.input();
             outputAction = action.output();
         }
 
         //@Action(input) =="", get it from @WebMethod(action)
-        WebMethod webMethod = seiMethod.getAnnotation(WebMethod.class);
-        String soapAction = "";
+        WebMethod webMethod = (metadataReader != null)? metadataReader.getAnnotation(WebMethod.class, seiMethod):seiMethod.getAnnotation(WebMethod.class);
+        soapAction = "";
         if (webMethod != null )
             soapAction = webMethod.action();
         if(!soapAction.equals("")) {
@@ -101,9 +106,16 @@ public final class JavaMethodImpl implements JavaMethod {
                 inputAction = soapAction;
             else if(!inputAction.equals(soapAction)){
                 //both are explicitly set via annotations, make sure @Action == @WebMethod.action
-                throw new WebServiceException("@Action and @WebMethod(action=\"\" does not match on operation "+ method.getName());
+                //http://java.net/jira/browse/JAX_WS-1108
+              //throw new WebServiceException("@Action and @WebMethod(action=\"\" does not match on operation "+ method.getName());
             }
         }
+    }
+
+    public ActionBasedOperationSignature getOperationSignature() {
+        QName qname = getRequestPayloadName();
+        if (qname == null) qname = new QName("", "");
+        return new ActionBasedOperationSignature(getInputAction(), qname);
     }
 
     public SEIModel getOwner() {
@@ -111,7 +123,7 @@ public final class JavaMethodImpl implements JavaMethod {
     }
 
     /**
-     * @see {@link JavaMethod}
+     * @see JavaMethod
      *
      * @return Returns the method.
      */
@@ -120,7 +132,7 @@ public final class JavaMethodImpl implements JavaMethod {
     }
 
     /**
-     * @see {@link JavaMethod}
+     * @see JavaMethod
      *
      * @return Returns the SEI method where annotations are present
      */
@@ -146,7 +158,7 @@ public final class JavaMethodImpl implements JavaMethod {
     /**
      * @return the Binding object
      */
-    public SOAPBindingImpl getBinding() {
+    public SOAPBinding getBinding() {
         if (binding == null)
             return new SOAPBindingImpl();
         return binding;
@@ -155,44 +167,56 @@ public final class JavaMethodImpl implements JavaMethod {
     /**
      * @param binding
      */
-    void setBinding(SOAPBindingImpl binding) {
+    void setBinding(SOAPBinding binding) {
         this.binding = binding;
     }
 
     /**
-     * Returns the {@link WSDLBoundOperation} Operation associated with {@link this}
+     * Returns the {@link WSDLBoundOperation} Operation associated with {@link JavaMethodImpl}
      * operation.
-     *
+     * @deprecated
      * @return the WSDLBoundOperation for this JavaMethod
      */
-    public @NotNull WSDLBoundOperation getOperation() {
-        assert wsdlOperation != null;
+    public WSDLBoundOperation getOperation() {
+//        assert wsdlOperation != null;
         return wsdlOperation;
     }
 
-    public void setOperationName(String name) {
+    public void setOperationQName(QName name) {
         this.operationName = name;
     }
 
+    public QName getOperationQName() {
+        return (wsdlOperation != null)? wsdlOperation.getName(): operationName;
+    }
+
+    public String getSOAPAction() {
+        return (wsdlOperation != null)? wsdlOperation.getSOAPAction(): soapAction;
+    }
+
     public String getOperationName() {
-        return operationName;
+        return operationName.getLocalPart();
     }
 
     public String getRequestMessageName() {
-        return operationName;
+        return getOperationName();
     }
 
     public String getResponseMessageName() {
         if(mep.isOneWay())
             return null;
-        return operationName+"Response";
+        return getOperationName()+"Response";
+    }
+
+    public void setRequestPayloadName(QName n)  {
+        requestPayloadName = n;
     }
 
     /**
      * @return soap:Body's first child name for request message.
      */
     public @Nullable QName getRequestPayloadName() {
-        return wsdlOperation.getReqPayloadName();
+        return (wsdlOperation != null)? wsdlOperation.getReqPayloadName(): requestPayloadName;
     }
 
     /**
@@ -302,21 +326,24 @@ public final class JavaMethodImpl implements JavaMethod {
     }
 
     public String getInputAction() {
+//        return (wsdlOperation != null)? wsdlOperation.getOperation().getInput().getAction(): inputAction;
         return inputAction;
     }
 
     public String getOutputAction() {
+//        return (wsdlOperation != null)? wsdlOperation.getOperation().getOutput().getAction(): outputAction;
         return outputAction;
     }
 
     /**
+     * @deprecated
      * @param detailType
      * @return Gets the CheckedException corresponding to detailType. Returns
      *         null if no CheckedExcpetion with the detailType found.
      */
     public CheckedExceptionImpl getCheckedException(TypeReference detailType) {
         for (CheckedExceptionImpl ce : exceptions) {
-            TypeReference actual = ce.getDetailType();
+            TypeInfo actual = ce.getDetailType();
             if (actual.tagName.equals(detailType.tagName) && actual.type==detailType.type) {
                 return ce;
             }
@@ -334,8 +361,8 @@ public final class JavaMethodImpl implements JavaMethod {
         return mep.isAsync;
     }
 
-    /*package*/ void freeze(WSDLPortImpl portType) {
-        this.wsdlOperation = portType.getBinding().get(new QName(portType.getBinding().getPortType().getName().getNamespaceURI(),operationName));
+    /*package*/ void freeze(WSDLPort portType) {
+        this.wsdlOperation = portType.getBinding().get(new QName(portType.getBinding().getPortType().getName().getNamespaceURI(),getOperationName()));
         // TODO: replace this with proper error handling
         if(wsdlOperation ==null)
             throw new WebServiceException("Method "+seiMethod.getName()+" is exposed as WebMethod, but there is no corresponding wsdl operation with name "+operationName+" in the wsdl:portType" + portType.getBinding().getPortType().getName());
@@ -370,7 +397,7 @@ public final class JavaMethodImpl implements JavaMethod {
         }
     }
 
-    final void fillTypes(List<TypeReference> types) {
+    final void fillTypes(List<TypeInfo> types) {
         fillTypes(requestParams, types);
         fillTypes(responseParams, types);
 
@@ -379,7 +406,7 @@ public final class JavaMethodImpl implements JavaMethod {
         }
     }
 
-    private void fillTypes(List<ParameterImpl> params, List<TypeReference> types) {
+    private void fillTypes(List<ParameterImpl> params, List<TypeInfo> types) {
         for (ParameterImpl p : params) {
             p.fillTypes(types);
         }

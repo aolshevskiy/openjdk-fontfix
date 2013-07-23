@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,12 +26,11 @@
 package com.sun.xml.internal.ws.encoding;
 
 import com.sun.xml.internal.ws.api.SOAPVersion;
-import com.sun.xml.internal.ws.api.WSBinding;
+import com.sun.xml.internal.ws.api.WSFeatureList;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.pipe.Codec;
 import com.sun.xml.internal.ws.api.pipe.ContentType;
 import com.sun.xml.internal.ws.client.ContentNegotiation;
-import com.sun.xml.internal.ws.developer.StreamingAttachmentFeature;
 import com.sun.xml.internal.ws.encoding.xml.XMLCodec;
 import com.sun.xml.internal.ws.encoding.xml.XMLMessage;
 import com.sun.xml.internal.ws.encoding.xml.XMLMessage.MessageDataSource;
@@ -42,6 +41,7 @@ import com.sun.xml.internal.ws.util.ByteArrayBuffer;
 
 import javax.activation.DataSource;
 import javax.xml.ws.WebServiceException;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -95,83 +95,62 @@ public final class XMLHTTPBindingCodec extends MimeCodec {
      */
     private static final String fiXmlAccept = APPLICATION_FAST_INFOSET_MIME_TYPE + ", " + BASE_ACCEPT_VALUE;
 
-    private class AcceptContentType implements ContentType {
-        private ContentType _c;
-        private String _accept;
-
-        public AcceptContentType set(Packet p, ContentType c) {
-            // TODO: need to compose based on underlying codecs
-            if (p.contentNegotiation == ContentNegotiation.optimistic
-                    || p.contentNegotiation == ContentNegotiation.pessimistic) {
-                _accept = fiXmlAccept;
-            } else {
-                _accept = xmlAccept;
-            }
-            _c = c;
-            return this;
+    private ContentTypeImpl setAcceptHeader(Packet p, ContentType c) {
+        ContentTypeImpl ctImpl = (ContentTypeImpl)c;
+        if (p.contentNegotiation == ContentNegotiation.optimistic
+                || p.contentNegotiation == ContentNegotiation.pessimistic) {
+            ctImpl.setAcceptHeader(fiXmlAccept);
+        } else {
+            ctImpl.setAcceptHeader(xmlAccept);
         }
-
-        public String getContentType() {
-            return _c.getContentType();
-        }
-
-        public String getSOAPActionHeader() {
-            return _c.getSOAPActionHeader();
-        }
-
-        public String getAcceptHeader() {
-            return _accept;
-        }
+        p.setContentType(ctImpl);
+        return ctImpl;
     }
 
-    private AcceptContentType _adaptingContentType = new AcceptContentType();
+    public XMLHTTPBindingCodec(WSFeatureList f) {
+        super(SOAPVersion.SOAP_11, f);
 
-    public XMLHTTPBindingCodec(WSBinding binding) {
-        super(SOAPVersion.SOAP_11, binding);
-
-        xmlCodec = new XMLCodec(binding);
+        xmlCodec = new XMLCodec(f);
 
         fiCodec = getFICodec();
     }
 
+    @Override
     public String getMimeType() {
         return null;
     }
 
     @Override
     public ContentType getStaticContentType(Packet packet) {
-        setRootCodec(packet);
-
-        ContentType ct = null;
-        if (packet.getMessage() instanceof MessageDataSource) {
-            final MessageDataSource mds = (MessageDataSource)packet.getMessage();
+        ContentType ct;
+        if (packet.getInternalMessage() instanceof MessageDataSource) {
+            final MessageDataSource mds = (MessageDataSource)packet.getInternalMessage();
             if (mds.hasUnconsumedDataSource()) {
                 ct = getStaticContentType(mds);
                 return (ct != null)
-                    ? _adaptingContentType.set(packet, ct)
+                    ? setAcceptHeader(packet, ct) //_adaptingContentType.set(packet, ct)
                     : null;
             }
         }
 
         ct = super.getStaticContentType(packet);
         return (ct != null)
-            ? _adaptingContentType.set(packet, ct)
+            ? setAcceptHeader(packet, ct) //_adaptingContentType.set(packet, ct)
             : null;
     }
 
     @Override
     public ContentType encode(Packet packet, OutputStream out) throws IOException {
-        setRootCodec(packet);
-
-        if (packet.getMessage() instanceof MessageDataSource) {
-            final MessageDataSource mds = (MessageDataSource)packet.getMessage();
+        if (packet.getInternalMessage() instanceof MessageDataSource) {
+            final MessageDataSource mds = (MessageDataSource)packet.getInternalMessage();
             if (mds.hasUnconsumedDataSource())
-                return _adaptingContentType.set(packet, encode(mds, out));
+                return setAcceptHeader(packet, encode(mds, out));
         }
 
-        return _adaptingContentType.set(packet, super.encode(packet, out));
+        return setAcceptHeader(packet, super.encode(packet, out));
     }
 
+    @Override
     public ContentType encode(Packet packet, WritableByteChannel buffer) {
         throw new UnsupportedOperationException();
     }
@@ -188,7 +167,7 @@ public final class XMLHTTPBindingCodec extends MimeCodec {
         if (contentType == null) {
             xmlCodec.decode(in, contentType, packet);
         } else if (isMultipartRelated(contentType)) {
-            packet.setMessage(new XMLMultiPart(contentType, in, binding));
+            packet.setMessage(new XMLMultiPart(contentType, in, features));
         } else if(isFastInfoset(contentType)) {
             if (fiCodec == null) {
                 throw new RuntimeException(StreamingMessages.FASTINFOSET_NO_IMPLEMENTATION());
@@ -207,20 +186,18 @@ public final class XMLHTTPBindingCodec extends MimeCodec {
         }
     }
 
+    @Override
     protected void decode(MimeMultipartParser mpp, Packet packet) throws IOException {
         // This method will never be invoked
     }
 
+    @Override
     public MimeCodec copy() {
-        return new XMLHTTPBindingCodec(binding);
+        return new XMLHTTPBindingCodec(features);
     }
 
     private boolean isMultipartRelated(String contentType) {
         return compareStrings(contentType, MimeCodec.MULTIPART_RELATED_MIME_TYPE);
-    }
-
-    private boolean isApplicationXopXml(String contentType) {
-        return compareStrings(contentType, MtomCodec.XOP_XML_MIME_TYPE);
     }
 
     private boolean isXml(String contentType) {
@@ -270,7 +247,7 @@ public final class XMLHTTPBindingCodec extends MimeCodec {
             final boolean isFastInfoset = XMLMessage.isFastInfoset(
                     mds.getDataSource().getContentType());
             DataSource ds = transformDataSource(mds.getDataSource(),
-                    isFastInfoset, useFastInfosetForEncoding, binding);
+                    isFastInfoset, useFastInfosetForEncoding, features);
 
             InputStream is = ds.getInputStream();
             byte[] buf = new byte[1024];
@@ -284,7 +261,8 @@ public final class XMLHTTPBindingCodec extends MimeCodec {
         }
     }
 
-    private void setRootCodec(Packet p) {
+    @Override
+    protected Codec getMimeRootCodec(Packet p) {
         /**
          * The following logic is only for outbound packets
          * to be encoded by client.
@@ -299,8 +277,7 @@ public final class XMLHTTPBindingCodec extends MimeCodec {
             useFastInfosetForEncoding = true;
         }
 
-        rootCodec = (useFastInfosetForEncoding && fiCodec != null)
-            ? fiCodec : xmlCodec;
+        return (useFastInfosetForEncoding && fiCodec != null)? fiCodec : xmlCodec;
     }
 
     public static boolean requiresTransformationOfDataSource(
@@ -309,11 +286,11 @@ public final class XMLHTTPBindingCodec extends MimeCodec {
     }
 
     public static DataSource transformDataSource(DataSource in,
-            boolean isFastInfoset, boolean useFastInfoset, WSBinding binding) {
+            boolean isFastInfoset, boolean useFastInfoset, WSFeatureList f) {
         try {
             if (isFastInfoset && !useFastInfoset) {
                 // Convert from Fast Infoset to XML
-                Codec codec = new XMLHTTPBindingCodec(binding);
+                Codec codec = new XMLHTTPBindingCodec(f);
                 Packet p = new Packet();
                 codec.decode(in.getInputStream(), in.getContentType(), p);
 
@@ -325,7 +302,7 @@ public final class XMLHTTPBindingCodec extends MimeCodec {
                 return XMLMessage.createDataSource(ct.getContentType(), bos.newInputStream());
             } else if (!isFastInfoset && useFastInfoset) {
                 // Convert from XML to Fast Infoset
-                Codec codec = new XMLHTTPBindingCodec(binding);
+                Codec codec = new XMLHTTPBindingCodec(f);
                 Packet p = new Packet();
                 codec.decode(in.getInputStream(), in.getContentType(), p);
 

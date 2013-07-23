@@ -36,6 +36,10 @@
 #import "QuartzSurfaceData.h"
 #include "AWTStrike.h"
 
+/* Use THIS_FILE when it is available. */
+#ifndef THIS_FILE
+    #define THIS_FILE __FILE__
+#endif
 
 static const CGAffineTransform sInverseTX = { 1, 0, 0, -1, 0, 0 };
 
@@ -138,8 +142,13 @@ void JavaCT_DrawGlyphVector
     // get our baseline transform and font
     CGContextRef cgRef = qsdo->cgRef;
     CGAffineTransform ctmText = CGContextGetTextMatrix(cgRef);
-    //CGFontRef cgFont = CGContextGetFont(cgRef);
 
+    BOOL saved = false;
+
+    /* Save and restore of graphics context is done before the iteration.  
+       This seems to work using our test case (see bug ID 7158350) so we are restoring it at
+       the end of the for loop.  If we find out that save/restore outside the loop
+       doesn't work on all cases then we will move the Save/Restore inside the loop.*/
     CGContextSaveGState(cgRef);
     CGAffineTransform invTx = CGAffineTransformInvert(strike->fTx);
 
@@ -168,9 +177,18 @@ void JavaCT_DrawGlyphVector
                 CFRelease(fallback);
 
                 if (cgFallback) {
+                    if (!saved) {
+                        CGContextSaveGState(cgRef);
+                        saved = true;
+                    }
                     CGContextSetFont(cgRef, cgFallback);
                     CFRelease(cgFallback);
                 }
+            }
+        } else {
+            if (saved) {
+                CGContextRestoreGState(cgRef);
+                saved = false;
             }
         }
 
@@ -206,13 +224,9 @@ void JavaCT_DrawGlyphVector
         pt.x += advances[i].width;
         pt.y += advances[i].height;
 
-        // reset the font on the context after striking a unicode with CoreText
-        if (uniChar != 0)
-        {
-           // CGContextSetFont(cgRef, cgFont);
-            CGContextSaveGState(cgRef);
-        }
     }
+    // reset the font on the context after striking a unicode with CoreText
+    CGContextRestoreGState(cgRef);
 }
 
 // Using the Quartz Surface Data context, draw a hot-substituted character run
@@ -498,10 +512,22 @@ static inline void doDrawGlyphsPipe_getGlyphVectorLengthAndAlloc
         int *uniChars = (int *)malloc(sizeof(int) * length);
         CGSize *advances = (CGSize *)malloc(sizeof(CGSize) * length);
 
-        if (glyphs == NULL || advances == NULL)
+        if (glyphs == NULL || uniChars == NULL || advances == NULL)
         {
             (*env)->DeleteLocalRef(env, glyphsArray);
-            [NSException raise:NSMallocException format:@"%s-%s:%d", __FILE__, __FUNCTION__, __LINE__];
+            [NSException raise:NSMallocException format:@"%s-%s:%d", THIS_FILE, __FUNCTION__, __LINE__];
+            if (glyphs)
+            {
+                free(glyphs);
+            }
+            if (uniChars)
+            {
+                free(uniChars);
+            }
+            if (advances)
+            {
+                free(advances);
+            }
             return;
         }
 

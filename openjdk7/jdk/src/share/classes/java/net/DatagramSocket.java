@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,7 @@
 
 package java.net;
 
-import java.io.FileDescriptor;
 import java.io.IOException;
-import java.io.InterruptedIOException;
 import java.nio.channels.DatagramChannel;
 import java.security.AccessController;
 import java.security.PrivilegedExceptionAction;
@@ -107,7 +105,7 @@ class DatagramSocket implements java.io.Closeable {
      * Connects this socket to a remote socket address (IP address + port number).
      * Binds socket if not already bound.
      * <p>
-     * @param   addr    The remote address.
+     * @param   address The remote address.
      * @param   port    The remote port
      * @throws  SocketException if binding the socket fails.
      */
@@ -175,15 +173,7 @@ class DatagramSocket implements java.io.Closeable {
      * @see SecurityManager#checkListen
      */
     public DatagramSocket() throws SocketException {
-        // create a datagram socket.
-        createImpl();
-        try {
-            bind(new InetSocketAddress(0));
-        } catch (SocketException se) {
-            throw se;
-        } catch(IOException e) {
-            throw new SocketException(e.getMessage());
-        }
+        this(new InetSocketAddress(0));
     }
 
     /**
@@ -228,7 +218,12 @@ class DatagramSocket implements java.io.Closeable {
         // create a datagram socket.
         createImpl();
         if (bindaddr != null) {
-            bind(bindaddr);
+            try {
+                bind(bindaddr);
+            } finally {
+                if (!isBound())
+                    close();
+            }
         }
     }
 
@@ -293,7 +288,7 @@ class DatagramSocket implements java.io.Closeable {
             AccessController.doPrivileged(
                 new PrivilegedExceptionAction<Void>() {
                     public Void run() throws NoSuchMethodException {
-                        Class[] cl = new Class[1];
+                        Class<?>[] cl = new Class<?>[1];
                         cl[0] = DatagramPacket.class;
                         impl.getClass().getDeclaredMethod("peekData", cl);
                         return null;
@@ -304,7 +299,7 @@ class DatagramSocket implements java.io.Closeable {
         }
     }
 
-    static Class implClass = null;
+    static Class<?> implClass = null;
 
     void createImpl() throws SocketException {
         if (impl == null) {
@@ -339,12 +334,12 @@ class DatagramSocket implements java.io.Closeable {
     }
 
     /**
-     * Binds this DatagramSocket to a specific address & port.
+     * Binds this DatagramSocket to a specific address and port.
      * <p>
      * If the address is <code>null</code>, then the system will pick up
      * an ephemeral port and a valid local address to bind the socket.
      *<p>
-     * @param   addr The address & port to bind to.
+     * @param   addr The address and port to bind to.
      * @throws  SocketException if any error happens during the bind, or if the
      *          socket is already bound.
      * @throws  SecurityException  if a security manager exists and its
@@ -849,7 +844,7 @@ class DatagramSocket implements java.io.Closeable {
      *  a <B>java.net.SocketTimeoutException</B> is raised, though the
      *  DatagramSocket is still valid.  The option <B>must</B> be enabled
      *  prior to entering the blocking operation to have effect.  The
-     *  timeout must be > 0.
+     *  timeout must be {@code > 0}.
      *  A timeout of zero is interpreted as an infinite timeout.
      *
      * @param timeout the specified timeout in milliseconds.
@@ -1106,8 +1101,8 @@ class DatagramSocket implements java.io.Closeable {
      * As the underlying network implementation may ignore this
      * value applications should consider it a hint.
      *
-     * <P> The tc <B>must</B> be in the range <code> 0 <= tc <=
-     * 255</code> or an IllegalArgumentException will be thrown.
+     * <P> The tc <B>must</B> be in the range {@code 0 <= tc <=
+     * 255} or an IllegalArgumentException will be thrown.
      * <p>Notes:
      * <p>For Internet Protocol v4 the value consists of an
      * <code>integer</code>, the least significant 8 bits of which

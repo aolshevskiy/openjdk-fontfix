@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,7 @@
 #include "memory/gcLocker.inline.hpp"
 #include "memory/genCollectedHeap.hpp"
 #include "memory/genOopClosures.inline.hpp"
+#include "memory/genRemSet.hpp"
 #include "memory/generationSpec.hpp"
 #include "memory/iterator.hpp"
 #include "memory/referencePolicy.hpp"
@@ -41,20 +42,9 @@
 #include "oops/instanceRefKlass.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/java.hpp"
+#include "runtime/thread.inline.hpp"
 #include "utilities/copy.hpp"
 #include "utilities/stack.inline.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
 
 //
 // DefNewGeneration functions.
@@ -63,9 +53,6 @@
 
 DefNewGeneration::IsAliveClosure::IsAliveClosure(Generation* g) : _g(g) {
   assert(g->level() == 0, "Optimized for youngest gen.");
-}
-void DefNewGeneration::IsAliveClosure::do_object(oop p) {
-  assert(false, "Do not call.");
 }
 bool DefNewGeneration::IsAliveClosure::do_object_b(oop p) {
   return (HeapWord*)p >= _g->reserved().end() || p->is_forwarded();
@@ -122,7 +109,7 @@ void DefNewGeneration::FastEvacuateFollowersClosure::do_void() {
 }
 
 ScanClosure::ScanClosure(DefNewGeneration* g, bool gc_barrier) :
-  OopsInGenClosure(g), _g(g), _gc_barrier(gc_barrier)
+    OopsInKlassOrGenClosure(g), _g(g), _gc_barrier(gc_barrier)
 {
   assert(_g->level() == 0, "Optimized for youngest generation");
   _boundary = _g->reserved().end();
@@ -132,7 +119,7 @@ void ScanClosure::do_oop(oop* p)       { ScanClosure::do_oop_work(p); }
 void ScanClosure::do_oop(narrowOop* p) { ScanClosure::do_oop_work(p); }
 
 FastScanClosure::FastScanClosure(DefNewGeneration* g, bool gc_barrier) :
-  OopsInGenClosure(g), _g(g), _gc_barrier(gc_barrier)
+    OopsInKlassOrGenClosure(g), _g(g), _gc_barrier(gc_barrier)
 {
   assert(_g->level() == 0, "Optimized for youngest generation");
   _boundary = _g->reserved().end();
@@ -141,8 +128,39 @@ FastScanClosure::FastScanClosure(DefNewGeneration* g, bool gc_barrier) :
 void FastScanClosure::do_oop(oop* p)       { FastScanClosure::do_oop_work(p); }
 void FastScanClosure::do_oop(narrowOop* p) { FastScanClosure::do_oop_work(p); }
 
+void KlassScanClosure::do_klass(Klass* klass) {
+#ifndef PRODUCT
+  if (TraceScavenge) {
+    ResourceMark rm;
+    gclog_or_tty->print_cr("KlassScanClosure::do_klass %p, %s, dirty: %s",
+                           klass,
+                           klass->external_name(),
+                           klass->has_modified_oops() ? "true" : "false");
+  }
+#endif
+
+  // If the klass has not been dirtied we know that there's
+  // no references into  the young gen and we can skip it.
+  if (klass->has_modified_oops()) {
+    if (_accumulate_modified_oops) {
+      klass->accumulate_modified_oops();
+    }
+
+    // Clear this state since we're going to scavenge all the metadata.
+    klass->clear_modified_oops();
+
+    // Tell the closure which Klass is being scanned so that it can be dirtied
+    // if oops are left pointing into the young gen.
+    _scavenge_closure->set_scanned_klass(klass);
+
+    klass->oops_do(_scavenge_closure);
+
+    _scavenge_closure->set_scanned_klass(NULL);
+  }
+}
+
 ScanWeakRefClosure::ScanWeakRefClosure(DefNewGeneration* g) :
-  OopClosure(g->ref_processor()), _g(g)
+  _g(g)
 {
   assert(_g->level() == 0, "Optimized for youngest generation");
   _boundary = _g->reserved().end();
@@ -153,6 +171,12 @@ void ScanWeakRefClosure::do_oop(narrowOop* p) { ScanWeakRefClosure::do_oop_work(
 
 void FilteringClosure::do_oop(oop* p)       { FilteringClosure::do_oop_work(p); }
 void FilteringClosure::do_oop(narrowOop* p) { FilteringClosure::do_oop_work(p); }
+
+KlassScanClosure::KlassScanClosure(OopsInKlassOrGenClosure* scavenge_closure,
+                                   KlassRemSet* klass_rem_set)
+    : _scavenge_closure(scavenge_closure),
+      _accumulate_modified_oops(klass_rem_set->accumulate_modified_oops()) {}
+
 
 DefNewGeneration::DefNewGeneration(ReservedSpace rs,
                                    size_t initial_size,
@@ -426,11 +450,6 @@ void DefNewGeneration::compute_new_size() {
   }
 }
 
-void DefNewGeneration::object_iterate_since_last_GC(ObjectClosure* cl) {
-  // $$$ This may be wrong in case of "scavenge failure"?
-  eden()->object_iterate(cl);
-}
-
 void DefNewGeneration::younger_refs_iterate(OopsInGenClosure* cl) {
   assert(false, "NYI -- are you sure you want to call this?");
 }
@@ -529,6 +548,11 @@ HeapWord* DefNewGeneration::expand_and_allocate(size_t size,
   return allocate(size, is_tlab);
 }
 
+void DefNewGeneration::adjust_desired_tenuring_threshold() {
+  // Set the desired survivor size to half the real survivor space
+  _tenuring_threshold =
+    age_table()->compute_tenuring_threshold(to()->capacity()/HeapWordSize);
+}
 
 void DefNewGeneration::collect(bool   full,
                                bool   clear_all_soft_refs,
@@ -586,6 +610,9 @@ void DefNewGeneration::collect(bool   full,
   FastScanClosure fsc_with_no_gc_barrier(this, false);
   FastScanClosure fsc_with_gc_barrier(this, true);
 
+  KlassScanClosure klass_scan_closure(&fsc_with_no_gc_barrier,
+                                      gch->rem_set()->klass_rem_set());
+
   set_promo_failure_scan_stack_closure(&fsc_with_no_gc_barrier);
   FastEvacuateFollowersClosure evacuate_followers(gch, _level, this,
                                                   &fsc_with_no_gc_barrier,
@@ -594,15 +621,18 @@ void DefNewGeneration::collect(bool   full,
   assert(gch->no_allocs_since_save_marks(0),
          "save marks have not been newly set.");
 
+  int so = SharedHeap::SO_AllClasses | SharedHeap::SO_Strings | SharedHeap::SO_CodeCache;
+
   gch->gen_process_strong_roots(_level,
                                 true,  // Process younger gens, if any,
                                        // as strong roots.
                                 true,  // activate StrongRootsScope
-                                false, // not collecting perm generation.
-                                SharedHeap::SO_AllClasses,
+                                true,  // is scavenging
+                                SharedHeap::ScanningOption(so),
                                 &fsc_with_no_gc_barrier,
                                 true,   // walk *all* scavengable nmethods
-                                &fsc_with_gc_barrier);
+                                &fsc_with_gc_barrier,
+                                &klass_scan_closure);
 
   // "evacuate followers".
   evacuate_followers.do_void();
@@ -611,9 +641,10 @@ void DefNewGeneration::collect(bool   full,
   ReferenceProcessor* rp = ref_processor();
   rp->setup_policy(clear_all_soft_refs);
   const ReferenceProcessorStats& stats =
-    rp->process_discovered_references(&is_alive, &keep_alive, &evacuate_followers,
-                                      NULL, _gc_timer);
+  rp->process_discovered_references(&is_alive, &keep_alive, &evacuate_followers,
+                                    NULL, _gc_timer);
   gc_tracer.report_gc_reference_stats(stats);
+
   if (!_promotion_failed) {
     // Swap the survivor spaces.
     eden()->clear(SpaceDecorator::Mangle);
@@ -632,9 +663,7 @@ void DefNewGeneration::collect(bool   full,
 
     assert(to()->is_empty(), "to space should be empty now");
 
-    // Set the desired survivor size to half the real survivor space
-    _tenuring_threshold =
-      age_table()->compute_tenuring_threshold(to()->capacity()/HeapWordSize);
+    adjust_desired_tenuring_threshold();
 
     // A successful scavenge should restart the GC time limit count which is
     // for full GC's.

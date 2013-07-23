@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,28 +24,35 @@
 
 package sun.jvm.hotspot;
 
-import java.io.PrintStream;
-import java.net.*;
-import java.rmi.*;
-import sun.jvm.hotspot.debugger.*;
-import sun.jvm.hotspot.debugger.bsd.*;
-import sun.jvm.hotspot.debugger.proc.*;
-import sun.jvm.hotspot.debugger.remote.*;
-import sun.jvm.hotspot.debugger.windbg.*;
-import sun.jvm.hotspot.debugger.linux.*;
-import sun.jvm.hotspot.memory.*;
-import sun.jvm.hotspot.oops.*;
-import sun.jvm.hotspot.runtime.*;
-import sun.jvm.hotspot.types.*;
-import sun.jvm.hotspot.utilities.*;
+import java.rmi.RemoteException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+
+import sun.jvm.hotspot.debugger.Debugger;
+import sun.jvm.hotspot.debugger.DebuggerException;
+import sun.jvm.hotspot.debugger.JVMDebugger;
+import sun.jvm.hotspot.debugger.MachineDescription;
+import sun.jvm.hotspot.debugger.MachineDescriptionAMD64;
+import sun.jvm.hotspot.debugger.MachineDescriptionIA64;
+import sun.jvm.hotspot.debugger.MachineDescriptionIntelX86;
+import sun.jvm.hotspot.debugger.MachineDescriptionSPARC32Bit;
+import sun.jvm.hotspot.debugger.MachineDescriptionSPARC64Bit;
+import sun.jvm.hotspot.debugger.NoSuchSymbolException;
+import sun.jvm.hotspot.debugger.bsd.BsdDebuggerLocal;
+import sun.jvm.hotspot.debugger.linux.LinuxDebuggerLocal;
+import sun.jvm.hotspot.debugger.proc.ProcDebuggerLocal;
+import sun.jvm.hotspot.debugger.remote.RemoteDebugger;
+import sun.jvm.hotspot.debugger.remote.RemoteDebuggerClient;
+import sun.jvm.hotspot.debugger.remote.RemoteDebuggerServer;
+import sun.jvm.hotspot.debugger.windbg.WindbgDebuggerLocal;
+import sun.jvm.hotspot.runtime.VM;
+import sun.jvm.hotspot.types.TypeDataBase;
+import sun.jvm.hotspot.utilities.PlatformInfo;
+import sun.jvm.hotspot.utilities.UnsupportedPlatformException;
 
 /** <P> This class wraps much of the basic functionality and is the
  * highest-level factory for VM data structures. It makes it simple
  * to start up the debugging system. </P>
- *
- * <P> FIXME: need to add a way to configure the paths to dbx and the
- * DSO from the outside. However, this should work for now for
- * internal use. </P>
  *
  * <P> FIXME: especially with the addition of remote debugging, this
  * has turned into a mess; needs rethinking. </P>
@@ -58,7 +65,6 @@ public class HotSpotAgent {
 
     private String os;
     private String cpu;
-    private String fileSep;
 
     // The system can work in several ways:
     //  - Attaching to local process
@@ -87,30 +93,7 @@ public class HotSpotAgent {
 
     private String[] jvmLibNames;
 
-    // FIXME: make these configurable, i.e., via a dotfile; also
-    // consider searching within the JDK from which this Java executable
-    // comes to find them
-    private static final String defaultDbxPathPrefix                = "/net/jano.sfbay/export/disk05/hotspot/sa";
-    private static final String defaultDbxSvcAgentDSOPathPrefix     = "/net/jano.sfbay/export/disk05/hotspot/sa";
-
     static void showUsage() {
-        System.out.println("    You can also pass these -D options to java to specify where to find dbx and the \n" +
-        "    Serviceability Agent plugin for dbx:");
-        System.out.println("       -DdbxPathName=<path-to-dbx-executable>\n" +
-        "             Default is derived from dbxPathPrefix");
-        System.out.println("    or");
-        System.out.println("       -DdbxPathPrefix=<xxx>\n" +
-        "             where xxx is the path name of a dir structure that contains:\n" +
-        "                   <os>/<arch>/bin/dbx\n" +
-        "             The default is " + defaultDbxPathPrefix);
-        System.out.println("    and");
-        System.out.println("       -DdbxSvcAgentDSOPathName=<path-to-dbx-serviceability-agent-module>\n" +
-        "             Default is determined from dbxSvcAgentDSOPathPrefix");
-        System.out.println("    or");
-        System.out.println("       -DdbxSvcAgentDSOPathPrefix=<xxx>\n" +
-        "             where xxx is the pathname of a dir structure that contains:\n" +
-        "                   <os>/<arch>/bin/lib/libsvc_agent_dbx.so\n" +
-        "             The default is " + defaultDbxSvcAgentDSOPathPrefix);
     }
 
     public HotSpotAgent() {
@@ -169,6 +152,14 @@ public class HotSpotAgent {
         this.javaExecutableName = javaExecutableName;
         this.coreFileName = coreFileName;
         startupMode = CORE_FILE_MODE;
+        isServer = false;
+        go();
+    }
+
+    /** This uses a JVMDebugger that is already attached to the core or process */
+    public synchronized void attach(JVMDebugger d)
+    throws DebuggerException {
+        debugger = d;
         isServer = false;
         go();
     }
@@ -321,26 +312,37 @@ public class HotSpotAgent {
             // server, but not client attaching to server)
             //
 
-            try {
-                os  = PlatformInfo.getOS();
-                cpu = PlatformInfo.getCPU();
-            }
-            catch (UnsupportedPlatformException e) {
-                throw new DebuggerException(e);
-            }
-            fileSep = System.getProperty("file.separator");
+            // Handle existing or alternate JVMDebugger:
+            // these will set os, cpu independently of our PlatformInfo implementation.
+            String alternateDebugger = System.getProperty("sa.altDebugger");
+            if (debugger != null) {
+                setupDebuggerExisting();
 
-            if (os.equals("solaris")) {
-                setupDebuggerSolaris();
-            } else if (os.equals("win32")) {
-                setupDebuggerWin32();
-            } else if (os.equals("linux")) {
-                setupDebuggerLinux();
-            } else if (os.equals("bsd")) {
-                setupDebuggerBsd();
+            } else if (alternateDebugger != null) {
+                setupDebuggerAlternate(alternateDebugger);
+
             } else {
-                // Add support for more operating systems here
-                throw new DebuggerException("Operating system " + os + " not yet supported");
+                // Otherwise, os, cpu are those of our current platform:
+                try {
+                    os  = PlatformInfo.getOS();
+                    cpu = PlatformInfo.getCPU();
+                } catch (UnsupportedPlatformException e) {
+                   throw new DebuggerException(e);
+                }
+                if (os.equals("solaris")) {
+                    setupDebuggerSolaris();
+                } else if (os.equals("win32")) {
+                    setupDebuggerWin32();
+                } else if (os.equals("linux")) {
+                    setupDebuggerLinux();
+                } else if (os.equals("bsd")) {
+                    setupDebuggerBsd();
+                } else if (os.equals("darwin")) {
+                    setupDebuggerDarwin();
+                } else {
+                    // Add support for more operating systems here
+                    throw new DebuggerException("Operating system " + os + " not yet supported");
+                }
             }
 
             if (isServer) {
@@ -397,6 +399,10 @@ public class HotSpotAgent {
                 db = new HotSpotTypeDataBase(machDesc,
                 new BsdVtblAccess(debugger, jvmLibNames),
                 debugger, jvmLibNames);
+            } else if (os.equals("darwin")) {
+                db = new HotSpotTypeDataBase(machDesc,
+                new BsdVtblAccess(debugger, jvmLibNames),
+                debugger, jvmLibNames);
             } else {
                 throw new DebuggerException("OS \"" + os + "\" not yet supported (no VtblAccess yet)");
             }
@@ -434,6 +440,41 @@ public class HotSpotAgent {
     //--------------------------------------------------------------------------------
     // OS-specific debugger setup/connect routines
     //
+
+    // Use the existing JVMDebugger, as passed to our constructor.
+    // Retrieve os and cpu from that debugger, not the current platform.
+    private void setupDebuggerExisting() {
+
+        os = debugger.getOS();
+        cpu = debugger.getCPU();
+        setupJVMLibNames(os);
+        machDesc = debugger.getMachineDescription();
+    }
+
+    // Given a classname, load an alternate implementation of JVMDebugger.
+    private void setupDebuggerAlternate(String alternateName) {
+
+        try {
+            Class c = Class.forName(alternateName);
+            Constructor cons = c.getConstructor();
+            debugger = (JVMDebugger) cons.newInstance();
+            attachDebugger();
+            setupDebuggerExisting();
+
+        } catch (ClassNotFoundException cnfe) {
+            throw new DebuggerException("Cannot find alternate SA Debugger: '" + alternateName + "'");
+        } catch (NoSuchMethodException nsme) {
+            throw new DebuggerException("Alternate SA Debugger: '" + alternateName + "' has missing constructor.");
+        } catch (InstantiationException ie) {
+            throw new DebuggerException("Alternate SA Debugger: '" + alternateName + "' fails to initialise: ", ie);
+        } catch (IllegalAccessException iae) {
+            throw new DebuggerException("Alternate SA Debugger: '" + alternateName + "' fails to initialise: ", iae);
+        } catch (InvocationTargetException iae) {
+            throw new DebuggerException("Alternate SA Debugger: '" + alternateName + "' fails to initialise: ", iae);
+        }
+
+        System.err.println("Loaded alternate HotSpot SA Debugger: " + alternateName);
+    }
 
     //
     // Solaris
@@ -478,6 +519,11 @@ public class HotSpotAgent {
         debugger = new RemoteDebuggerClient(remote);
         machDesc = ((RemoteDebuggerClient) debugger).getMachineDescription();
         os = debugger.getOS();
+        setupJVMLibNames(os);
+        cpu = debugger.getCPU();
+    }
+
+    private void setupJVMLibNames(String os) {
         if (os.equals("solaris")) {
             setupJVMLibNamesSolaris();
         } else if (os.equals("win32")) {
@@ -486,15 +532,15 @@ public class HotSpotAgent {
             setupJVMLibNamesLinux();
         } else if (os.equals("bsd")) {
             setupJVMLibNamesBsd();
+        } else if (os.equals("darwin")) {
+            setupJVMLibNamesDarwin();
         } else {
             throw new RuntimeException("Unknown OS type");
         }
-
-        cpu = debugger.getCPU();
     }
 
     private void setupJVMLibNamesSolaris() {
-        jvmLibNames = new String[] { "libjvm.so", "libjvm_g.so", "gamma_g" };
+        jvmLibNames = new String[] { "libjvm.so" };
     }
 
     //
@@ -526,7 +572,7 @@ public class HotSpotAgent {
     }
 
     private void setupJVMLibNamesWin32() {
-        jvmLibNames = new String[] { "jvm.dll", "jvm_g.dll" };
+        jvmLibNames = new String[] { "jvm.dll" };
     }
 
     //
@@ -566,7 +612,7 @@ public class HotSpotAgent {
     }
 
     private void setupJVMLibNamesLinux() {
-        jvmLibNames = new String[] { "libjvm.so", "libjvm_g.so" };
+        jvmLibNames = new String[] { "libjvm.so" };
     }
 
     //
@@ -591,7 +637,30 @@ public class HotSpotAgent {
     }
 
     private void setupJVMLibNamesBsd() {
-        jvmLibNames = new String[] { "libjvm.so", "libjvm_g.so" };
+        jvmLibNames = new String[] { "libjvm.so" };
+    }
+
+    //
+    // Darwin
+    //
+
+    private void setupDebuggerDarwin() {
+        setupJVMLibNamesDarwin();
+
+        if (cpu.equals("amd64") || cpu.equals("x86_64")) {
+            machDesc = new MachineDescriptionAMD64();
+        } else {
+            throw new DebuggerException("Darwin only supported on x86_64. Current arch: " + cpu);
+        }
+
+        BsdDebuggerLocal dbg = new BsdDebuggerLocal(machDesc, !isServer);
+        debugger = dbg;
+
+        attachDebugger();
+    }
+
+    private void setupJVMLibNamesDarwin() {
+        jvmLibNames = new String[] { "libjvm.dylib" };
     }
 
     /** Convenience routine which should be called by per-platform

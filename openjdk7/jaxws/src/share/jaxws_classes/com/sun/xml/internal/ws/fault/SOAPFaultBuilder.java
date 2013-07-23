@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,11 +27,8 @@ package com.sun.xml.internal.ws.fault;
 
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
-import com.sun.xml.internal.bind.api.Bridge;
-import com.sun.xml.internal.bind.api.JAXBRIContext;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.message.Message;
-import com.sun.xml.internal.ws.api.model.CheckedException;
 import com.sun.xml.internal.ws.api.model.ExceptionType;
 import com.sun.xml.internal.ws.encoding.soap.SOAP12Constants;
 import com.sun.xml.internal.ws.encoding.soap.SOAPConstants;
@@ -40,6 +37,7 @@ import com.sun.xml.internal.ws.message.jaxb.JAXBMessage;
 import com.sun.xml.internal.ws.message.FaultMessage;
 import com.sun.xml.internal.ws.model.CheckedExceptionImpl;
 import com.sun.xml.internal.ws.model.JavaMethodImpl;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
 import com.sun.xml.internal.ws.util.DOMUtil;
 import com.sun.xml.internal.ws.util.StringUtils;
 import org.w3c.dom.Document;
@@ -48,6 +46,7 @@ import org.w3c.dom.Node;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
+import javax.xml.bind.annotation.XmlTransient;
 import javax.xml.namespace.QName;
 import javax.xml.soap.SOAPFault;
 import javax.xml.soap.Detail;
@@ -80,7 +79,7 @@ public abstract class SOAPFaultBuilder {
 
     abstract void setDetail(DetailType detailType);
 
-    public @Nullable QName getFirstDetailEntryName() {
+    public @XmlTransient @Nullable QName getFirstDetailEntryName() {
         DetailType dt = getDetail();
         if (dt != null) {
             Node entry = dt.getDetail(0);
@@ -170,7 +169,18 @@ public abstract class SOAPFaultBuilder {
      * @param soapVersion non-null
      */
     public static Message createSOAPFaultMessage(SOAPVersion soapVersion, CheckedExceptionImpl ceModel, Throwable ex) {
-        return createSOAPFaultMessage(soapVersion, ceModel, ex, null);
+        // Sometimes InvocationTargetException.getCause() is null
+        // but InvocationTargetException.getTargetException() contains the real exception
+        // even though they are supposed to be equivalent.
+        // If we only look at .getCause this results in the real exception being lost.
+        // Looks like a JDK bug.
+        final Throwable t =
+            ex instanceof java.lang.reflect.InvocationTargetException
+            ?
+            ((java.lang.reflect.InvocationTargetException)ex).getTargetException()
+            :
+            ex;
+        return createSOAPFaultMessage(soapVersion, ceModel, t, null);
     }
 
     /**
@@ -283,9 +293,9 @@ public abstract class SOAPFaultBuilder {
 
     abstract protected Throwable getProtocolException();
 
-    private Object getJAXBObject(Node jaxbBean, CheckedException ce) throws JAXBException {
-        Bridge bridge = ce.getBridge();
-        return bridge.unmarshal(jaxbBean);
+    private Object getJAXBObject(Node jaxbBean, CheckedExceptionImpl ce) throws JAXBException {
+        XMLBridge bridge = ce.getBond();
+        return bridge.unmarshal(jaxbBean,null);
     }
 
     private Exception createUserDefinedException(CheckedExceptionImpl ce) {
@@ -390,7 +400,7 @@ public abstract class SOAPFaultBuilder {
         } else if(ce != null){
             try {
                 DOMResult dr = new DOMResult();
-                ce.getBridge().marshal(detail,dr);
+                ce.getBond().marshal(detail,dr);
                 detailNode = (Element)dr.getNode().getFirstChild();
                 firstEntry = getFirstDetailEntryName(detailNode);
             } catch (JAXBException e1) {
@@ -485,13 +495,12 @@ public abstract class SOAPFaultBuilder {
         } else if(detail != null){
             try {
                 DOMResult dr = new DOMResult();
-                ce.getBridge().marshal(detail, dr);
+                ce.getBond().marshal(detail, dr);
                 detailNode = (Element)dr.getNode().getFirstChild();
                 firstEntry = getFirstDetailEntryName(detailNode);
             } catch (JAXBException e1) {
                 //Should we throw Internal Server Error???
                 faultString = e.getMessage();
-                faultCode = getDefaultFaultCode(soapVersion);
             }
         }
 
@@ -528,26 +537,28 @@ public abstract class SOAPFaultBuilder {
     /**
      * This {@link JAXBContext} can handle SOAP 1.1/1.2 faults.
      */
-    private static final JAXBRIContext JAXB_CONTEXT;
+    private static final JAXBContext JAXB_CONTEXT;
 
     private static final Logger logger = Logger.getLogger(SOAPFaultBuilder.class.getName());
 
     /**
      * Set to false if you don't want the generated faults to have stack trace in it.
      */
-    public static boolean captureStackTrace;
+    public static final boolean captureStackTrace;
 
     /*package*/ static final String CAPTURE_STACK_TRACE_PROPERTY = SOAPFaultBuilder.class.getName()+".captureStackTrace";
 
     static {
+        boolean tmpVal = false;
         try {
-            captureStackTrace = Boolean.getBoolean(CAPTURE_STACK_TRACE_PROPERTY);
+            tmpVal = Boolean.getBoolean(CAPTURE_STACK_TRACE_PROPERTY);
         } catch (SecurityException e) {
             // ignore
         }
+        captureStackTrace = tmpVal;
 
         try {
-            JAXB_CONTEXT = (JAXBRIContext)JAXBContext.newInstance(SOAP11Fault.class, SOAP12Fault.class);
+            JAXB_CONTEXT = JAXBContext.newInstance(SOAP11Fault.class, SOAP12Fault.class);
         } catch (JAXBException e) {
             throw new Error(e); // this must be a bug in our code
         }

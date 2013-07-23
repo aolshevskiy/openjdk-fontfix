@@ -52,14 +52,10 @@ define_pd_global(intx,  StackShadowPages,     5 LP64_ONLY(+1) DEBUG_ONLY(+3));
 define_pd_global(bool,  RewriteBytecodes,     true);
 define_pd_global(bool,  RewriteFrequentPairs, true);
 
-#ifdef _ALLBSD_SOURCE
 define_pd_global(bool,  UseMembar,            true);
-#else
-define_pd_global(bool,  UseMembar,            false);
-#endif
 
 // GC Ergo Flags
-define_pd_global(intx, CMSYoungGenPerWorker, 16*M);  // default max size of CMS young gen, per GC worker thread
+define_pd_global(uintx, CMSYoungGenPerWorker, 16*M);  // default max size of CMS young gen, per GC worker thread
 
 #define ARCH_FLAGS(develop, product, diagnostic, experimental, notproduct)
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.xml.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -50,6 +49,18 @@ public final class DispatchMessages {
      */
     public static String INVALID_NULLARG_XMLHTTP_REQUEST_METHOD(Object arg0, Object arg1) {
         return localizer.localize(localizableINVALID_NULLARG_XMLHTTP_REQUEST_METHOD(arg0, arg1));
+    }
+
+    public static Localizable localizableINVALID_NULLARG_URI() {
+        return messageFactory.getMessage("invalid.nullarg.uri");
+    }
+
+    /**
+     * Endpoint address URI is not allowed with a null argument
+     *
+     */
+    public static String INVALID_NULLARG_URI() {
+        return localizer.localize(localizableINVALID_NULLARG_URI());
     }
 
     public static Localizable localizableINVALID_SOAPMESSAGE_DISPATCH_MSGMODE(Object arg0, Object arg1) {

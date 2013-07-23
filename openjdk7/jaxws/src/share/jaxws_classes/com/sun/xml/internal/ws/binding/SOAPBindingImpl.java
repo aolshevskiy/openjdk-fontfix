@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,26 +28,20 @@ package com.sun.xml.internal.ws.binding;
 import com.sun.istack.internal.NotNull;
 import com.sun.xml.internal.ws.api.BindingID;
 import com.sun.xml.internal.ws.api.SOAPVersion;
-import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
-import com.sun.xml.internal.ws.api.handler.MessageHandler;
 import com.sun.xml.internal.ws.client.HandlerConfiguration;
 import com.sun.xml.internal.ws.encoding.soap.streaming.SOAP12NamespaceConstants;
-import com.sun.xml.internal.ws.handler.HandlerException;
 import com.sun.xml.internal.ws.resources.ClientMessages;
 
 import javax.xml.namespace.QName;
 import javax.xml.soap.MessageFactory;
 import javax.xml.soap.SOAPFactory;
-import javax.xml.ws.ServiceMode;
+
 import javax.xml.ws.WebServiceException;
 import javax.xml.ws.WebServiceFeature;
 import javax.xml.ws.handler.Handler;
-import javax.xml.ws.handler.LogicalHandler;
-import javax.xml.ws.handler.soap.SOAPHandler;
 import javax.xml.ws.soap.MTOMFeature;
 import javax.xml.ws.soap.SOAPBinding;
 import java.util.*;
-
 
 /**
  * @author WS Development Team
@@ -66,6 +60,8 @@ public final class SOAPBindingImpl extends BindingImpl implements SOAPBinding {
 
     /**
      * Use {@link BindingImpl#create(BindingID)} to create this.
+     *
+     * @param bindingId SOAP binding ID
      */
     SOAPBindingImpl(BindingID bindingId) {
         this(bindingId,EMPTY_FEATURES);
@@ -74,22 +70,21 @@ public final class SOAPBindingImpl extends BindingImpl implements SOAPBinding {
     /**
      * Use {@link BindingImpl#create(BindingID)} to create this.
      *
+     * @param bindingId binding id
      * @param features
      *      These features have a precedence over
      *      {@link BindingID#createBuiltinFeatureList() the implicit features}
      *      associated with the {@link BindingID}.
      */
     SOAPBindingImpl(BindingID bindingId, WebServiceFeature... features) {
-        super(bindingId);
+        super(bindingId, features);
         this.soapVersion = bindingId.getSOAPVersion();
         //populates with required roles and updates handlerConfig
         setRoles(new HashSet<String>());
         //Is this still required? comment out for now
         //setupSystemHandlerDelegate(serviceName);
 
-        setFeatures(features);
         this.features.addAll(bindingId.createBuiltinFeatureList());
-        populateBindingUnderstoodHeaders();
     }
 
     /**
@@ -97,38 +92,22 @@ public final class SOAPBindingImpl extends BindingImpl implements SOAPBinding {
      *  The Headers understood by the Port are set, so that they can be used for MU
      *  processing.
      *
-     * @param headers
+     * @param headers SOAP header names
      */
     public void setPortKnownHeaders(@NotNull Set<QName> headers) {
         this.portKnownHeaders = headers;
     }
 
-    public boolean understandsHeader(QName header) {
-        if(serviceMode == javax.xml.ws.Service.Mode.MESSAGE)
-            return true;
-        if(portKnownHeaders.contains(header))
-            return true;
-        if(bindingUnderstoodHeaders.contains(header))
-            return true;
-
-        return false;
-    }
-
     /**
-     * Understand WS-Addressing headers if WS-Addressing is enabled
-     *
+     * TODO A feature should be created to configure processing of MU headers.
+     * @param header
+     * @return
      */
-    private void populateBindingUnderstoodHeaders() {
-        AddressingVersion addressingVersion = getAddressingVersion();
-        if (addressingVersion != null) {
-            bindingUnderstoodHeaders.add(addressingVersion.actionTag);
-            bindingUnderstoodHeaders.add(addressingVersion.faultToTag);
-            bindingUnderstoodHeaders.add(addressingVersion.fromTag);
-            bindingUnderstoodHeaders.add(addressingVersion.messageIDTag);
-            bindingUnderstoodHeaders.add(addressingVersion.relatesToTag);
-            bindingUnderstoodHeaders.add(addressingVersion.replyToTag);
-            bindingUnderstoodHeaders.add(addressingVersion.toTag);
-        }
+    public boolean understandsHeader(QName header) {
+        return serviceMode == javax.xml.ws.Service.Mode.MESSAGE
+                || portKnownHeaders.contains(header)
+                || bindingUnderstoodHeaders.contains(header);
+
     }
 
     /**
@@ -137,7 +116,7 @@ public final class SOAPBindingImpl extends BindingImpl implements SOAPBinding {
      * Protocol Handlers and sets the HandlerConfiguration.
      */
     public void setHandlerChain(List<Handler> chain) {
-        handlerConfig = new HandlerConfiguration(handlerConfig.getRoles(), chain);
+        setHandlerConfig(new HandlerConfiguration(getHandlerConfig().getRoles(), chain));
     }
 
     protected void addRequiredRoles(Set<String> roles) {
@@ -145,7 +124,7 @@ public final class SOAPBindingImpl extends BindingImpl implements SOAPBinding {
     }
 
     public Set<String> getRoles() {
-        return handlerConfig.getRoles();
+        return getHandlerConfig().getRoles();
     }
 
     /**
@@ -161,7 +140,7 @@ public final class SOAPBindingImpl extends BindingImpl implements SOAPBinding {
             throw new WebServiceException(ClientMessages.INVALID_SOAP_ROLE_NONE());
         }
         addRequiredRoles(roles);
-        handlerConfig = new HandlerConfiguration(roles, getHandlerConfig());
+        setHandlerConfig(new HandlerConfiguration(roles, getHandlerConfig()));
     }
 
 
@@ -176,16 +155,15 @@ public final class SOAPBindingImpl extends BindingImpl implements SOAPBinding {
      * Client application can override if the MTOM optimization should be enabled
      */
     public void setMTOMEnabled(boolean b) {
-        setFeatures(new MTOMFeature(b));
+        features.setMTOMEnabled(b);
     }
 
     public SOAPFactory getSOAPFactory() {
-        return soapVersion.saajSoapFactory;
+        return soapVersion.getSOAPFactory();
     }
 
     public MessageFactory getMessageFactory() {
-        return soapVersion.saajMessageFactory;
+        return soapVersion.getMessageFactory();
     }
 
-    private static final WebServiceFeature[] EMPTY_FEATURES = new WebServiceFeature[0];
 }

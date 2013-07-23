@@ -29,6 +29,7 @@
 #include "code/icBuffer.hpp"
 #include "code/vtableStubs.hpp"
 #include "compiler/compileBroker.hpp"
+#include "compiler/disassembler.hpp"
 #include "interpreter/interpreter.hpp"
 #include "jvm_linux.h"
 #include "memory/allocation.inline.hpp"
@@ -53,38 +54,18 @@
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/statSampler.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/threadCritical.hpp"
 #include "runtime/timer.hpp"
 #include "services/attachListener.hpp"
 #include "services/memTracker.hpp"
 #include "services/runtimeService.hpp"
-#include "thread_linux.inline.hpp"
 #include "utilities/decoder.hpp"
 #include "utilities/defaultStream.hpp"
 #include "utilities/events.hpp"
 #include "utilities/elfFile.hpp"
 #include "utilities/growableArray.hpp"
 #include "utilities/vmError.hpp"
-#ifdef TARGET_ARCH_x86
-# include "assembler_x86.inline.hpp"
-# include "nativeInst_x86.hpp"
-#endif
-#ifdef TARGET_ARCH_sparc
-# include "assembler_sparc.inline.hpp"
-# include "nativeInst_sparc.hpp"
-#endif
-#ifdef TARGET_ARCH_zero
-# include "assembler_zero.inline.hpp"
-# include "nativeInst_zero.hpp"
-#endif
-#ifdef TARGET_ARCH_arm
-# include "assembler_arm.inline.hpp"
-# include "nativeInst_arm.hpp"
-#endif
-#ifdef TARGET_ARCH_ppc
-# include "assembler_ppc.inline.hpp"
-# include "nativeInst_ppc.hpp"
-#endif
 
 // put OS-includes here
 # include <sys/types.h>
@@ -120,6 +101,12 @@
 # include <inttypes.h>
 # include <sys/ioctl.h>
 
+// if RUSAGE_THREAD for getrusage() has not been defined, do it here. The code calling
+// getrusage() is prepared to handle the associated failure.
+#ifndef RUSAGE_THREAD
+#define RUSAGE_THREAD   (1)               /* only the calling thread */
+#endif
+
 #define MAX_PATH    (2 * K)
 
 // for timer info max values which include all bits
@@ -138,6 +125,7 @@ int (*os::Linux::_pthread_getcpuclockid)(pthread_t, clockid_t *) = NULL;
 Mutex* os::Linux::_createThread_lock = NULL;
 pthread_t os::Linux::_main_thread;
 int os::Linux::_page_size = -1;
+const int os::Linux::_vm_default_page_size = (8 * K);
 bool os::Linux::_is_floating_stack = false;
 bool os::Linux::_is_NPTL = false;
 bool os::Linux::_supports_fast_thread_cpu_time = false;
@@ -198,7 +186,6 @@ class MemNotifyThread: public Thread {
 // utility functions
 
 static int SR_initialize();
-static int SR_finalize();
 
 julong os::available_memory() {
   return Linux::available_memory();
@@ -214,20 +201,6 @@ julong os::Linux::available_memory() {
 
 julong os::physical_memory() {
   return Linux::physical_memory();
-}
-
-julong os::allocatable_physical_memory(julong size) {
-#ifdef _LP64
-  return size;
-#else
-  julong result = MIN2(size, (julong)3800*M);
-   if (!is_allocatable(result)) {
-     // See comments under solaris for alignment considerations
-     julong reasonable_size = (julong)2*G - 2 * os::vm_page_size();
-     result =  MIN2(size, reasonable_size);
-   }
-   return result;
-#endif // _LP64
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -346,12 +319,12 @@ void os::init_system_properties_values() {
 
   // The next steps are taken in the product version:
   //
-  // Obtain the JAVA_HOME value from the location of libjvm[_g].so.
+  // Obtain the JAVA_HOME value from the location of libjvm.so.
   // This library should be located at:
-  // <JAVA_HOME>/jre/lib/<arch>/{client|server}/libjvm[_g].so.
+  // <JAVA_HOME>/jre/lib/<arch>/{client|server}/libjvm.so.
   //
   // If "/jre/lib/" appears at the right place in the path, then we
-  // assume libjvm[_g].so is installed in a JDK and we use this path.
+  // assume libjvm.so is installed in a JDK and we use this path.
   //
   // Otherwise exit with message: "Could not create the Java virtual machine."
   //
@@ -361,9 +334,9 @@ void os::init_system_properties_values() {
   // instead of exit check for $JAVA_HOME environment variable.
   //
   // If it is defined and we are able to locate $JAVA_HOME/jre/lib/<arch>,
-  // then we append a fake suffix "hotspot/libjvm[_g].so" to this path so
-  // it looks like libjvm[_g].so is installed there
-  // <JAVA_HOME>/jre/lib/<arch>/hotspot/libjvm[_g].so.
+  // then we append a fake suffix "hotspot/libjvm.so" to this path so
+  // it looks like libjvm.so is installed there
+  // <JAVA_HOME>/jre/lib/<arch>/hotspot/libjvm.so.
   //
   // Otherwise exit.
   //
@@ -1180,13 +1153,9 @@ void os::Linux::capture_initial_stack(size_t max_size) {
   //   for initial thread if its stack size exceeds 6M. Cap it at 2M,
   //   in case other parts in glibc still assumes 2M max stack size.
   // FIXME: alt signal stack is gone, maybe we can relax this constraint?
-#ifndef IA64
-  if (stack_size > 2 * K * K) stack_size = 2 * K * K;
-#else
   // Problem still exists RH7.2 (IA64 anyway) but 2MB is a little small
-  if (stack_size > 4 * K * K) stack_size = 4 * K * K;
-#endif
-
+  if (stack_size > 2 * K * K IA64_ONLY(*2))
+      stack_size = 2 * K * K IA64_ONLY(*2);
   // Try to figure out where the stack base (top) is. This is harder.
   //
   // When an application is started, glibc saves the initial stack pointer in
@@ -1376,15 +1345,19 @@ jlong os::elapsed_frequency() {
   return (1000 * 1000);
 }
 
-// For now, we say that linux does not support vtime.  I have no idea
-// whether it can actually be made to (DLD, 9/13/05).
-
-bool os::supports_vtime() { return false; }
+bool os::supports_vtime() { return true; }
 bool os::enable_vtime()   { return false; }
 bool os::vtime_enabled()  { return false; }
+
 double os::elapsedVTime() {
-  // better than nothing, but not much
-  return elapsedTime();
+  struct rusage usage;
+  int retval = getrusage(RUSAGE_THREAD, &usage);
+  if (retval == 0) {
+    return (double) (usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + (double) (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / (1000 * 1000);
+  } else {
+    // better than nothing, but not much
+    return elapsedTime();
+  }
 }
 
 jlong os::javaTimeMillis() {
@@ -1656,22 +1629,26 @@ static bool file_exists(const char* filename) {
   return os::stat(filename, &statbuf) == 0;
 }
 
-void os::dll_build_name(char* buffer, size_t buflen,
+bool os::dll_build_name(char* buffer, size_t buflen,
                         const char* pname, const char* fname) {
+  bool retval = false;
   // Copied from libhpi
   const size_t pnamelen = pname ? strlen(pname) : 0;
 
-  // Quietly truncate on buffer overflow.  Should be an error.
+  // Return error on buffer overflow.
   if (pnamelen + strlen(fname) + 10 > (size_t) buflen) {
-      *buffer = '\0';
-      return;
+    return retval;
   }
 
   if (pnamelen == 0) {
     snprintf(buffer, buflen, "lib%s.so", fname);
+    retval = true;
   } else if (strchr(pname, *os::path_separator()) != NULL) {
     int n;
     char** pelements = split_path(pname, &n);
+    if (pelements == NULL) {
+      return false;
+    }
     for (int i = 0 ; i < n ; i++) {
       // Really shouldn't be NULL, but check can't hurt
       if (pelements[i] == NULL || strlen(pelements[i]) == 0) {
@@ -1679,6 +1656,7 @@ void os::dll_build_name(char* buffer, size_t buflen,
       }
       snprintf(buffer, buflen, "%s/lib%s.so", pelements[i], fname);
       if (file_exists(buffer)) {
+        retval = true;
         break;
       }
     }
@@ -1693,25 +1671,24 @@ void os::dll_build_name(char* buffer, size_t buflen,
     }
   } else {
     snprintf(buffer, buflen, "%s/lib%s.so", pname, fname);
+    retval = true;
   }
+  return retval;
 }
 
-const char* os::get_current_directory(char *buf, int buflen) {
-  return getcwd(buf, buflen);
-}
-
-// check if addr is inside libjvm[_g].so
+// check if addr is inside libjvm.so
 bool os::address_is_in_vm(address addr) {
   static address libjvm_base_addr;
   Dl_info dlinfo;
 
   if (libjvm_base_addr == NULL) {
-    dladdr(CAST_FROM_FN_PTR(void *, os::address_is_in_vm), &dlinfo);
-    libjvm_base_addr = (address)dlinfo.dli_fbase;
+    if (dladdr(CAST_FROM_FN_PTR(void *, os::address_is_in_vm), &dlinfo) != 0) {
+      libjvm_base_addr = (address)dlinfo.dli_fbase;
+    }
     assert(libjvm_base_addr !=NULL, "Cannot obtain base address for libjvm");
   }
 
-  if (dladdr((void *)addr, &dlinfo)) {
+  if (dladdr((void *)addr, &dlinfo) != 0) {
     if (libjvm_base_addr == (address)dlinfo.dli_fbase) return true;
   }
 
@@ -1720,24 +1697,30 @@ bool os::address_is_in_vm(address addr) {
 
 bool os::dll_address_to_function_name(address addr, char *buf,
                                       int buflen, int *offset) {
+  // buf is not optional, but offset is optional
+  assert(buf != NULL, "sanity check");
+
   Dl_info dlinfo;
 
-  if (dladdr((void*)addr, &dlinfo) && dlinfo.dli_sname != NULL) {
-    if (buf != NULL) {
-      if(!Decoder::demangle(dlinfo.dli_sname, buf, buflen)) {
+  if (dladdr((void*)addr, &dlinfo) != 0) {
+    // see if we have a matching symbol
+    if (dlinfo.dli_saddr != NULL && dlinfo.dli_sname != NULL) {
+      if (!Decoder::demangle(dlinfo.dli_sname, buf, buflen)) {
         jio_snprintf(buf, buflen, "%s", dlinfo.dli_sname);
       }
+      if (offset != NULL) *offset = addr - (address)dlinfo.dli_saddr;
+      return true;
     }
-    if (offset != NULL) *offset = addr - (address)dlinfo.dli_saddr;
-    return true;
-  } else if (dlinfo.dli_fname != NULL && dlinfo.dli_fbase != 0) {
-    if (Decoder::decode((address)(addr - (address)dlinfo.dli_fbase),
-        buf, buflen, offset, dlinfo.dli_fname)) {
-       return true;
+    // no matching symbol so try for just file info
+    if (dlinfo.dli_fname != NULL && dlinfo.dli_fbase != NULL) {
+      if (Decoder::decode((address)(addr - (address)dlinfo.dli_fbase),
+                          buf, buflen, offset, dlinfo.dli_fname)) {
+        return true;
+      }
     }
   }
 
-  if (buf != NULL) buf[0] = '\0';
+  buf[0] = '\0';
   if (offset != NULL) *offset = -1;
   return false;
 }
@@ -1788,6 +1771,9 @@ static int address_to_library_name_callback(struct dl_phdr_info *info,
 
 bool os::dll_address_to_library_name(address addr, char* buf,
                                      int buflen, int* offset) {
+  // buf is not optional, but offset is optional
+  assert(buf != NULL, "sanity check");
+
   Dl_info dlinfo;
   struct _address_to_library_name data;
 
@@ -1806,15 +1792,20 @@ bool os::dll_address_to_library_name(address addr, char* buf,
      // buf already contains library name
      if (offset) *offset = addr - data.base;
      return true;
-  } else if (dladdr((void*)addr, &dlinfo)){
-     if (buf) jio_snprintf(buf, buflen, "%s", dlinfo.dli_fname);
-     if (offset) *offset = addr - (address)dlinfo.dli_fbase;
-     return true;
-  } else {
-     if (buf) buf[0] = '\0';
-     if (offset) *offset = -1;
-     return false;
   }
+  if (dladdr((void*)addr, &dlinfo) != 0) {
+    if (dlinfo.dli_fname != NULL) {
+      jio_snprintf(buf, buflen, "%s", dlinfo.dli_fname);
+    }
+    if (dlinfo.dli_fbase != NULL && offset != NULL) {
+      *offset = addr - (address)dlinfo.dli_fbase;
+    }
+    return true;
+  }
+
+  buf[0] = '\0';
+  if (offset) *offset = -1;
+  return false;
 }
 
   // Loads .dll/.so and
@@ -2323,7 +2314,7 @@ void os::print_signal_handlers(outputStream* st, char* buf, size_t buflen) {
 
 static char saved_jvm_path[MAXPATHLEN] = {0};
 
-// Find the full path to the current module, libjvm.so or libjvm_g.so
+// Find the full path to the current module, libjvm.so
 void os::jvm_path(char *buf, jint buflen) {
   // Error checking.
   if (buflen < MAXPATHLEN) {
@@ -2341,8 +2332,11 @@ void os::jvm_path(char *buf, jint buflen) {
   bool ret = dll_address_to_library_name(
                 CAST_FROM_FN_PTR(address, os::jvm_path),
                 dli_fname, sizeof(dli_fname), NULL);
-  assert(ret != 0, "cannot locate libjvm");
-  char *rp = realpath(dli_fname, buf);
+  assert(ret, "cannot locate libjvm");
+  char *rp = NULL;
+  if (ret && dli_fname[0] != '\0') {
+    rp = realpath(dli_fname, buf);
+  }
   if (rp == NULL)
     return;
 
@@ -2366,10 +2360,9 @@ void os::jvm_path(char *buf, jint buflen) {
         char* jrelib_p;
         int len;
 
-        // Check the current module name "libjvm.so" or "libjvm_g.so".
+        // Check the current module name "libjvm.so".
         p = strrchr(buf, '/');
         assert(strstr(p, "/libjvm") == p, "invalid library name");
-        p = strstr(p, "_g") ? "_g" : "";
 
         rp = realpath(java_home_var, buf);
         if (rp == NULL)
@@ -2385,11 +2378,9 @@ void os::jvm_path(char *buf, jint buflen) {
         }
 
         if (0 == access(buf, F_OK)) {
-          // Use current module name "libjvm[_g].so" instead of
-          // "libjvm"debug_only("_g")".so" since for fastdebug version
-          // we should have "libjvm.so" but debug_only("_g") adds "_g"!
+          // Use current module name "libjvm.so"
           len = strlen(buf);
-          snprintf(buf + len, buflen-len, "/hotspot/libjvm%s.so", p);
+          snprintf(buf + len, buflen-len, "/hotspot/libjvm.so");
         } else {
           // Go back to path of .so
           rp = realpath(dli_fname, buf);
@@ -2639,11 +2630,49 @@ void linux_wrap_code(char* base, size_t size) {
   }
 }
 
+static bool recoverable_mmap_error(int err) {
+  // See if the error is one we can let the caller handle. This
+  // list of errno values comes from JBS-6843484. I can't find a
+  // Linux man page that documents this specific set of errno
+  // values so while this list currently matches Solaris, it may
+  // change as we gain experience with this failure mode.
+  switch (err) {
+  case EBADF:
+  case EINVAL:
+  case ENOTSUP:
+    // let the caller deal with these errors
+    return true;
+
+  default:
+    // Any remaining errors on this OS can cause our reserved mapping
+    // to be lost. That can cause confusion where different data
+    // structures think they have the same memory mapped. The worst
+    // scenario is if both the VM and a library think they have the
+    // same memory mapped.
+    return false;
+  }
+}
+
+static void warn_fail_commit_memory(char* addr, size_t size, bool exec,
+                                    int err) {
+  warning("INFO: os::commit_memory(" PTR_FORMAT ", " SIZE_FORMAT
+          ", %d) failed; error='%s' (errno=%d)", addr, size, exec,
+          strerror(err), err);
+}
+
+static void warn_fail_commit_memory(char* addr, size_t size,
+                                    size_t alignment_hint, bool exec,
+                                    int err) {
+  warning("INFO: os::commit_memory(" PTR_FORMAT ", " SIZE_FORMAT
+          ", " SIZE_FORMAT ", %d) failed; error='%s' (errno=%d)", addr, size,
+          alignment_hint, exec, strerror(err), err);
+}
+
 // NOTE: Linux kernel does not really reserve the pages for us.
 //       All it does is to check if there are enough free pages
 //       left at the time of mmap(). This could be a potential
 //       problem.
-bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
+int os::Linux::commit_memory_impl(char* addr, size_t size, bool exec) {
   int prot = exec ? PROT_READ|PROT_WRITE|PROT_EXEC : PROT_READ|PROT_WRITE;
   uintptr_t res = (uintptr_t) ::mmap(addr, size, prot,
                                    MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0);
@@ -2651,9 +2680,32 @@ bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
     if (UseNUMAInterleaving) {
       numa_make_global(addr, size);
     }
-    return true;
+    return 0;
   }
-  return false;
+
+  int err = errno;  // save errno from mmap() call above
+
+  if (!recoverable_mmap_error(err)) {
+    warn_fail_commit_memory(addr, size, exec, err);
+    vm_exit_out_of_memory(size, OOM_MMAP_ERROR, "committing reserved memory.");
+  }
+
+  return err;
+}
+
+bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
+  return os::Linux::commit_memory_impl(addr, size, exec) == 0;
+}
+
+void os::pd_commit_memory_or_exit(char* addr, size_t size, bool exec,
+                                  const char* mesg) {
+  assert(mesg != NULL, "mesg must be specified");
+  int err = os::Linux::commit_memory_impl(addr, size, exec);
+  if (err != 0) {
+    // the caller wants all commit errors to exit with the specified mesg:
+    warn_fail_commit_memory(addr, size, exec, err);
+    vm_exit_out_of_memory(size, OOM_MMAP_ERROR, mesg);
+  }
 }
 
 // Define MAP_HUGETLB here so we can build HotSpot on old systems.
@@ -2666,8 +2718,9 @@ bool os::pd_commit_memory(char* addr, size_t size, bool exec) {
 #define MADV_HUGEPAGE 14
 #endif
 
-bool os::pd_commit_memory(char* addr, size_t size, size_t alignment_hint,
-                       bool exec) {
+int os::Linux::commit_memory_impl(char* addr, size_t size,
+                                  size_t alignment_hint, bool exec) {
+  int err;
   if (UseHugeTLBFS && alignment_hint > (size_t)vm_page_size()) {
     int prot = exec ? PROT_READ|PROT_WRITE|PROT_EXEC : PROT_READ|PROT_WRITE;
     uintptr_t res =
@@ -2678,16 +2731,46 @@ bool os::pd_commit_memory(char* addr, size_t size, size_t alignment_hint,
       if (UseNUMAInterleaving) {
         numa_make_global(addr, size);
       }
-      return true;
+      return 0;
+    }
+
+    err = errno;  // save errno from mmap() call above
+
+    if (!recoverable_mmap_error(err)) {
+      // However, it is not clear that this loss of our reserved mapping
+      // happens with large pages on Linux or that we cannot recover
+      // from the loss. For now, we just issue a warning and we don't
+      // call vm_exit_out_of_memory(). This issue is being tracked by
+      // JBS-8007074.
+      warn_fail_commit_memory(addr, size, alignment_hint, exec, err);
+//    vm_exit_out_of_memory(size, OOM_MMAP_ERROR,
+//                          "committing reserved memory.");
     }
     // Fall through and try to use small pages
   }
 
-  if (commit_memory(addr, size, exec)) {
+  err = os::Linux::commit_memory_impl(addr, size, exec);
+  if (err == 0) {
     realign_memory(addr, size, alignment_hint);
-    return true;
   }
-  return false;
+  return err;
+}
+
+bool os::pd_commit_memory(char* addr, size_t size, size_t alignment_hint,
+                          bool exec) {
+  return os::Linux::commit_memory_impl(addr, size, alignment_hint, exec) == 0;
+}
+
+void os::pd_commit_memory_or_exit(char* addr, size_t size,
+                                  size_t alignment_hint, bool exec,
+                                  const char* mesg) {
+  assert(mesg != NULL, "mesg must be specified");
+  int err = os::Linux::commit_memory_impl(addr, size, alignment_hint, exec);
+  if (err != 0) {
+    // the caller wants all commit errors to exit with the specified mesg:
+    warn_fail_commit_memory(addr, size, alignment_hint, exec, err);
+    vm_exit_out_of_memory(size, OOM_MMAP_ERROR, mesg);
+  }
 }
 
 void os::pd_realign_memory(char *addr, size_t bytes, size_t alignment_hint) {
@@ -2705,7 +2788,7 @@ void os::pd_free_memory(char *addr, size_t bytes, size_t alignment_hint) {
   // small pages on top of the SHM segment. This method always works for small pages, so we
   // allow that in any case.
   if (alignment_hint <= (size_t)os::vm_page_size() || !UseSHM) {
-    commit_memory(addr, bytes, alignment_hint, false);
+    commit_memory(addr, bytes, alignment_hint, !ExecMem);
   }
 }
 
@@ -2958,7 +3041,7 @@ bool os::pd_create_stack_guard_pages(char* addr, size_t size) {
       ::munmap((void*)stack_extent, (uintptr_t)addr - stack_extent);
   }
 
-  return os::commit_memory(addr, size);
+  return os::commit_memory(addr, size, !ExecMem);
 }
 
 // If this is a growable mapping, remove the guard pages entirely by
@@ -2995,9 +3078,10 @@ static char* anon_mmap(char* requested_addr, size_t bytes, bool fixed) {
     flags |= MAP_FIXED;
   }
 
-  // Map uncommitted pages PROT_READ and PROT_WRITE, change access
-  // to PROT_EXEC if executable when we commit the page.
-  addr = (char*)::mmap(requested_addr, bytes, PROT_READ|PROT_WRITE,
+  // Map reserved/uncommitted pages PROT_NONE so we fail early if we
+  // touch an uncommitted page. Otherwise, the read/write might
+  // succeed if we have enough swap space to back the physical page.
+  addr = (char*)::mmap(requested_addr, bytes, PROT_NONE,
                        flags, -1, 0);
 
   if (addr != MAP_FAILED) {
@@ -3079,7 +3163,7 @@ bool os::Linux::hugetlbfs_sanity_check(bool warn, size_t page_size) {
                   MAP_ANONYMOUS|MAP_PRIVATE|MAP_HUGETLB,
                   -1, 0);
 
-  if (p != (void *) -1) {
+  if (p != MAP_FAILED) {
     // We don't know if this really is a huge page or not.
     FILE *fp = fopen("/proc/self/maps", "r");
     if (fp) {
@@ -3297,22 +3381,21 @@ char* os::reserve_memory_special(size_t bytes, char* req_addr, bool exec) {
   }
 
   // The memory is committed
-  address pc = CALLER_PC;
-  MemTracker::record_virtual_memory_reserve((address)addr, bytes, pc);
-  MemTracker::record_virtual_memory_commit((address)addr, bytes, pc);
+  MemTracker::record_virtual_memory_reserve_and_commit((address)addr, bytes, mtNone, CALLER_PC);
 
   return addr;
 }
 
 bool os::release_memory_special(char* base, size_t bytes) {
+  MemTracker::Tracker tkr = MemTracker::get_virtual_memory_release_tracker();
   // detaching the SHM segment will also delete it, see reserve_memory_special()
   int rslt = shmdt(base);
   if (rslt == 0) {
-    MemTracker::record_virtual_memory_uncommit((address)base, bytes);
-    MemTracker::record_virtual_memory_release((address)base, bytes);
+    tkr.record((address)base, bytes);
     return true;
   } else {
-   return false;
+    tkr.discard();
+    return false;
   }
 }
 
@@ -3751,10 +3834,6 @@ static int SR_initialize() {
   return 0;
 }
 
-static int SR_finalize() {
-  return 0;
-}
-
 static int sr_notify(OSThread* osthread) {
   int status = pthread_kill(osthread->pthread_id(), SR_signum);
   assert_status(status == 0, status, "pthread_kill");
@@ -3911,7 +3990,9 @@ JVM_handle_linux_signal(int signo, siginfo_t* siginfo,
 
 void signalHandler(int sig, siginfo_t* info, void* uc) {
   assert(info != NULL && uc != NULL, "it must be old kernel");
+  int orig_errno = errno;  // Preserve errno value over signal handler.
   JVM_handle_linux_signal(sig, info, uc, true);
+  errno = orig_errno;
 }
 
 
@@ -4385,6 +4466,15 @@ void os::init(void) {
   Linux::clock_init();
   initial_time_count = os::elapsed_counter();
   pthread_mutex_init(&dl_mutex, NULL);
+
+  // If the pagesize of the VM is greater than 8K determine the appropriate
+  // number of initial guard pages.  The user can change this with the
+  // command line arguments, if needed.
+  if (vm_page_size() > (int)Linux::vm_default_page_size()) {
+    StackYellowPages = 1;
+    StackRedPages = 1;
+    StackShadowPages = round_to((StackShadowPages*Linux::vm_default_page_size()), vm_page_size()) / vm_page_size();
+  }
 }
 
 // To install functions for atexit system call
@@ -4412,7 +4502,7 @@ jint os::init_2(void)
 
   if (!UseMembar) {
     address mem_serialize_page = (address) ::mmap(NULL, Linux::page_size(), PROT_READ | PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-    guarantee( mem_serialize_page != NULL, "mmap Failed for memory serialize page");
+    guarantee( mem_serialize_page != MAP_FAILED, "mmap Failed for memory serialize page");
     os::set_memory_serialize_page( mem_serialize_page );
 
 #ifndef PRODUCT
@@ -4438,8 +4528,8 @@ jint os::init_2(void)
   // Add in 2*BytesPerWord times page size to account for VM stack during
   // class initialization depending on 32 or 64 bit VM.
   os::Linux::min_stack_allowed = MAX2(os::Linux::min_stack_allowed,
-            (size_t)(StackYellowPages+StackRedPages+StackShadowPages+
-                    2*BytesPerWord COMPILER2_PRESENT(+1)) * Linux::page_size());
+            (size_t)(StackYellowPages+StackRedPages+StackShadowPages) * Linux::page_size() +
+                    (2*BytesPerWord COMPILER2_PRESENT(+1)) * Linux::vm_default_page_size());
 
   size_t threadStackSizeInBytes = ThreadStackSize * K;
   if (threadStackSizeInBytes != 0 &&
@@ -4642,16 +4732,12 @@ int os::Linux::safe_cond_timedwait(pthread_cond_t *_cond, pthread_mutex_t *_mute
    if (is_NPTL()) {
       return pthread_cond_timedwait(_cond, _mutex, _abstime);
    } else {
-#ifndef IA64
       // 6292965: LinuxThreads pthread_cond_timedwait() resets FPU control
       // word back to default 64bit precision if condvar is signaled. Java
       // wants 53bit precision.  Save and restore current value.
       int fpu = get_fpu_control_word();
-#endif // IA64
       int status = pthread_cond_timedwait(_cond, _mutex, _abstime);
-#ifndef IA64
       set_fpu_control_word(fpu);
-#endif // IA64
       return status;
    }
 }
@@ -4659,46 +4745,36 @@ int os::Linux::safe_cond_timedwait(pthread_cond_t *_cond, pthread_mutex_t *_mute
 ////////////////////////////////////////////////////////////////////////////////
 // debug support
 
-static address same_page(address x, address y) {
-  int page_bits = -os::vm_page_size();
-  if ((intptr_t(x) & page_bits) == (intptr_t(y) & page_bits))
-    return x;
-  else if (x > y)
-    return (address)(intptr_t(y) | ~page_bits) + 1;
-  else
-    return (address)(intptr_t(y) & page_bits);
-}
-
 bool os::find(address addr, outputStream* st) {
   Dl_info dlinfo;
   memset(&dlinfo, 0, sizeof(dlinfo));
-  if (dladdr(addr, &dlinfo)) {
+  if (dladdr(addr, &dlinfo) != 0) {
     st->print(PTR_FORMAT ": ", addr);
-    if (dlinfo.dli_sname != NULL) {
+    if (dlinfo.dli_sname != NULL && dlinfo.dli_saddr != NULL) {
       st->print("%s+%#x", dlinfo.dli_sname,
                  addr - (intptr_t)dlinfo.dli_saddr);
-    } else if (dlinfo.dli_fname) {
+    } else if (dlinfo.dli_fbase != NULL) {
       st->print("<offset %#x>", addr - (intptr_t)dlinfo.dli_fbase);
     } else {
       st->print("<absolute address>");
     }
-    if (dlinfo.dli_fname) {
+    if (dlinfo.dli_fname != NULL) {
       st->print(" in %s", dlinfo.dli_fname);
     }
-    if (dlinfo.dli_fbase) {
+    if (dlinfo.dli_fbase != NULL) {
       st->print(" at " PTR_FORMAT, dlinfo.dli_fbase);
     }
     st->cr();
 
     if (Verbose) {
       // decode some bytes around the PC
-      address begin = same_page(addr-40, addr);
-      address end   = same_page(addr+40, addr);
+      address begin = clamp_address_in_page(addr-40, addr, os::vm_page_size());
+      address end   = clamp_address_in_page(addr+40, addr, os::vm_page_size());
       address       lowest = (address) dlinfo.dli_sname;
       if (!lowest)  lowest = (address) dlinfo.dli_fbase;
       if (begin < lowest)  begin = lowest;
       Dl_info dlinfo2;
-      if (dladdr(end, &dlinfo2) && dlinfo2.dli_saddr != dlinfo.dli_saddr
+      if (dladdr(end, &dlinfo2) != 0 && dlinfo2.dli_saddr != dlinfo.dli_saddr
           && end > dlinfo2.dli_saddr && dlinfo2.dli_saddr > begin)
         end = (address) dlinfo2.dli_saddr;
       Disassembler::decode(begin, end, st);
@@ -5024,49 +5100,26 @@ jlong os::thread_cpu_time(Thread *thread, bool user_sys_cpu_time) {
 //
 
 static jlong slow_thread_cpu_time(Thread *thread, bool user_sys_cpu_time) {
-  static bool proc_pid_cpu_avail = true;
   static bool proc_task_unchecked = true;
   static const char *proc_stat_path = "/proc/%d/stat";
   pid_t  tid = thread->osthread()->thread_id();
-  int i;
   char *s;
   char stat[2048];
   int statlen;
   char proc_name[64];
   int count;
   long sys_time, user_time;
-  char string[64];
   char cdummy;
   int idummy;
   long ldummy;
   FILE *fp;
 
-  // We first try accessing /proc/<pid>/cpu since this is faster to
-  // process.  If this file is not present (linux kernels 2.5 and above)
-  // then we open /proc/<pid>/stat.
-  if ( proc_pid_cpu_avail ) {
-    sprintf(proc_name, "/proc/%d/cpu", tid);
-    fp =  fopen(proc_name, "r");
-    if ( fp != NULL ) {
-      count = fscanf( fp, "%s %lu %lu\n", string, &user_time, &sys_time);
-      fclose(fp);
-      if ( count != 3 ) return -1;
-
-      if (user_sys_cpu_time) {
-        return ((jlong)sys_time + (jlong)user_time) * (1000000000 / clock_tics_per_sec);
-      } else {
-        return (jlong)user_time * (1000000000 / clock_tics_per_sec);
-      }
-    }
-    else proc_pid_cpu_avail = false;
-  }
-
   // The /proc/<tid>/stat aggregates per-process usage on
   // new Linux kernels 2.6+ where NPTL is supported.
   // The /proc/self/task/<tid>/stat still has the per-thread usage.
   // See bug 6328462.
-  // There can be no directory /proc/self/task on kernels 2.4 with NPTL
-  // and possibly in some other cases, so we check its availability.
+  // There possibly can be cases where there is no directory
+  // /proc/self/task, so we check its availability.
   if (proc_task_unchecked && os::Linux::is_NPTL()) {
     // This is executed only once
     proc_task_unchecked = false;
@@ -5091,7 +5144,6 @@ static jlong slow_thread_cpu_time(Thread *thread, bool user_sys_cpu_time) {
   // We don't really need to know the command string, just find the last
   // occurrence of ")" and then start parsing from there. See bug 4726580.
   s = strrchr(stat, ')');
-  i = 0;
   if (s == NULL ) return -1;
 
   // Skip blank chars

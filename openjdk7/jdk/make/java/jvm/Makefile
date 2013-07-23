@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -55,10 +55,10 @@ JVMCFG_ARCH = $(ARCH)
 endif
 
 ifeq ($(PLATFORM),macosx)
-  JVMCFG_SRC = $(PLATFORM_SRC_MACOS)/bin/$(JVMCFG_ARCH)/jvm.cfg
+  JVMCFG_SRC=$(PLATFORM_SRC_MACOS)/bin/$(JVMCFG_ARCH)/jvm.cfg
   JVMCFG_DIR = $(LIBDIR)
 else
-  JVMCFG_SRC = $(PLATFORM_SRC)/bin/$(JVMCFG_ARCH)/jvm.cfg
+  JVMCFG_SRC=$(PLATFORM_SRC)/bin/$(JVMCFG_ARCH)/jvm.cfg
   JVMCFG_DIR = $(LIBDIR)/$(LIBARCH)
 endif
 

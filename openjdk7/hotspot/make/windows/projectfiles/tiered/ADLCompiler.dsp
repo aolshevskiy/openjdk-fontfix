@@ -67,16 +67,16 @@ LINK32=link.exe
 # PROP Ignore_Export_Lib 0
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /W3 /Gm /GX /Zi /Od /D "WIN32" /D "_CONSOLE" /D "_MBCS" /YX /FD /c
-# ADD CPP /nologo /ML /W3 /WX /Gm /GX /Zi /Od /I "." /I "$(HotSpotWorkSpace)\src\share\vm\opto" /I "$(HotSpotWorkSpace)\src\share\vm\prims" /I "$(HotSpotWorkSpace)\src\share\vm\lookup" /I "$(HotSpotWorkSpace)\src\share\vm\interpreter" /I "$(HotSpotWorkSpace)\src\share\vm\asm" /I "$(HotSpotWorkSpace)\src\share\vm\compiler" /I "$(HotSpotWorkSpace)\src\share\vm\utilities" /I "$(HotSpotWorkSpace)\src\share\vm\code" /I "$(HotSpotWorkSpace)\src\share\vm\oops" /I "$(HotSpotWorkSpace)\src\share\vm\runtime" /I "$(HotSpotWorkSpace)\src\share\vm\memory" /I "$(HotSpotWorkSpace)\src\share\vm\libadt" /I "$(HotSpotWorkSpace)\src\cpu\i486\vm" /I "$(HotSpotWorkSpace)\src\os\win32\vm" /D "WIN32" /D "DEBUG" /D "_WINDOWS" /D "ASSERT" /Fr /FD /c
+# ADD CPP /nologo /ML /W3 /WX /Gm /GX /Zi /Od /I "." /I "$(HotSpotWorkSpace)\src\share\vm\opto" /I "$(HotSpotWorkSpace)\src\share\vm\prims" /I "$(HotSpotWorkSpace)\src\share\vm\lookup" /I "$(HotSpotWorkSpace)\src\share\vm\interpreter" /I "$(HotSpotWorkSpace)\src\share\vm\asm" /I "$(HotSpotWorkSpace)\src\share\vm\compiler" /I "$(HotSpotWorkSpace)\src\share\vm\utilities" /I "$(HotSpotWorkSpace)\src\share\vm\code" /I "$(HotSpotWorkSpace)\src\share\vm\oops" /I "$(HotSpotWorkSpace)\src\share\vm\runtime" /I "$(HotSpotWorkSpace)\src\share\vm\memory" /I "$(HotSpotWorkSpace)\src\share\vm\libadt" /I "$(HotSpotWorkSpace)\src\cpu\i486\vm" /I "$(HotSpotWorkSpace)\src\os\win32\vm" /D "WIN32" /D "_WINDOWS" /D "ASSERT" /Fr /FD /c
 # ADD BASE RSC /l 0x409
 # ADD RSC /l 0x409
 BSC32=bscmake.exe
 # ADD BASE BSC32 /nologo
-# ADD BSC32 /o".\adlc\Debug\adlc_g.bsc"
+# ADD BSC32 /o".\adlc\Debug\adlc.bsc"
 # SUBTRACT BSC32 /nologo
 LINK32=link.exe
 # ADD BASE LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /pdbtype:sept
-# ADD LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib uuid.lib /nologo /subsystem:console /debug /machine:I386 /out:".\bin\adlc_g.exe"
+# ADD LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib uuid.lib /nologo /subsystem:console /debug /machine:I386 /out:".\bin\adlc.exe"
 
 !ENDIF 
 

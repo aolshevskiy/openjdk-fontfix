@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -95,7 +95,12 @@ public class DefaultProxySelector extends ProxySelector {
                 }});
         if (b != null && b.booleanValue()) {
             java.security.AccessController.doPrivileged(
-                      new sun.security.action.LoadLibraryAction("net"));
+                new java.security.PrivilegedAction<Void>() {
+                    public Void run() {
+                        System.loadLibrary("net");
+                        return null;
+                    }
+                });
             hasSystemProxies = init();
         }
     }
@@ -119,6 +124,7 @@ public class DefaultProxySelector extends ProxySelector {
         final String defaultVal;
         static NonProxyInfo ftpNonProxyInfo = new NonProxyInfo("ftp.nonProxyHosts", null, null, defStringVal);
         static NonProxyInfo httpNonProxyInfo = new NonProxyInfo("http.nonProxyHosts", null, null, defStringVal);
+        static NonProxyInfo socksNonProxyInfo = new NonProxyInfo("socksNonProxyHosts", null, null, defStringVal);
 
         NonProxyInfo(String p, String s, RegexpPool pool, String d) {
             property = p;
@@ -181,6 +187,8 @@ public class DefaultProxySelector extends ProxySelector {
             pinfo = NonProxyInfo.httpNonProxyInfo;
         } else if ("ftp".equalsIgnoreCase(protocol)) {
             pinfo = NonProxyInfo.ftpNonProxyInfo;
+        } else if ("socket".equalsIgnoreCase(protocol)) {
+            pinfo = NonProxyInfo.socksNonProxyInfo;
         }
 
         /**

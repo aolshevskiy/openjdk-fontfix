@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package com.sun.crypto.provider;
 
-import java.io.UnsupportedEncodingException;
 import java.security.*;
 import java.security.spec.*;
 import javax.crypto.*;
@@ -165,21 +164,17 @@ final class PBECipherCore {
         AlgorithmParameters params = null;
         if (salt == null) {
             salt = new byte[8];
-            SunJCE.RANDOM.nextBytes(salt);
+            SunJCE.getRandom().nextBytes(salt);
         }
         PBEParameterSpec pbeSpec = new PBEParameterSpec(salt, iCount);
         try {
             params = AlgorithmParameters.getInstance("PBEWithMD5And" +
-                (algo.equalsIgnoreCase("DES")? "DES":"TripleDES"), "SunJCE");
+                (algo.equalsIgnoreCase("DES")? "DES":"TripleDES"),
+                    SunJCE.getInstance());
+            params.init(pbeSpec);
         } catch (NoSuchAlgorithmException nsae) {
             // should never happen
             throw new RuntimeException("SunJCE called, but not configured");
-        } catch (NoSuchProviderException nspe) {
-            // should never happen
-            throw new RuntimeException("SunJCE called, but not configured");
-        }
-        try {
-            params.init(pbeSpec);
         } catch (InvalidParameterSpecException ipse) {
             // should never happen
             throw new RuntimeException("PBEParameterSpec not supported");
@@ -326,8 +321,7 @@ final class PBECipherCore {
         PBEParameterSpec pbeSpec = null;
         if (params != null) {
             try {
-                pbeSpec = (PBEParameterSpec) params.getParameterSpec
-                    (PBEParameterSpec.class);
+                pbeSpec = params.getParameterSpec(PBEParameterSpec.class);
             } catch (InvalidParameterSpecException ipse) {
                 throw new InvalidAlgorithmParameterException("Wrong parameter "
                                                              + "type: PBE "

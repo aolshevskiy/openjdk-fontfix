@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -101,6 +101,7 @@ public class ParallelWorldClassLoader extends ClassLoader implements Closeable {
     }
 
     protected Class findClass(String name) throws ClassNotFoundException {
+
         StringBuffer sb = new StringBuffer(name.length()+prefix.length()+6);
         sb.append(prefix).append(name.replace('.','/')).append(".class");
 

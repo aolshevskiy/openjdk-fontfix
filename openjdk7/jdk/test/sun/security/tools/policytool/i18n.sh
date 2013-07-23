@@ -22,11 +22,14 @@
 #
 
 # @test
-# @bug 4348370 7083664
+# @bug 4348370
+# @bug 8015274
+# @bug 8015276
+# @bug 8016158
 # @summary policytool not i18n compliant
 #
 # @run applet/manual=done i18n.html
-# @run shell i18n.sh
+# @run shell/timeout=1200 i18n.sh
 # @run applet/manual=yesno i18n.html
 
 # set a few environment variables so that the shell-script can run stand-alone
@@ -55,7 +58,6 @@ case "$OS" in
     NULL=/dev/null
     PS=";"
     FS="/"
-    CP="cp -f"
     ;;
   Windows* )
     NULL=NUL
@@ -72,6 +74,19 @@ esac
 
 echo "HELLO!"
 
+echo "Checking for $HOME/.java.policy"
+
+# 8015274
+if [ -e $HOME/.java.policy ]; then
+    echo "You have a .java.policy file in your HOME directory"
+    echo "The file must be removed before running this test"
+    exit 1
+fi
+
+${TESTJAVA}${FS}bin${FS}keytool -genkeypair -alias hello -dname CN=Hello \
+        -storepass changeit -keypass changeit -keystore ks
+echo changeit > good
+echo badpass > bad
 ${TESTJAVA}${FS}bin${FS}policytool
 
 exit $?

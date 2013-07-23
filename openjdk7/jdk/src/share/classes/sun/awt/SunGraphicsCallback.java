@@ -47,6 +47,7 @@ public abstract class SunGraphicsCallback {
         g.clipRect(0, 0, bounds.width, bounds.height);
     }
 
+    @SuppressWarnings("deprecation")
     public final void runOneComponent(Component comp, Rectangle bounds,
                                       Graphics g, Shape clip,
                                       int weightFlags) {
@@ -87,7 +88,7 @@ public abstract class SunGraphicsCallback {
         int ncomponents = comps.length;
         Shape clip = g.getClip();
 
-        if (log.isLoggable(PlatformLogger.FINER) && (clip != null)) {
+        if (log.isLoggable(PlatformLogger.Level.FINER) && (clip != null)) {
             Rectangle newrect = clip.getBounds();
             log.finer("x = " + newrect.x + ", y = " + newrect.y +
                       ", width = " + newrect.width +

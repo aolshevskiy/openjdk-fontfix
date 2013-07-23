@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -362,7 +362,7 @@ public abstract class MethodImpl extends TypeComponentImpl
         int argSize = arguments.size();
 
         JNITypeParser parser = new JNITypeParser(signature());
-        List signatures = parser.argumentSignatures();
+        List<String> signatures = parser.argumentSignatures();
 
         if (signatures.size() != argSize) {
             throw new IllegalArgumentException("Invalid argument count: expected " +

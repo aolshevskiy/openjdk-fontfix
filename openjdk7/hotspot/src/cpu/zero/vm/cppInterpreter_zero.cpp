@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2007, 2013, Red Hat, Inc.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2007, 2008, 2009, 2010, 2011 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,8 +31,8 @@
 #include "interpreter/interpreterGenerator.hpp"
 #include "interpreter/interpreterRuntime.hpp"
 #include "oops/arrayOop.hpp"
-#include "oops/methodDataOop.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/methodData.hpp"
+#include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/jvmtiExport.hpp"
 #include "prims/jvmtiThreadState.hpp"
@@ -47,6 +47,7 @@
 #include "runtime/vframeArray.hpp"
 #include "stack_zero.inline.hpp"
 #include "utilities/debug.hpp"
+#include "utilities/macros.hpp"
 #ifdef SHARK
 #include "shark/shark_globals.hpp"
 #endif
@@ -65,7 +66,7 @@
   CALL_VM_NOCHECK_NOFIX(func)                   \
   fixup_after_potential_safepoint()
 
-int CppInterpreter::normal_entry(methodOop method, intptr_t UNUSED, TRAPS) {
+int CppInterpreter::normal_entry(Method* method, intptr_t UNUSED, TRAPS) {
   JavaThread *thread = (JavaThread *) THREAD;
 
   // Allocate and initialize our frame.
@@ -90,7 +91,7 @@ void CppInterpreter::main_loop(int recurse, TRAPS) {
 
   InterpreterFrame *frame = thread->top_zero_frame()->as_interpreter_frame();
   interpreterState istate = frame->interpreter_state();
-  methodOop method = istate->method();
+  Method* method = istate->method();
 
   intptr_t *result = NULL;
   int result_slots = 0;
@@ -114,7 +115,7 @@ void CppInterpreter::main_loop(int recurse, TRAPS) {
 
     // Examine the message from the interpreter to decide what to do
     if (istate->msg() == BytecodeInterpreter::call_method) {
-      methodOop callee = istate->callee();
+      Method* callee = istate->callee();
 
       // Trim back the stack to put the parameters at the top
       stack->set_sp(istate->stack() + 1);
@@ -196,7 +197,7 @@ void CppInterpreter::main_loop(int recurse, TRAPS) {
     stack->push(result[-i]);
 }
 
-int CppInterpreter::native_entry(methodOop method, intptr_t UNUSED, TRAPS) {
+int CppInterpreter::native_entry(Method* method, intptr_t UNUSED, TRAPS) {
   // Make sure method is native and not abstract
   assert(method->is_native() && !method->is_abstract(), "should be");
 
@@ -211,7 +212,13 @@ int CppInterpreter::native_entry(methodOop method, intptr_t UNUSED, TRAPS) {
 
   // Update the invocation counter
   if ((UseCompiler || CountCompiledCalls) && !method->is_synchronized()) {
-    InvocationCounter *counter = method->invocation_counter();
+    MethodCounters* mcs = method->method_counters();
+    if (mcs == NULL) {
+      CALL_VM_NOCHECK(mcs = InterpreterRuntime::build_method_counters(thread, method));
+      if (HAS_PENDING_EXCEPTION)
+        goto unwind_and_return;
+    }
+    InvocationCounter *counter = mcs->invocation_counter();
     counter->increment();
     if (counter->reached_InvocationLimit()) {
       CALL_VM_NOCHECK(
@@ -466,7 +473,7 @@ int CppInterpreter::native_entry(methodOop method, intptr_t UNUSED, TRAPS) {
   return 0;
 }
 
-int CppInterpreter::accessor_entry(methodOop method, intptr_t UNUSED, TRAPS) {
+int CppInterpreter::accessor_entry(Method* method, intptr_t UNUSED, TRAPS) {
   JavaThread *thread = (JavaThread *) THREAD;
   ZeroStack *stack = thread->zero_stack();
   intptr_t *locals = stack->sp();
@@ -499,7 +506,7 @@ int CppInterpreter::accessor_entry(methodOop method, intptr_t UNUSED, TRAPS) {
 
   // Get the entry from the constant pool cache, and drop into
   // the slow path if it has not been resolved
-  constantPoolCacheOop cache = method->constants()->cache();
+  ConstantPoolCache* cache = method->constants()->cache();
   ConstantPoolCacheEntry* entry = cache->entry_at(index);
   if (!entry->is_resolved(Bytecodes::_getfield)) {
     return normal_entry(method, 0, THREAD);
@@ -594,7 +601,7 @@ int CppInterpreter::accessor_entry(methodOop method, intptr_t UNUSED, TRAPS) {
   return 0;
 }
 
-int CppInterpreter::empty_entry(methodOop method, intptr_t UNUSED, TRAPS) {
+int CppInterpreter::empty_entry(Method* method, intptr_t UNUSED, TRAPS) {
   JavaThread *thread = (JavaThread *) THREAD;
   ZeroStack *stack = thread->zero_stack();
 
@@ -643,7 +650,7 @@ void CppInterpreter::remove_vmslots(int first_slot, int num_slots, TRAPS) {
 BasicType CppInterpreter::result_type_of_handle(oop method_handle) {
   oop method_type = java_lang_invoke_MethodHandle::type(method_handle);
   oop return_type = java_lang_invoke_MethodType::rtype(method_type);
-  return java_lang_Class::as_BasicType(return_type, (klassOop *) NULL);
+  return java_lang_Class::as_BasicType(return_type, (Klass* *) NULL);
 }
 
 intptr_t* CppInterpreter::calculate_unwind_sp(ZeroStack* stack,
@@ -660,7 +667,7 @@ IRT_ENTRY(void, CppInterpreter::throw_exception(JavaThread* thread,
   THROW_MSG(name, message);
 IRT_END
 
-InterpreterFrame *InterpreterFrame::build(const methodOop method, TRAPS) {
+InterpreterFrame *InterpreterFrame::build(Method* const method, TRAPS) {
   JavaThread *thread = (JavaThread *) THREAD;
   ZeroStack *stack = thread->zero_stack();
 
@@ -756,7 +763,7 @@ int AbstractInterpreter::BasicType_as_index(BasicType type) {
   return i;
 }
 
-BasicType CppInterpreter::result_type_of(methodOop method) {
+BasicType CppInterpreter::result_type_of(Method* method) {
   BasicType t;
   switch (method->result_index()) {
     case 0 : t = T_BOOLEAN; break;
@@ -791,7 +798,7 @@ address InterpreterGenerator::generate_accessor_entry() {
 }
 
 address InterpreterGenerator::generate_Reference_get_entry(void) {
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   if (UseG1GC) {
     // We need to generate have a routine that generates code to:
     //   * load the value in the referent field
@@ -803,7 +810,7 @@ address InterpreterGenerator::generate_Reference_get_entry(void) {
     // field as live.
     Unimplemented();
   }
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   // If G1 is not enabled then attempt to go through the accessor entry point
   // Reference.get is an accessor
@@ -909,7 +916,7 @@ InterpreterFrame *InterpreterFrame::build(int size, TRAPS) {
   return (InterpreterFrame *) fp;
 }
 
-int AbstractInterpreter::layout_activation(methodOop method,
+int AbstractInterpreter::layout_activation(Method* method,
                                            int       tempcount,
                                            int       popframe_extra_args,
                                            int       moncount,
@@ -966,7 +973,7 @@ int AbstractInterpreter::layout_activation(methodOop method,
 void BytecodeInterpreter::layout_interpreterState(interpreterState istate,
                                                   frame*    caller,
                                                   frame*    current,
-                                                  methodOop method,
+                                                  Method* method,
                                                   intptr_t* locals,
                                                   intptr_t* stack,
                                                   intptr_t* stack_base,
@@ -1009,18 +1016,14 @@ address CppInterpreter::deopt_entry(TosState state, int length) {
 
 // Helper for (runtime) stack overflow checks
 
-int AbstractInterpreter::size_top_interpreter_activation(methodOop method) {
+int AbstractInterpreter::size_top_interpreter_activation(Method* method) {
   return 0;
 }
 
 // Helper for figuring out if frames are interpreter frames
 
 bool CppInterpreter::contains(address pc) {
-#ifdef PRODUCT
-  ShouldNotCallThis();
-#else
   return false; // make frame::print_value_on work
-#endif // !PRODUCT
 }
 
 // Result handlers and convertors

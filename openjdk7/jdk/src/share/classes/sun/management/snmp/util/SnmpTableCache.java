@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -98,7 +98,7 @@ public abstract class SnmpTableCache implements Serializable {
         final SnmpCachedData cached   = getCachedDatas();
         if (cached != null) return cached;
         final SnmpCachedData computedDatas = updateCachedDatas(context);
-        if (validity != 0) datas = new WeakReference<SnmpCachedData>(computedDatas);
+        if (validity != 0) datas = new WeakReference<>(computedDatas);
         return computedDatas;
     }
 

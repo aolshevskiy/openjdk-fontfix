@@ -116,11 +116,15 @@ public class UnixPrintServiceLookup extends PrintServiceLookup
     }
 
     static boolean isMac() {
-        return osname.contains("OS X");
+        return osname.startsWith("Mac");
     }
 
     static boolean isSysV() {
         return osname.equals("SunOS");
+    }
+
+    static boolean isLinux() {
+        return (osname.equals("Linux"));
     }
 
     static boolean isBSD() {
@@ -195,7 +199,7 @@ public class UnixPrintServiceLookup extends PrintServiceLookup
         if (printServices == null) {
             return new PrintService[0];
         } else {
-            return printServices;
+            return (PrintService[])printServices.clone();
         }
     }
 
@@ -362,10 +366,33 @@ public class UnixPrintServiceLookup extends PrintServiceLookup
      */
     private PrintService getServiceByName(PrinterName nameAttr) {
         String name = nameAttr.getValue();
-        PrintService printer = null;
         if (name == null || name.equals("") || !checkPrinterName(name)) {
             return null;
         }
+        /* check is all printers are already available */
+        if (printServices != null) {
+            for (PrintService printService : printServices) {
+                if (printService.getName().equals(name)) {
+                    return printService;
+                }
+            }
+        }
+        /* take CUPS into account first */
+        if (CUPSPrinter.isCupsRunning()) {
+            try {
+                return new IPPPrintService(name,
+                                           new URL("http://"+
+                                                   CUPSPrinter.getServer()+":"+
+                                                   CUPSPrinter.getPort()+"/"+
+                                                   name));
+            } catch (Exception e) {
+                IPPPrintService.debug_println(debugPrefix+
+                                              " getServiceByName Exception "+
+                                              e);
+            }
+        }
+        /* fallback if nothing not having a printer at this point */
+        PrintService printer = null;
         if (isMac() || isSysV()) {
             printer = getNamedPrinterNameSysV(name);
         } else {

@@ -32,6 +32,7 @@ import java.net.URL;
 import java.net.HttpURLConnection;
 import java.security.cert.CertificateException;
 import java.security.cert.CertPathValidatorException;
+import java.security.cert.CertPathValidatorException.BasicReason;
 import java.security.cert.CRLReason;
 import java.security.cert.Extension;
 import java.security.cert.X509Certificate;
@@ -44,6 +45,7 @@ import java.util.Map;
 import static sun.security.provider.certpath.OCSPResponse.*;
 import sun.security.action.GetIntegerAction;
 import sun.security.util.Debug;
+import sun.security.util.ObjectIdentifier;
 import sun.security.x509.AccessDescription;
 import sun.security.x509.AuthorityInfoAccessExtension;
 import sun.security.x509.GeneralName;
@@ -62,6 +64,9 @@ import sun.security.x509.X509CertImpl;
  * @author Sean Mullan
  */
 public final class OCSP {
+
+    static final ObjectIdentifier NONCE_EXTENSION_OID =
+        ObjectIdentifier.newInternal(new int[]{ 1, 3, 6, 1, 5, 5, 7, 48, 1, 2});
 
     private static final Debug debug = Debug.getInstance("certpath");
 
@@ -83,7 +88,7 @@ public final class OCSP {
         Integer tmp = java.security.AccessController.doPrivileged(
                 new GetIntegerAction("com.sun.security.ocsp.timeout"));
         if (tmp == null || tmp < 0) {
-            tmp = DEFAULT_CONNECT_TIMEOUT;
+            return DEFAULT_CONNECT_TIMEOUT;
         }
         // Convert to milliseconds, as the system property will be
         // specified in seconds
@@ -107,8 +112,8 @@ public final class OCSP {
      *    encoding the OCSP Request or validating the OCSP Response
      */
     public static RevocationStatus check(X509Certificate cert,
-        X509Certificate issuerCert)
-            throws IOException, CertPathValidatorException {
+                                         X509Certificate issuerCert)
+        throws IOException, CertPathValidatorException {
         CertId certId = null;
         URI responderURI = null;
         try {
@@ -119,16 +124,13 @@ public final class OCSP {
                     ("No OCSP Responder URI in certificate");
             }
             certId = new CertId(issuerCert, certImpl.getSerialNumberObject());
-        } catch (CertificateException ce) {
+        } catch (CertificateException | IOException e) {
             throw new CertPathValidatorException
-                ("Exception while encoding OCSPRequest", ce);
-        } catch (IOException ioe) {
-            throw new CertPathValidatorException
-                ("Exception while encoding OCSPRequest", ioe);
+                ("Exception while encoding OCSPRequest", e);
         }
         OCSPResponse ocspResponse = check(Collections.singletonList(certId),
-            responderURI, Collections.singletonList(issuerCert), null);
-        return (RevocationStatus) ocspResponse.getSingleResponse(certId);
+            responderURI, issuerCert, null, Collections.<Extension>emptyList());
+        return (RevocationStatus)ocspResponse.getSingleResponse(certId);
     }
 
     /**
@@ -147,47 +149,34 @@ public final class OCSP {
      *    encoding the OCSP Request or validating the OCSP Response
      */
     public static RevocationStatus check(X509Certificate cert,
-        X509Certificate issuerCert, URI responderURI,
-        X509Certificate responderCert, Date date)
-            throws IOException, CertPathValidatorException {
-
-        return check(cert, issuerCert, responderURI,
-            Collections.singletonList(responderCert), date);
+                                         X509Certificate issuerCert,
+                                         URI responderURI,
+                                         X509Certificate responderCert,
+                                         Date date)
+        throws IOException, CertPathValidatorException
+    {
+        return check(cert, issuerCert, responderURI, responderCert, date,
+                     Collections.<Extension>emptyList());
     }
 
-    /**
-     * Obtains the revocation status of a certificate using OCSP.
-     *
-     * @param cert the certificate to be checked
-     * @param issuerCert the issuer certificate
-     * @param responderURI the URI of the OCSP responder
-     * @param responderCerts the OCSP responder's certificates
-     * @param date the time the validity of the OCSP responder's certificate
-     *    should be checked against. If null, the current time is used.
-     * @return the RevocationStatus
-     * @throws IOException if there is an exception connecting to or
-     *    communicating with the OCSP responder
-     * @throws CertPathValidatorException if an exception occurs while
-     *    encoding the OCSP Request or validating the OCSP Response
-     */
+    // Called by com.sun.deploy.security.TrustDecider
     public static RevocationStatus check(X509Certificate cert,
-        X509Certificate issuerCert, URI responderURI,
-        List<X509Certificate> responderCerts, Date date)
-            throws IOException, CertPathValidatorException {
-
+                                         X509Certificate issuerCert,
+                                         URI responderURI,
+                                         X509Certificate responderCert,
+                                         Date date, List<Extension> extensions)
+        throws IOException, CertPathValidatorException
+    {
         CertId certId = null;
         try {
             X509CertImpl certImpl = X509CertImpl.toImpl(cert);
             certId = new CertId(issuerCert, certImpl.getSerialNumberObject());
-        } catch (CertificateException ce) {
+        } catch (CertificateException | IOException e) {
             throw new CertPathValidatorException
-                ("Exception while encoding OCSPRequest", ce);
-        } catch (IOException ioe) {
-            throw new CertPathValidatorException
-                ("Exception while encoding OCSPRequest", ioe);
+                ("Exception while encoding OCSPRequest", e);
         }
         OCSPResponse ocspResponse = check(Collections.singletonList(certId),
-            responderURI, responderCerts, date);
+            responderURI, responderCert, date, extensions);
         return (RevocationStatus) ocspResponse.getSingleResponse(certId);
     }
 
@@ -196,7 +185,7 @@ public final class OCSP {
      *
      * @param certs the CertIds to be checked
      * @param responderURI the URI of the OCSP responder
-     * @param responderCerts the OCSP responder's certificates
+     * @param responderCert the OCSP responder's certificate
      * @param date the time the validity of the OCSP responder's certificate
      *    should be checked against. If null, the current time is used.
      * @return the OCSPResponse
@@ -206,12 +195,14 @@ public final class OCSP {
      *    encoding the OCSP Request or validating the OCSP Response
      */
     static OCSPResponse check(List<CertId> certIds, URI responderURI,
-        List<X509Certificate> responderCerts, Date date)
-            throws IOException, CertPathValidatorException {
-
+                              X509Certificate responderCert, Date date,
+                              List<Extension> extensions)
+        throws IOException, CertPathValidatorException
+    {
         byte[] bytes = null;
+        OCSPRequest request = null;
         try {
-            OCSPRequest request = new OCSPRequest(certIds);
+            request = new OCSPRequest(certIds, extensions);
             bytes = request.encodeBytes();
         } catch (IOException ioe) {
             throw new CertPathValidatorException
@@ -263,6 +254,8 @@ public final class OCSP {
                 }
             }
             response = Arrays.copyOf(response, total);
+        } catch (IOException ioe) {
+            throw new NetworkFailureException(ioe);
         } finally {
             if (in != null) {
                 try {
@@ -282,33 +275,15 @@ public final class OCSP {
 
         OCSPResponse ocspResponse = null;
         try {
-            ocspResponse = new OCSPResponse(response, date, responderCerts);
+            ocspResponse = new OCSPResponse(response);
         } catch (IOException ioe) {
             // response decoding exception
             throw new CertPathValidatorException(ioe);
         }
-        if (ocspResponse.getResponseStatus() != ResponseStatus.SUCCESSFUL) {
-            throw new CertPathValidatorException
-                ("OCSP response error: " + ocspResponse.getResponseStatus());
-        }
 
-        // Check that the response includes a response for all of the
-        // certs that were supplied in the request
-        for (CertId certId : certIds) {
-            SingleResponse sr = ocspResponse.getSingleResponse(certId);
-            if (sr == null) {
-                if (debug != null) {
-                    debug.println("No response found for CertId: " + certId);
-                }
-                throw new CertPathValidatorException(
-                    "OCSP response does not include a response for a " +
-                    "certificate supplied in the OCSP request");
-            }
-            if (debug != null) {
-                debug.println("Status of certificate (with serial number " +
-                    certId.getSerialNumber() + ") is: " + sr.getCertStatus());
-            }
-        }
+        // verify the response
+        ocspResponse.verify(certIds, responderCert, date, request.getNonce());
+
         return ocspResponse;
     }
 
@@ -320,6 +295,7 @@ public final class OCSP {
      * @param cert the certificate
      * @return the URI of the OCSP Responder, or null if not specified
      */
+    // Called by com.sun.deploy.security.TrustDecider
     public static URI getResponderURI(X509Certificate cert) {
         try {
             return getResponderURI(X509CertImpl.toImpl(cert));
@@ -378,5 +354,18 @@ public final class OCSP {
          * Returns a Map of additional extensions.
          */
         Map<String, Extension> getSingleExtensions();
+    }
+
+    static class NetworkFailureException extends CertPathValidatorException {
+        private static final long serialVersionUID = 0l;
+
+        NetworkFailureException(Throwable t) {
+            super(t);
+        }
+
+        @Override
+        public CertPathValidatorException.Reason getReason() {
+            return BasicReason.UNDETERMINED_REVOCATION_STATUS;
+        }
     }
 }

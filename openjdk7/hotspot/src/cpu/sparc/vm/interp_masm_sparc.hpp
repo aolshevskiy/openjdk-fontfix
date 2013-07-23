@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 #ifndef CPU_SPARC_VM_INTERP_MASM_SPARC_HPP
 #define CPU_SPARC_VM_INTERP_MASM_SPARC_HPP
 
-#include "assembler_sparc.inline.hpp"
+#include "asm/macroAssembler.inline.hpp"
 #include "interpreter/invocationCounter.hpp"
 
 // This file specializes the assember with interpreter-specific macros
@@ -188,11 +188,15 @@ class InterpreterMacroAssembler: public MacroAssembler {
                                   Register   Rdst,
                                   setCCOrNot should_set_CC = dont_set_CC );
 
+  // Note: "get_cache_and_index" really means "get the index, use it to get the cache entry, and throw away the index".
   void get_cache_and_index_at_bcp(Register cache, Register tmp, int bcp_offset, size_t index_size = sizeof(u2));
   void get_cache_and_index_and_bytecode_at_bcp(Register cache, Register temp, Register bytecode, int byte_no, int bcp_offset, size_t index_size = sizeof(u2));
   void get_cache_entry_pointer_at_bcp(Register cache, Register tmp, int bcp_offset, size_t index_size = sizeof(u2));
-  void get_cache_index_at_bcp(Register cache, Register tmp, int bcp_offset, size_t index_size = sizeof(u2));
+  // Note: This one does not fetch the cache.  The first argument is a temp which may be killed.
+  void get_cache_index_at_bcp(Register temp, Register index, int bcp_offset, size_t index_size = sizeof(u2));
 
+  // load cpool->resolved_references(index);
+  void load_resolved_reference_at_index(Register result, Register index);
 
   // common code
 
@@ -259,8 +263,9 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void compute_stack_base( Register Rdest );
 
 #endif /* CC_INTERP */
-  void increment_invocation_counter( Register Rtmp, Register Rtmp2 );
-  void increment_backedge_counter( Register Rtmp, Register Rtmp2 );
+  void get_method_counters(Register method, Register Rcounters, Label& skip);
+  void increment_invocation_counter( Register Rcounters, Register Rtmp, Register Rtmp2 );
+  void increment_backedge_counter( Register Rcounters, Register Rtmp, Register Rtmp2 );
 #ifndef CC_INTERP
   void test_backedge_count_for_osr( Register backedge_count, Register branch_bcp, Register Rtmp );
 

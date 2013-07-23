@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,7 @@ import javax.xml.ws.WebServiceException;
 
 /**
  * Invokes {@link Tube}line asynchronously for the client's async API(for e.g.: Dispatch#invokeAsync}
- * The concrete classes need to call {@link Stub#processAsync(Packet, RequestContext, CompletionCallback)} in
+ * The concrete classes need to call {@link Stub#processAsync(AsyncResponseImpl, Packet, RequestContext, Fiber.CompletionCallback) } in
  * run() method.
  *
  * @author Jitendra Kotamraju
@@ -44,12 +44,29 @@ public abstract class AsyncInvoker implements Runnable {
      * we can't take this as a constructor parameter.
      */
     protected AsyncResponseImpl responseImpl;
+    protected boolean nonNullAsyncHandlerGiven;
 
     public void setReceiver(AsyncResponseImpl responseImpl) {
         this.responseImpl = responseImpl;
     }
 
-    public void run () {
+  public AsyncResponseImpl getResponseImpl() {
+    return responseImpl;
+  }
+
+  public void setResponseImpl(AsyncResponseImpl responseImpl) {
+    this.responseImpl = responseImpl;
+  }
+
+  public boolean isNonNullAsyncHandlerGiven() {
+    return nonNullAsyncHandlerGiven;
+  }
+
+  public void setNonNullAsyncHandlerGiven(boolean nonNullAsyncHandlerGiven) {
+    this.nonNullAsyncHandlerGiven = nonNullAsyncHandlerGiven;
+  }
+
+  public void run () {
         try {
             do_run();
         }catch(WebServiceException e) {
@@ -61,5 +78,4 @@ public abstract class AsyncInvoker implements Runnable {
     }
 
     public abstract void do_run();
-
 }

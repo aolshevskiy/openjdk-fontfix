@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,10 +43,11 @@ import com.sun.jmx.snmp.Enumerated;
  */
 public class EnumJvmMemPoolCollectThreshdSupport extends Enumerated implements Serializable {
 
+    static final long serialVersionUID = 8610091819732806282L;
     protected static Hashtable<Integer, String> intTable =
-            new Hashtable<Integer, String>();
+            new Hashtable<>();
     protected static Hashtable<String, Integer> stringTable =
-            new Hashtable<String, Integer>();
+            new Hashtable<>();
     static  {
         intTable.put(new Integer(2), "supported");
         intTable.put(new Integer(1), "unsupported");
@@ -70,11 +71,11 @@ public class EnumJvmMemPoolCollectThreshdSupport extends Enumerated implements S
         super(x);
     }
 
-    protected Hashtable getIntTable() {
+    protected Hashtable<Integer, String> getIntTable() {
         return intTable ;
     }
 
-    protected Hashtable getStringTable() {
+    protected Hashtable<String, Integer> getStringTable() {
         return stringTable ;
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,6 @@
 package com.sun.crypto.provider;
 
 import java.math.BigInteger;
-import java.util.*;
 import java.io.*;
 import sun.security.util.*;
 import sun.security.x509.*;
@@ -106,20 +105,6 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
         }
     }
 
-    private static String convertToStandardName(String internalName) {
-        if (internalName.equals("SHA")) {
-            return "SHA-1";
-        } else if (internalName.equals("SHA256")) {
-            return "SHA-256";
-        } else if (internalName.equals("SHA384")) {
-            return "SHA-384";
-        } else if (internalName.equals("SHA512")) {
-            return "SHA-512";
-        } else {
-            return internalName;
-        }
-    }
-
     protected void engineInit(byte[] encoded)
         throws IOException {
         DerInputStream der = new DerInputStream(encoded);
@@ -131,8 +116,8 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
             DerValue data = datum[i];
             if (data.isContextSpecific((byte) 0x00)) {
                 // hash algid
-                mdName = convertToStandardName(AlgorithmId.parse
-                    (data.data.getDerValue()).getName());
+                mdName = AlgorithmId.parse
+                    (data.data.getDerValue()).getName();
             } else if (data.isContextSpecific((byte) 0x01)) {
                 // mgf algid
                 AlgorithmId val = AlgorithmId.parse(data.data.getDerValue());
@@ -141,9 +126,11 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
                 }
                 AlgorithmId params = AlgorithmId.parse(
                     new DerValue(val.getEncodedParams()));
-                String mgfDigestName = convertToStandardName(params.getName());
+                String mgfDigestName = params.getName();
                 if (mgfDigestName.equals("SHA-1")) {
                     mgfSpec = MGF1ParameterSpec.SHA1;
+                } else if (mgfDigestName.equals("SHA-224")) {
+                    mgfSpec = MGF1ParameterSpec.SHA224;
                 } else if (mgfDigestName.equals("SHA-256")) {
                     mgfSpec = MGF1ParameterSpec.SHA256;
                 } else if (mgfDigestName.equals("SHA-384")) {
@@ -180,11 +167,13 @@ public final class OAEPParameters extends AlgorithmParametersSpi {
         engineInit(encoded);
     }
 
-    protected AlgorithmParameterSpec engineGetParameterSpec(Class paramSpec)
+    protected <T extends AlgorithmParameterSpec>
+        T engineGetParameterSpec(Class<T> paramSpec)
         throws InvalidParameterSpecException {
         if (OAEPParameterSpec.class.isAssignableFrom(paramSpec)) {
-            return new OAEPParameterSpec(mdName, "MGF1", mgfSpec,
-                new PSource.PSpecified(p));
+            return paramSpec.cast(
+                new OAEPParameterSpec(mdName, "MGF1", mgfSpec,
+                                      new PSource.PSpecified(p)));
         } else {
             throw new InvalidParameterSpecException
                 ("Inappropriate parameter specification");

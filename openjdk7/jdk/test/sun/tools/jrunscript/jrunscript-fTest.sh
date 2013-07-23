@@ -1,7 +1,7 @@
 #!/bin/sh
 
 #
-# Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -39,22 +39,11 @@ if [ $? -eq 2 ]; then
     exit 0
 fi
 
-rm -f jrunscript-fTest.out 2>/dev/null
-${JRUNSCRIPT} -f ${TESTSRC}/hello.js > jrunscript-fTest.out 2>&1
-
-$golden_diff jrunscript-fTest.out ${TESTSRC}/dash-f.out
-if [ $? != 0 ]
-then
-  echo "Output of jrunscript -f differ from expected output. Failed."
-  rm -f jrunscript-fTest.out 2>/dev/null
-  exit 1
-fi
-
 # -f option used with JavaScript as language chosen explicitly
 # with -l option
 
 rm -f jrunscript-fTest.out 2>/dev/null
-${JRUNSCRIPT} -l js -f ${TESTSRC}/hello.js > jrunscript-fTest.out 2>&1
+${JRUNSCRIPT} -J-Djava.awt.headless=true -l nashorn -f ${TESTSRC}/hello.js > jrunscript-fTest.out 2>&1
 
 $golden_diff jrunscript-fTest.out ${TESTSRC}/dash-f.out
 if [ $? != 0 ]

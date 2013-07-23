@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,7 +59,7 @@ public class MonitorInfoCompositeData extends LazyCompositeData {
 
         int len = monitorInfoItemNames.length;
         Object[] values = new Object[len];
-        CompositeData li = LockDataConverter.toLockInfoCompositeData(lock);
+        CompositeData li = LockInfoCompositeData.toCompositeData(lock);
 
         for (int i = 0; i < len; i++) {
             String item = monitorInfoItemNames[i];
@@ -92,7 +92,7 @@ public class MonitorInfoCompositeData extends LazyCompositeData {
             monitorInfoCompositeType = (CompositeType)
                 MappedMXBeanType.toOpenType(MonitorInfo.class);
             Set<String> s = monitorInfoCompositeType.keySet();
-            monitorInfoItemNames = (String[]) s.toArray(new String[0]);
+            monitorInfoItemNames =  s.toArray(new String[0]);
         } catch (OpenDataException e) {
             // Should never reach here
             throw new AssertionError(e);

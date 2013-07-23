@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -92,19 +92,22 @@ public class Args {
                new F(){void f(){ t.scheduleAtFixedRate(x, (Date)null, 42); }}
                );
 
-        final long start = System.currentTimeMillis();
-        final Date past = new Date(start - 10500);
         final CountDownLatch y1 = new CountDownLatch(1);
         final CountDownLatch y2 = new CountDownLatch(1);
         final CountDownLatch y3 = new CountDownLatch(11);
+        final long start = System.currentTimeMillis();
+        final Date past = new Date(start - 10500);
+
         schedule(           t, counter(y1), past);
         schedule(           t, counter(y2), past, 1000);
         scheduleAtFixedRate(t, counter(y3), past, 1000);
         y3.await();
         y1.await();
         y2.await();
-        System.out.printf("elapsed=%d%n", System.currentTimeMillis() - start);
-        check(System.currentTimeMillis() - start < 500);
+
+        final long elapsed = System.currentTimeMillis() - start;
+        System.out.printf("elapsed=%d%n", elapsed);
+        check(elapsed < 500);
 
         t.cancel();
 

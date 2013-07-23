@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,7 +57,7 @@ public class Continuation extends ResolveResult {
      * The environment used by the caller. Initialized by constructor and
      * used when filling out a CannotProceedException.
      */
-    protected Hashtable environment = null;
+    protected Hashtable<?,?> environment = null;
 
     /**
      * Indicates whether the Continuation instance indicates that the operation
@@ -90,14 +90,16 @@ public class Continuation extends ResolveResult {
      * Constructs a new instance of Continuation.
      * @param top The name of the object that is to be resolved/operated upon.
      *          This becomes the Continuation's 'starter' and is used to
-     *          calculate the "resolved name" when filling  in a NamingException.
+     *          calculate the "resolved name" when filling in a NamingException.
      * @param environment The environment used by the caller. It is used
-     * when setting the "environment" of a CannotProceedException.
+     *          when setting the "environment" of a CannotProceedException.
      */
-    public Continuation(Name top, Hashtable environment) {
+    @SuppressWarnings("unchecked")  // For Hashtable clone: environment.clone()
+    public Continuation(Name top, Hashtable<?,?> environment) {
         super();
         starter = top;
-        this.environment = environment;
+        this.environment = (Hashtable<?,?>)
+                ((environment == null) ? null : environment.clone());
     }
 
     /**
@@ -154,8 +156,8 @@ public class Continuation extends ResolveResult {
 
         if ((e instanceof CannotProceedException)) {
             CannotProceedException cpe = (CannotProceedException)e;
-            Hashtable env = (environment == null ?
-                new Hashtable(11) : (Hashtable)environment.clone());
+            Hashtable<?,?> env = (environment == null ?
+                new Hashtable<>(11) : (Hashtable<?,?>)environment.clone());
             cpe.setEnvironment(env);
             cpe.setAltNameCtx(resolvedContext);
             cpe.setAltName(relativeResolvedName);

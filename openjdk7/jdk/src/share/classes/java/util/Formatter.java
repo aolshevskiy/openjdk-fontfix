@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,7 +50,14 @@ import java.text.NumberFormat;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import sun.misc.FpUtils;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoField;
+import java.time.temporal.TemporalAccessor;
+import java.time.temporal.TemporalQuery;
+
 import sun.misc.DoubleConsts;
 import sun.misc.FormattedFloatingDecimal;
 
@@ -183,7 +190,7 @@ import sun.misc.FormattedFloatingDecimal;
  * <p> The optional <i>flags</i> is a set of characters that modify the output
  * format.  The set of valid flags depends on the conversion.
  *
- * <p> The optional <i>width</i> is a non-negative decimal integer indicating
+ * <p> The optional <i>width</i> is a positive decimal integer indicating
  * the minimum number of characters to be written to the output.
  *
  * <p> The optional <i>precision</i> is a non-negative decimal integer usually
@@ -255,8 +262,8 @@ import sun.misc.FormattedFloatingDecimal;
  * </ol>
  *
  * <li> <b>Date/Time</b> - may be applied to Java types which are capable of
- * encoding a date or time: {@code long}, {@link Long}, {@link Calendar}, and
- * {@link Date}.
+ * encoding a date or time: {@code long}, {@link Long}, {@link Calendar},
+ * {@link Date} and {@link TemporalAccessor TemporalAccessor}
  *
  * <li> <b>Percent</b> - produces a literal {@code '%'}
  * (<tt>'&#92;u0025'</tt>)
@@ -337,7 +344,9 @@ import sun.misc.FormattedFloatingDecimal;
  * <tr><td valign="top">{@code 'a'}, {@code 'A'}
  *     <td valign="top"> floating point
  *     <td> The result is formatted as a hexadecimal floating-point number with
- *     a significand and an exponent
+ *     a significand and an exponent. This conversion is <b>not</b> supported
+ *     for the {@code BigDecimal} type despite the latter's being in the
+ *     <i>floating point</i> argument category.
  *
  * <tr><td valign="top">{@code 't'}, {@code 'T'}
  *     <td valign="top"> date/time
@@ -832,7 +841,7 @@ import sun.misc.FormattedFloatingDecimal;
  *
  * <p> Numeric types will be formatted according to the following algorithm:
  *
- * <p><b><a name="l10n algorithm"> Number Localization Algorithm</a></b>
+ * <p><b><a name="L10nAlgorithm"> Number Localization Algorithm</a></b>
  *
  * <p> After digits are obtained for the integer part, fractional part, and
  * exponent (as appropriate for the data type), the following transformation
@@ -851,7 +860,7 @@ import sun.misc.FormattedFloatingDecimal;
  * substituted.
  *
  * <li> If the {@code ','} (<tt>'&#92;u002c'</tt>)
- * <a name="l10n group">flag</a> is given, then the locale-specific {@linkplain
+ * <a name="L10nGroup">flag</a> is given, then the locale-specific {@linkplain
  * java.text.DecimalFormatSymbols#getGroupingSeparator grouping separator} is
  * inserted by scanning the integer part of the string from least significant
  * to most significant digits and inserting a separator at intervals defined by
@@ -893,7 +902,7 @@ import sun.misc.FormattedFloatingDecimal;
  * <tr><td valign="top"> {@code 'd'}
  *     <td valign="top"> <tt>'&#92;u0054'</tt>
  *     <td> Formats the argument as a decimal integer. The <a
- *     href="#l10n algorithm">localization algorithm</a> is applied.
+ *     href="#L10nAlgorithm">localization algorithm</a> is applied.
  *
  *     <p> If the {@code '0'} flag is given and the value is negative, then
  *     the zero padding will occur after the sign.
@@ -919,7 +928,7 @@ import sun.misc.FormattedFloatingDecimal;
  *     <p> If the {@code '0'} flag is given then the output will be padded
  *     with leading zeros to the field width following any indication of sign.
  *
- *     <p> If {@code '('}, {@code '+'}, '&nbsp&nbsp;', or {@code ','} flags
+ *     <p> If {@code '('}, {@code '+'}, '&nbsp;&nbsp;', or {@code ','} flags
  *     are given then a {@link FormatFlagsConversionMismatchException} will be
  *     thrown.
  *
@@ -1002,7 +1011,7 @@ import sun.misc.FormattedFloatingDecimal;
  *     <td valign="top"> <tt>'&#92;u002c'</tt>
  *     <td> Requires the output to include the locale-specific {@linkplain
  *     java.text.DecimalFormatSymbols#getGroupingSeparator group separators} as
- *     described in the <a href="#l10n group">"group" section</a> of the
+ *     described in the <a href="#L10nGroup">"group" section</a> of the
  *     localization algorithm.
  *
  * <tr><td valign="top"> {@code '('}
@@ -1051,7 +1060,7 @@ import sun.misc.FormattedFloatingDecimal;
  * <tr><td valign="top"> {@code 'd'}
  *     <td valign="top"> <tt>'&#92;u0054'</tt>
  *     <td> Requires the output to be formatted as a decimal integer. The <a
- *     href="#l10n algorithm">localization algorithm</a> is applied.
+ *     href="#L10nAlgorithm">localization algorithm</a> is applied.
  *
  *     <p> If the {@code '#'} flag is given {@link
  *     FormatFlagsConversionMismatchException} will be thrown.
@@ -1146,7 +1155,7 @@ import sun.misc.FormattedFloatingDecimal;
  *     <td valign="top"> <tt>'&#92;u0065'</tt>
  *     <td> Requires the output to be formatted using <a
  *     name="scientific">computerized scientific notation</a>.  The <a
- *     href="#l10n algorithm">localization algorithm</a> is applied.
+ *     href="#L10nAlgorithm">localization algorithm</a> is applied.
  *
  *     <p> The formatting of the magnitude <i>m</i> depends upon its value.
  *
@@ -1159,7 +1168,7 @@ import sun.misc.FormattedFloatingDecimal;
  *
  *     <p> Otherwise, the result is a string that represents the sign and
  *     magnitude (absolute value) of the argument.  The formatting of the sign
- *     is described in the <a href="#l10n algorithm">localization
+ *     is described in the <a href="#L10nAlgorithm">localization
  *     algorithm</a>. The formatting of the magnitude <i>m</i> depends upon its
  *     value.
  *
@@ -1198,7 +1207,7 @@ import sun.misc.FormattedFloatingDecimal;
  * <tr><td valign="top"> {@code 'g'}
  *     <td valign="top"> <tt>'&#92;u0067'</tt>
  *     <td> Requires the output to be formatted in general scientific notation
- *     as described below. The <a href="#l10n algorithm">localization
+ *     as described below. The <a href="#L10nAlgorithm">localization
  *     algorithm</a> is applied.
  *
  *     <p> After rounding for the precision, the formatting of the resulting
@@ -1227,12 +1236,12 @@ import sun.misc.FormattedFloatingDecimal;
  * <tr><td valign="top"> {@code 'f'}
  *     <td valign="top"> <tt>'&#92;u0066'</tt>
  *     <td> Requires the output to be formatted using <a name="decimal">decimal
- *     format</a>.  The <a href="#l10n algorithm">localization algorithm</a> is
+ *     format</a>.  The <a href="#L10nAlgorithm">localization algorithm</a> is
  *     applied.
  *
  *     <p> The result is a string that represents the sign and magnitude
  *     (absolute value) of the argument.  The formatting of the sign is
- *     described in the <a href="#l10n algorithm">localization
+ *     described in the <a href="#L10nAlgorithm">localization
  *     algorithm</a>. The formatting of the magnitude <i>m</i> depends upon its
  *     value.
  *
@@ -1373,7 +1382,7 @@ import sun.misc.FormattedFloatingDecimal;
  *     <td valign="top"> <tt>'&#92;u0065'</tt>
  *     <td> Requires the output to be formatted using <a
  *     name="bscientific">computerized scientific notation</a>.  The <a
- *     href="#l10n algorithm">localization algorithm</a> is applied.
+ *     href="#L10nAlgorithm">localization algorithm</a> is applied.
  *
  *     <p> The formatting of the magnitude <i>m</i> depends upon its value.
  *
@@ -1382,7 +1391,7 @@ import sun.misc.FormattedFloatingDecimal;
  *
  *     <p> Otherwise, the result is a string that represents the sign and
  *     magnitude (absolute value) of the argument.  The formatting of the sign
- *     is described in the <a href="#l10n algorithm">localization
+ *     is described in the <a href="#L10nAlgorithm">localization
  *     algorithm</a>. The formatting of the magnitude <i>m</i> depends upon its
  *     value.
  *
@@ -1419,7 +1428,7 @@ import sun.misc.FormattedFloatingDecimal;
  * <tr><td valign="top"> {@code 'g'}
  *     <td valign="top"> <tt>'&#92;u0067'</tt>
  *     <td> Requires the output to be formatted in general scientific notation
- *     as described below. The <a href="#l10n algorithm">localization
+ *     as described below. The <a href="#L10nAlgorithm">localization
  *     algorithm</a> is applied.
  *
  *     <p> After rounding for the precision, the formatting of the resulting
@@ -1448,12 +1457,12 @@ import sun.misc.FormattedFloatingDecimal;
  * <tr><td valign="top"> {@code 'f'}
  *     <td valign="top"> <tt>'&#92;u0066'</tt>
  *     <td> Requires the output to be formatted using <a name="bdecimal">decimal
- *     format</a>.  The <a href="#l10n algorithm">localization algorithm</a> is
+ *     format</a>.  The <a href="#L10nAlgorithm">localization algorithm</a> is
  *     applied.
  *
  *     <p> The result is a string that represents the sign and magnitude
  *     (absolute value) of the argument.  The formatting of the sign is
- *     described in the <a href="#l10n algorithm">localization
+ *     described in the <a href="#L10nAlgorithm">localization
  *     algorithm</a>. The formatting of the magnitude <i>m</i> depends upon its
  *     value.
  *
@@ -1489,7 +1498,7 @@ import sun.misc.FormattedFloatingDecimal;
  * <h4><a name="ddt">Date/Time</a></h4>
  *
  * <p> This conversion may be applied to {@code long}, {@link Long}, {@link
- * Calendar}, and {@link Date}.
+ * Calendar}, {@link Date} and {@link TemporalAccessor TemporalAccessor}
  *
  * <table cellpadding=5 summary="DTConv">
  *
@@ -1712,7 +1721,7 @@ import sun.misc.FormattedFloatingDecimal;
  * conversions</a> applies.  If the {@code '#'} flag is given, then a {@link
  * FormatFlagsConversionMismatchException} will be thrown.
  *
- * <p> The <a name="dtWidth">width</a> is the minimum number of characters to
+ * <p> The width is the minimum number of characters to
  * be written to the output.  If the length of the converted value is less than
  * the {@code width} then the output will be padded by spaces
  * (<tt>'&#92;u0020'</tt>) until the total number of characters equals width.
@@ -1732,7 +1741,7 @@ import sun.misc.FormattedFloatingDecimal;
  * <tr><td valign="top">{@code '%'}
  *     <td> The result is a literal {@code '%'} (<tt>'&#92;u0025'</tt>)
  *
- * <p> The <a name="dtWidth">width</a> is the minimum number of characters to
+ * <p> The width is the minimum number of characters to
  * be written to the output including the {@code '%'}.  If the length of the
  * converted value is less than the {@code width} then the output will be
  * padded by spaces (<tt>'&#92;u0020'</tt>) until the total number of
@@ -1891,7 +1900,8 @@ public final class Formatter implements Closeable, Flushable {
      * which may be retrieved by invoking {@link #out out()} and whose
      * current content may be converted into a string by invoking {@link
      * #toString toString()}.  The locale used is the {@linkplain
-     * Locale#getDefault() default locale} for this instance of the Java
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
      * virtual machine.
      */
     public Formatter() {
@@ -1901,8 +1911,10 @@ public final class Formatter implements Closeable, Flushable {
     /**
      * Constructs a new formatter with the specified destination.
      *
-     * <p> The locale used is the {@linkplain Locale#getDefault() default
-     * locale} for this instance of the Java virtual machine.
+     * <p> The locale used is the {@linkplain
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
+     * virtual machine.
      *
      * @param  a
      *         Destination for the formatted output.  If {@code a} is
@@ -1952,8 +1964,10 @@ public final class Formatter implements Closeable, Flushable {
      * java.nio.charset.Charset#defaultCharset() default charset} for this
      * instance of the Java virtual machine.
      *
-     * <p> The locale used is the {@linkplain Locale#getDefault() default
-     * locale} for this instance of the Java virtual machine.
+     * <p> The locale used is the {@linkplain
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
+     * virtual machine.
      *
      * @param  fileName
      *         The name of the file to use as the destination of this
@@ -1980,8 +1994,10 @@ public final class Formatter implements Closeable, Flushable {
     /**
      * Constructs a new formatter with the specified file name and charset.
      *
-     * <p> The locale used is the {@linkplain Locale#getDefault default
-     * locale} for this instance of the Java virtual machine.
+     * <p> The locale used is the {@linkplain
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
+     * virtual machine.
      *
      * @param  fileName
      *         The name of the file to use as the destination of this
@@ -2059,8 +2075,10 @@ public final class Formatter implements Closeable, Flushable {
      * java.nio.charset.Charset#defaultCharset() default charset} for this
      * instance of the Java virtual machine.
      *
-     * <p> The locale used is the {@linkplain Locale#getDefault() default
-     * locale} for this instance of the Java virtual machine.
+     * <p> The locale used is the {@linkplain
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
+     * virtual machine.
      *
      * @param  file
      *         The file to use as the destination of this formatter.  If the
@@ -2087,8 +2105,10 @@ public final class Formatter implements Closeable, Flushable {
     /**
      * Constructs a new formatter with the specified file and charset.
      *
-     * <p> The locale used is the {@linkplain Locale#getDefault default
-     * locale} for this instance of the Java virtual machine.
+     * <p> The locale used is the {@linkplain
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
+     * virtual machine.
      *
      * @param  file
      *         The file to use as the destination of this formatter.  If the
@@ -2162,8 +2182,10 @@ public final class Formatter implements Closeable, Flushable {
     /**
      * Constructs a new formatter with the specified print stream.
      *
-     * <p> The locale used is the {@linkplain Locale#getDefault() default
-     * locale} for this instance of the Java virtual machine.
+     * <p> The locale used is the {@linkplain
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
+     * virtual machine.
      *
      * <p> Characters are written to the given {@link java.io.PrintStream
      * PrintStream} object and are therefore encoded using that object's
@@ -2184,8 +2206,10 @@ public final class Formatter implements Closeable, Flushable {
      * java.nio.charset.Charset#defaultCharset() default charset} for this
      * instance of the Java virtual machine.
      *
-     * <p> The locale used is the {@linkplain Locale#getDefault() default
-     * locale} for this instance of the Java virtual machine.
+     * <p> The locale used is the {@linkplain
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
+     * virtual machine.
      *
      * @param  os
      *         The output stream to use as the destination of this formatter.
@@ -2200,8 +2224,10 @@ public final class Formatter implements Closeable, Flushable {
      * Constructs a new formatter with the specified output stream and
      * charset.
      *
-     * <p> The locale used is the {@linkplain Locale#getDefault default
-     * locale} for this instance of the Java virtual machine.
+     * <p> The locale used is the {@linkplain
+     * Locale#getDefault(Locale.Category) default locale} for
+     * {@linkplain Locale.Category#FORMAT formatting} for this instance of the Java
+     * virtual machine.
      *
      * @param  os
      *         The output stream to use as the destination of this formatter.
@@ -2564,7 +2590,20 @@ public final class Formatter implements Closeable, Flushable {
         public String toString() { return s; }
     }
 
-    public enum BigDecimalLayoutForm { SCIENTIFIC, DECIMAL_FLOAT };
+    /**
+     * Enum for {@code BigDecimal} formatting.
+     */
+    public enum BigDecimalLayoutForm {
+        /**
+         * Format the {@code BigDecimal} in computerized scientific notation.
+         */
+        SCIENTIFIC,
+
+        /**
+         * Format the {@code BigDecimal} as a decimal number.
+         */
+        DECIMAL_FLOAT
+    };
 
     private class FormatSpecifier implements FormatString {
         private int index = -1;
@@ -2781,8 +2820,11 @@ public final class Formatter implements Closeable, Flushable {
                 cal = Calendar.getInstance(l == null ? Locale.US : l);
                 cal.setTime((Date)arg);
             } else if (arg instanceof Calendar) {
-                cal = (Calendar) ((Calendar)arg).clone();
+                cal = (Calendar) ((Calendar) arg).clone();
                 cal.setLenient(true);
+            } else if (arg instanceof TemporalAccessor) {
+                print((TemporalAccessor) arg, c, l);
+                return;
             } else {
                 failConversion(c, arg);
             }
@@ -2880,7 +2922,7 @@ public final class Formatter implements Closeable, Flushable {
         }
 
         public String toString() {
-            StringBuilder sb = new StringBuilder('%');
+            StringBuilder sb = new StringBuilder("%");
             // Flags.UPPERCASE is set internally for legal conversions.
             Flags dupf = f.dup().remove(Flags.UPPERCASE);
             sb.append(dupf.toString());
@@ -3213,13 +3255,10 @@ public final class Formatter implements Closeable, Flushable {
                 int prec = (precision == -1 ? 6 : precision);
 
                 FormattedFloatingDecimal fd
-                    = new FormattedFloatingDecimal(value, prec,
-                        FormattedFloatingDecimal.Form.SCIENTIFIC);
+                        = FormattedFloatingDecimal.valueOf(value, prec,
+                          FormattedFloatingDecimal.Form.SCIENTIFIC);
 
-                char[] v = new char[MAX_FD_CHARS];
-                int len = fd.getChars(v);
-
-                char[] mant = addZeros(mantissa(v, len), prec);
+                char[] mant = addZeros(fd.getMantissa(), prec);
 
                 // If the precision is zero and the '#' flag is set, add the
                 // requested decimal point.
@@ -3227,7 +3266,7 @@ public final class Formatter implements Closeable, Flushable {
                     mant = addDot(mant);
 
                 char[] exp = (value == 0.0)
-                    ? new char[] {'+','0','0'} : exponent(v, len);
+                    ? new char[] {'+','0','0'} : fd.getExponent();
 
                 int newW = width;
                 if (width != -1)
@@ -3250,15 +3289,10 @@ public final class Formatter implements Closeable, Flushable {
                 int prec = (precision == -1 ? 6 : precision);
 
                 FormattedFloatingDecimal fd
-                    = new FormattedFloatingDecimal(value, prec,
-                        FormattedFloatingDecimal.Form.DECIMAL_FLOAT);
+                        = FormattedFloatingDecimal.valueOf(value, prec,
+                          FormattedFloatingDecimal.Form.DECIMAL_FLOAT);
 
-                // MAX_FD_CHARS + 1 (round?)
-                char[] v = new char[MAX_FD_CHARS + 1
-                                   + Math.abs(fd.getExponent())];
-                int len = fd.getChars(v);
-
-                char[] mant = addZeros(mantissa(v, len), prec);
+                char[] mant = addZeros(fd.getMantissa(), prec);
 
                 // If the precision is zero and the '#' flag is set, add the
                 // requested decimal point.
@@ -3276,23 +3310,29 @@ public final class Formatter implements Closeable, Flushable {
                 else if (precision == 0)
                     prec = 1;
 
-                FormattedFloatingDecimal fd
-                    = new FormattedFloatingDecimal(value, prec,
-                        FormattedFloatingDecimal.Form.GENERAL);
+                char[] exp;
+                char[] mant;
+                int expRounded;
+                if (value == 0.0) {
+                    exp = null;
+                    mant = new char[] {'0'};
+                    expRounded = 0;
+                } else {
+                    FormattedFloatingDecimal fd
+                        = FormattedFloatingDecimal.valueOf(value, prec,
+                          FormattedFloatingDecimal.Form.GENERAL);
+                    exp = fd.getExponent();
+                    mant = fd.getMantissa();
+                    expRounded = fd.getExponentRounded();
+                }
 
-                // MAX_FD_CHARS + 1 (round?)
-                char[] v = new char[MAX_FD_CHARS + 1
-                                   + Math.abs(fd.getExponent())];
-                int len = fd.getChars(v);
-
-                char[] exp = exponent(v, len);
                 if (exp != null) {
                     prec -= 1;
                 } else {
-                    prec = prec - (value == 0 ? 0 : fd.getExponentRounded()) - 1;
+                    prec -= expRounded + 1;
                 }
 
-                char[] mant = addZeros(mantissa(v, len), prec);
+                mant = addZeros(mant, prec);
                 // If the precision is zero and the '#' flag is set, add the
                 // requested decimal point.
                 if (f.contains(Flags.ALTERNATE) && (prec == 0))
@@ -3351,30 +3391,6 @@ public final class Formatter implements Closeable, Flushable {
             }
         }
 
-        private char[] mantissa(char[] v, int len) {
-            int i;
-            for (i = 0; i < len; i++) {
-                if (v[i] == 'e')
-                    break;
-            }
-            char[] tmp = new char[i];
-            System.arraycopy(v, 0, tmp, 0, i);
-            return tmp;
-        }
-
-        private char[] exponent(char[] v, int len) {
-            int i;
-            for (i = len - 1; i >= 0; i--) {
-                if (v[i] == 'e')
-                    break;
-            }
-            if (i == -1)
-                return null;
-            char[] tmp = new char[len - i - 1];
-            System.arraycopy(v, i + 1, tmp, 0, len - i - 1);
-            return tmp;
-        }
-
         // Add zeros to the requested precision.
         private char[] addZeros(char[] v, int prec) {
             // Look for the dot.  If we don't find one, the we'll need to add
@@ -3417,24 +3433,24 @@ public final class Formatter implements Closeable, Flushable {
         // Method assumes that d > 0.
         private String hexDouble(double d, int prec) {
             // Let Double.toHexString handle simple cases
-            if(!FpUtils.isFinite(d) || d == 0.0 || prec == 0 || prec >= 13)
+            if(!Double.isFinite(d) || d == 0.0 || prec == 0 || prec >= 13)
                 // remove "0x"
                 return Double.toHexString(d).substring(2);
             else {
                 assert(prec >= 1 && prec <= 12);
 
-                int exponent  = FpUtils.getExponent(d);
+                int exponent  = Math.getExponent(d);
                 boolean subnormal
                     = (exponent == DoubleConsts.MIN_EXPONENT - 1);
 
                 // If this is subnormal input so normalize (could be faster to
                 // do as integer operation).
                 if (subnormal) {
-                    scaleUp = FpUtils.scalb(1.0, 54);
+                    scaleUp = Math.scalb(1.0, 54);
                     d *= scaleUp;
                     // Calculate the exponent.  This is not just exponent + 54
                     // since the former is not the normalized exponent.
-                    exponent = FpUtils.getExponent(d);
+                    exponent = Math.getExponent(d);
                     assert exponent >= DoubleConsts.MIN_EXPONENT &&
                         exponent <= DoubleConsts.MAX_EXPONENT: exponent;
                 }
@@ -3828,7 +3844,6 @@ public final class Formatter implements Closeable, Flushable {
                                  Locale l)
             throws IOException
         {
-            assert(width == -1);
             if (sb == null)
                 sb = new StringBuilder();
             switch (c) {
@@ -4030,6 +4045,242 @@ public final class Formatter implements Closeable, Flushable {
             }
             default:
                 assert false;
+            }
+            return sb;
+        }
+
+        private void print(TemporalAccessor t, char c, Locale l)  throws IOException {
+            StringBuilder sb = new StringBuilder();
+            print(sb, t, c, l);
+            // justify based on width
+            String s = justify(sb.toString());
+            if (f.contains(Flags.UPPERCASE))
+                s = s.toUpperCase();
+            a.append(s);
+        }
+
+        private Appendable print(StringBuilder sb, TemporalAccessor t, char c,
+                                 Locale l) throws IOException {
+            if (sb == null)
+                sb = new StringBuilder();
+            try {
+                switch (c) {
+                case DateTime.HOUR_OF_DAY_0: {  // 'H' (00 - 23)
+                    int i = t.get(ChronoField.HOUR_OF_DAY);
+                    sb.append(localizedMagnitude(null, i, Flags.ZERO_PAD, 2, l));
+                    break;
+                }
+                case DateTime.HOUR_OF_DAY: {   // 'k' (0 - 23) -- like H
+                    int i = t.get(ChronoField.HOUR_OF_DAY);
+                    sb.append(localizedMagnitude(null, i, Flags.NONE, 2, l));
+                    break;
+                }
+                case DateTime.HOUR_0:      {  // 'I' (01 - 12)
+                    int i = t.get(ChronoField.CLOCK_HOUR_OF_AMPM);
+                    sb.append(localizedMagnitude(null, i, Flags.ZERO_PAD, 2, l));
+                    break;
+                }
+                case DateTime.HOUR:        { // 'l' (1 - 12) -- like I
+                    int i = t.get(ChronoField.CLOCK_HOUR_OF_AMPM);
+                    sb.append(localizedMagnitude(null, i, Flags.NONE, 2, l));
+                    break;
+                }
+                case DateTime.MINUTE:      { // 'M' (00 - 59)
+                    int i = t.get(ChronoField.MINUTE_OF_HOUR);
+                    Flags flags = Flags.ZERO_PAD;
+                    sb.append(localizedMagnitude(null, i, flags, 2, l));
+                    break;
+                }
+                case DateTime.NANOSECOND:  { // 'N' (000000000 - 999999999)
+                    int i = t.get(ChronoField.MILLI_OF_SECOND) * 1000000;
+                    Flags flags = Flags.ZERO_PAD;
+                    sb.append(localizedMagnitude(null, i, flags, 9, l));
+                    break;
+                }
+                case DateTime.MILLISECOND: { // 'L' (000 - 999)
+                    int i = t.get(ChronoField.MILLI_OF_SECOND);
+                    Flags flags = Flags.ZERO_PAD;
+                    sb.append(localizedMagnitude(null, i, flags, 3, l));
+                    break;
+                }
+                case DateTime.MILLISECOND_SINCE_EPOCH: { // 'Q' (0 - 99...?)
+                    long i = t.getLong(ChronoField.INSTANT_SECONDS) * 1000L +
+                             t.getLong(ChronoField.MILLI_OF_SECOND);
+                    Flags flags = Flags.NONE;
+                    sb.append(localizedMagnitude(null, i, flags, width, l));
+                    break;
+                }
+                case DateTime.AM_PM:       { // 'p' (am or pm)
+                    // Calendar.AM = 0, Calendar.PM = 1, LocaleElements defines upper
+                    String[] ampm = { "AM", "PM" };
+                    if (l != null && l != Locale.US) {
+                        DateFormatSymbols dfs = DateFormatSymbols.getInstance(l);
+                        ampm = dfs.getAmPmStrings();
+                    }
+                    String s = ampm[t.get(ChronoField.AMPM_OF_DAY)];
+                    sb.append(s.toLowerCase(l != null ? l : Locale.US));
+                    break;
+                }
+                case DateTime.SECONDS_SINCE_EPOCH: { // 's' (0 - 99...?)
+                    long i = t.getLong(ChronoField.INSTANT_SECONDS);
+                    Flags flags = Flags.NONE;
+                    sb.append(localizedMagnitude(null, i, flags, width, l));
+                    break;
+                }
+                case DateTime.SECOND:      { // 'S' (00 - 60 - leap second)
+                    int i = t.get(ChronoField.SECOND_OF_MINUTE);
+                    Flags flags = Flags.ZERO_PAD;
+                    sb.append(localizedMagnitude(null, i, flags, 2, l));
+                    break;
+                }
+                case DateTime.ZONE_NUMERIC: { // 'z' ({-|+}####) - ls minus?
+                    int i = t.get(ChronoField.OFFSET_SECONDS);
+                    boolean neg = i < 0;
+                    sb.append(neg ? '-' : '+');
+                    if (neg)
+                        i = -i;
+                    int min = i / 60;
+                    // combine minute and hour into a single integer
+                    int offset = (min / 60) * 100 + (min % 60);
+                    Flags flags = Flags.ZERO_PAD;
+                    sb.append(localizedMagnitude(null, offset, flags, 4, l));
+                    break;
+                }
+                case DateTime.ZONE:        { // 'Z' (symbol)
+                    ZoneId zid = t.query(TemporalQuery.zone());
+                    if (zid == null) {
+                        throw new IllegalFormatConversionException(c, t.getClass());
+                    }
+                    if (!(zid instanceof ZoneOffset) &&
+                        t.isSupported(ChronoField.INSTANT_SECONDS)) {
+                        Instant instant = Instant.from(t);
+                        sb.append(TimeZone.getTimeZone(zid.getId())
+                                          .getDisplayName(zid.getRules().isDaylightSavings(instant),
+                                                          TimeZone.SHORT,
+                                                          (l == null) ? Locale.US : l));
+                        break;
+                    }
+                    sb.append(zid.getId());
+                    break;
+                }
+                // Date
+                case DateTime.NAME_OF_DAY_ABBREV:     // 'a'
+                case DateTime.NAME_OF_DAY:          { // 'A'
+                    int i = t.get(ChronoField.DAY_OF_WEEK) % 7 + 1;
+                    Locale lt = ((l == null) ? Locale.US : l);
+                    DateFormatSymbols dfs = DateFormatSymbols.getInstance(lt);
+                    if (c == DateTime.NAME_OF_DAY)
+                        sb.append(dfs.getWeekdays()[i]);
+                    else
+                        sb.append(dfs.getShortWeekdays()[i]);
+                    break;
+                }
+                case DateTime.NAME_OF_MONTH_ABBREV:   // 'b'
+                case DateTime.NAME_OF_MONTH_ABBREV_X: // 'h' -- same b
+                case DateTime.NAME_OF_MONTH:        { // 'B'
+                    int i = t.get(ChronoField.MONTH_OF_YEAR) - 1;
+                    Locale lt = ((l == null) ? Locale.US : l);
+                    DateFormatSymbols dfs = DateFormatSymbols.getInstance(lt);
+                    if (c == DateTime.NAME_OF_MONTH)
+                        sb.append(dfs.getMonths()[i]);
+                    else
+                        sb.append(dfs.getShortMonths()[i]);
+                    break;
+                }
+                case DateTime.CENTURY:                // 'C' (00 - 99)
+                case DateTime.YEAR_2:                 // 'y' (00 - 99)
+                case DateTime.YEAR_4:               { // 'Y' (0000 - 9999)
+                    int i = t.get(ChronoField.YEAR);
+                    int size = 2;
+                    switch (c) {
+                    case DateTime.CENTURY:
+                        i /= 100;
+                        break;
+                    case DateTime.YEAR_2:
+                        i %= 100;
+                        break;
+                    case DateTime.YEAR_4:
+                        size = 4;
+                        break;
+                    }
+                    Flags flags = Flags.ZERO_PAD;
+                    sb.append(localizedMagnitude(null, i, flags, size, l));
+                    break;
+                }
+                case DateTime.DAY_OF_MONTH_0:         // 'd' (01 - 31)
+                case DateTime.DAY_OF_MONTH:         { // 'e' (1 - 31) -- like d
+                    int i = t.get(ChronoField.DAY_OF_MONTH);
+                    Flags flags = (c == DateTime.DAY_OF_MONTH_0
+                                   ? Flags.ZERO_PAD
+                                   : Flags.NONE);
+                    sb.append(localizedMagnitude(null, i, flags, 2, l));
+                    break;
+                }
+                case DateTime.DAY_OF_YEAR:          { // 'j' (001 - 366)
+                    int i = t.get(ChronoField.DAY_OF_YEAR);
+                    Flags flags = Flags.ZERO_PAD;
+                    sb.append(localizedMagnitude(null, i, flags, 3, l));
+                    break;
+                }
+                case DateTime.MONTH:                { // 'm' (01 - 12)
+                    int i = t.get(ChronoField.MONTH_OF_YEAR);
+                    Flags flags = Flags.ZERO_PAD;
+                    sb.append(localizedMagnitude(null, i, flags, 2, l));
+                    break;
+                }
+
+                // Composites
+                case DateTime.TIME:         // 'T' (24 hour hh:mm:ss - %tH:%tM:%tS)
+                case DateTime.TIME_24_HOUR:    { // 'R' (hh:mm same as %H:%M)
+                    char sep = ':';
+                    print(sb, t, DateTime.HOUR_OF_DAY_0, l).append(sep);
+                    print(sb, t, DateTime.MINUTE, l);
+                    if (c == DateTime.TIME) {
+                        sb.append(sep);
+                        print(sb, t, DateTime.SECOND, l);
+                    }
+                    break;
+                }
+                case DateTime.TIME_12_HOUR:    { // 'r' (hh:mm:ss [AP]M)
+                    char sep = ':';
+                    print(sb, t, DateTime.HOUR_0, l).append(sep);
+                    print(sb, t, DateTime.MINUTE, l).append(sep);
+                    print(sb, t, DateTime.SECOND, l).append(' ');
+                    // this may be in wrong place for some locales
+                    StringBuilder tsb = new StringBuilder();
+                    print(tsb, t, DateTime.AM_PM, l);
+                    sb.append(tsb.toString().toUpperCase(l != null ? l : Locale.US));
+                    break;
+                }
+                case DateTime.DATE_TIME:    { // 'c' (Sat Nov 04 12:02:33 EST 1999)
+                    char sep = ' ';
+                    print(sb, t, DateTime.NAME_OF_DAY_ABBREV, l).append(sep);
+                    print(sb, t, DateTime.NAME_OF_MONTH_ABBREV, l).append(sep);
+                    print(sb, t, DateTime.DAY_OF_MONTH_0, l).append(sep);
+                    print(sb, t, DateTime.TIME, l).append(sep);
+                    print(sb, t, DateTime.ZONE, l).append(sep);
+                    print(sb, t, DateTime.YEAR_4, l);
+                    break;
+                }
+                case DateTime.DATE:            { // 'D' (mm/dd/yy)
+                    char sep = '/';
+                    print(sb, t, DateTime.MONTH, l).append(sep);
+                    print(sb, t, DateTime.DAY_OF_MONTH_0, l).append(sep);
+                    print(sb, t, DateTime.YEAR_2, l);
+                    break;
+                }
+                case DateTime.ISO_STANDARD_DATE: { // 'F' (%Y-%m-%d)
+                    char sep = '-';
+                    print(sb, t, DateTime.YEAR_4, l).append(sep);
+                    print(sb, t, DateTime.MONTH, l).append(sep);
+                    print(sb, t, DateTime.DAY_OF_MONTH_0, l);
+                    break;
+                }
+                default:
+                    assert false;
+                }
+            } catch (DateTimeException x) {
+                throw new IllegalFormatConversionException(c, t.getClass());
             }
             return sb;
         }

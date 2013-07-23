@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2009, 2013, Red Hat, Inc.
+ * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2009, 2010, 2011 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,7 @@
 #include "memory/allocation.inline.hpp"
 #include "prims/methodHandles.hpp"
 
-void MethodHandles::invoke_target(methodOop method, TRAPS) {
+void MethodHandles::invoke_target(Method* method, TRAPS) {
 
   JavaThread *thread = (JavaThread *) THREAD;
   ZeroStack *stack = thread->zero_stack();
@@ -61,7 +61,7 @@ oop MethodHandles::popFromStack(TRAPS) {
 
 }
 
-int MethodHandles::method_handle_entry_invokeBasic(methodOop method, intptr_t UNUSED, TRAPS) {
+int MethodHandles::method_handle_entry_invokeBasic(Method* method, intptr_t UNUSED, TRAPS) {
 
   JavaThread *thread = (JavaThread *) THREAD;
   InterpreterFrame *frame = thread->top_zero_frame()->as_interpreter_frame();
@@ -72,7 +72,7 @@ int MethodHandles::method_handle_entry_invokeBasic(methodOop method, intptr_t UN
   int numArgs = method->size_of_parameters();
   oop lform1 = java_lang_invoke_MethodHandle::form(STACK_OBJECT(-numArgs)); // this.form
   oop vmEntry1 = java_lang_invoke_LambdaForm::vmentry(lform1);
-  methodOop vmtarget = (methodOop) java_lang_invoke_MemberName::vmtarget(vmEntry1);
+  Method* vmtarget = (Method*) java_lang_invoke_MemberName::vmtarget(vmEntry1);
 
   invoke_target(vmtarget, THREAD);
 
@@ -80,20 +80,20 @@ int MethodHandles::method_handle_entry_invokeBasic(methodOop method, intptr_t UN
   return 0;
 }
 
-int MethodHandles::method_handle_entry_linkToStaticOrSpecial(methodOop method, intptr_t UNUSED, TRAPS) {
+int MethodHandles::method_handle_entry_linkToStaticOrSpecial(Method* method, intptr_t UNUSED, TRAPS) {
 
   // Pop appendix argument from stack. This is a MemberName which we resolve to the
   // target method.
   oop vmentry = popFromStack(THREAD);
 
-  methodOop vmtarget = (methodOop) java_lang_invoke_MemberName::vmtarget(vmentry);
+  Method* vmtarget = (Method*) java_lang_invoke_MemberName::vmtarget(vmentry);
 
   invoke_target(vmtarget, THREAD);
 
   return 0;
 }
 
-int MethodHandles::method_handle_entry_linkToInterface(methodOop method, intptr_t UNUSED, TRAPS) {
+int MethodHandles::method_handle_entry_linkToInterface(Method* method, intptr_t UNUSED, TRAPS) {
   JavaThread *thread = (JavaThread *) THREAD;
   InterpreterFrame *frame = thread->top_zero_frame()->as_interpreter_frame();
   interpreterState istate = frame->interpreter_state();
@@ -104,29 +104,29 @@ int MethodHandles::method_handle_entry_linkToInterface(methodOop method, intptr_
   intptr_t* topOfStack = istate->stack();
 
   // Resolve target method by looking up in the receiver object's itable.
-  klassOop clazz = java_lang_Class::as_klassOop(java_lang_invoke_MemberName::clazz(vmentry));
+  Klass* clazz = java_lang_Class::as_Klass(java_lang_invoke_MemberName::clazz(vmentry));
   intptr_t vmindex = java_lang_invoke_MemberName::vmindex(vmentry);
-  methodOop target = (methodOop) java_lang_invoke_MemberName::vmtarget(vmentry);
+  Method* target = (Method*) java_lang_invoke_MemberName::vmtarget(vmentry);
 
   int numArgs = target->size_of_parameters();
   oop recv = STACK_OBJECT(-numArgs);
 
-  instanceKlass* recvKlass = (instanceKlass *) recv->klass()->klass_part();
-  itableOffsetEntry* ki = (itableOffsetEntry*) recvKlass->start_of_itable();
+  InstanceKlass* klass_part = InstanceKlass::cast(recv->klass());
+  itableOffsetEntry* ki = (itableOffsetEntry*) klass_part->start_of_itable();
   int i;
-  for ( i = 0 ; i < recvKlass->itable_length() ; i++, ki++ ) {
+  for ( i = 0 ; i < klass_part->itable_length() ; i++, ki++ ) {
     if (ki->interface_klass() == clazz) break;
   }
 
   itableMethodEntry* im = ki->first_method_entry(recv->klass());
-  methodOop vmtarget = im[vmindex].method();
+  Method* vmtarget = im[vmindex].method();
 
   invoke_target(vmtarget, THREAD);
 
   return 0;
 }
 
-int MethodHandles::method_handle_entry_linkToVirtual(methodOop method, intptr_t UNUSED, TRAPS) {
+int MethodHandles::method_handle_entry_linkToVirtual(Method* method, intptr_t UNUSED, TRAPS) {
   JavaThread *thread = (JavaThread *) THREAD;
 
   InterpreterFrame *frame = thread->top_zero_frame()->as_interpreter_frame();
@@ -139,20 +139,20 @@ int MethodHandles::method_handle_entry_linkToVirtual(methodOop method, intptr_t 
 
   // Resolve target method by looking up in the receiver object's vtable.
   intptr_t vmindex = java_lang_invoke_MemberName::vmindex(vmentry);
-  methodOop target = (methodOop) java_lang_invoke_MemberName::vmtarget(vmentry);
+  Method* target = (Method*) java_lang_invoke_MemberName::vmtarget(vmentry);
   int numArgs = target->size_of_parameters();
   oop recv = STACK_OBJECT(-numArgs);
-  instanceKlass* recvKlass_part = (instanceKlass *) recv->klass()->klass_part();
-
-  klassVtable* vtable = recvKlass_part->vtable();
-  methodOop vmtarget = vtable->method_at(vmindex);
+  Klass* clazz = recv->klass();
+  Klass* klass_part = InstanceKlass::cast(clazz);
+  klassVtable* vtable = klass_part->vtable();
+  Method* vmtarget = vtable->method_at(vmindex);
 
   invoke_target(vmtarget, THREAD);
 
   return 0;
 }
 
-int MethodHandles::method_handle_entry_invalid(methodOop method, intptr_t UNUSED, TRAPS) {
+int MethodHandles::method_handle_entry_invalid(Method* method, intptr_t UNUSED, TRAPS) {
   ShouldNotReachHere();
   return 0;
 }

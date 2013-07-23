@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2003, 2005, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,7 @@ include $(BUILDDIR)/common/Defs.gmk
 #
 # Files to compile.
 #
-AUTO_FILES_JAVA_DIRS = java/lang/reflect sun/reflect
+AUTO_FILES_JAVA_DIRS = java/lang/reflect sun/reflect java/lang/annotation
 
 #
 # Install .lib file.

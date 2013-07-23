@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,6 +37,7 @@ package java.awt.color;
 
 import sun.java2d.cmm.PCMM;
 import sun.java2d.cmm.CMSManager;
+import sun.java2d.cmm.ProfileDataVerifier;
 import sun.java2d.cmm.ProfileDeferralMgr;
 import sun.java2d.cmm.ProfileDeferralInfo;
 import sun.java2d.cmm.ProfileActivator;
@@ -775,6 +776,8 @@ public class ICC_Profile implements Serializable {
             ProfileDeferralMgr.activateProfiles();
         }
 
+        ProfileDataVerifier.verify(data);
+
         try {
             theID = CMSManager.getModule().loadProfile(data);
         } catch (CMMException c) {
@@ -921,9 +924,9 @@ public class ICC_Profile implements Serializable {
      */
     private static ICC_Profile getStandardProfile(final String name) {
 
-        return (ICC_Profile) AccessController.doPrivileged(
-            new PrivilegedAction() {
-                 public Object run() {
+        return AccessController.doPrivileged(
+            new PrivilegedAction<ICC_Profile>() {
+                 public ICC_Profile run() {
                      ICC_Profile p = null;
                      try {
                          p = getInstance (name);
@@ -1432,7 +1435,15 @@ public class ICC_Profile implements Serializable {
 
         int renderingIntent = intFromBigEndian(theHeader, icHdrRenderingIntent);
                                                  /* set the rendering intent */
-        return renderingIntent;
+
+        /* According to ICC spec, only the least-significant 16 bits shall be
+         * used to encode the rendering intent. The most significant 16 bits
+         * shall be set to zero. Thus, we are ignoring two most significant
+         * bytes here.
+         *
+         *  See http://www.color.org/ICC1v42_2006-05.pdf, section 7.2.15.
+         */
+        return (0xffff & renderingIntent);
     }
 
 

@@ -114,16 +114,16 @@ int getDefaultScopeID(JNIEnv *env) {
     static jfieldID ni_defaultIndexID;
     if (ni_class == NULL) {
         jclass c = (*env)->FindClass(env, "java/net/NetworkInterface");
-        CHECK_NULL(c);
+        CHECK_NULL_RETURN(c, 0);
         c = (*env)->NewGlobalRef(env, c);
-        CHECK_NULL(c);
-        ni_defaultIndexID = (*env)->GetStaticFieldID(
-            env, c, "defaultIndex", "I");
+        CHECK_NULL_RETURN(c, 0);
+        ni_defaultIndexID = (*env)->GetStaticFieldID(env, c,
+                                                     "defaultIndex", "I");
         ni_class = c;
     }
     int defaultIndex = 0;
     defaultIndex = (*env)->GetStaticIntField(env, ni_class,
-                                                 ni_defaultIndexID);
+                                             ni_defaultIndexID);
     return defaultIndex;
 }
 
@@ -169,7 +169,7 @@ getParam(char *driver, char *param)
  * for Solaris versions that do not support the ioctl() in getParam().
  * Ugly, but only called once (for each sotype).
  *
- * As an optimisation, we make a guess using the default values for Solaris
+ * As an optimization, we make a guess using the default values for Solaris
  * assuming they haven't been modified with ndd.
  */
 
@@ -217,23 +217,7 @@ static int findMaxBuf(int fd, int opt, int sotype) {
 #endif
 
 #ifdef __linux__
-static int kernelV22 = 0;
 static int vinit = 0;
-
-int kernelIsV22 () {
-    if (!vinit) {
-        struct utsname sysinfo;
-        if (uname(&sysinfo) == 0) {
-            sysinfo.release[3] = '\0';
-            if (strcmp(sysinfo.release, "2.2") == 0) {
-                kernelV22 = JNI_TRUE;
-            }
-        }
-        vinit = 1;
-    }
-    return kernelV22;
-}
-
 static int kernelV24 = 0;
 static int vinit24 = 0;
 
@@ -253,17 +237,11 @@ int kernelIsV24 () {
 
 int getScopeID (struct sockaddr *him) {
     struct sockaddr_in6 *hext = (struct sockaddr_in6 *)him;
-    if (kernelIsV22()) {
-        return 0;
-    }
     return hext->sin6_scope_id;
 }
 
 int cmpScopeID (unsigned int scope, struct sockaddr *him) {
     struct sockaddr_in6 *hext = (struct sockaddr_in6 *)him;
-    if (kernelIsV22()) {
-        return 1;       /* scope is ignored for comparison in 2.2 kernel */
-    }
     return hext->sin6_scope_id == scope;
 }
 
@@ -438,37 +416,12 @@ jint  IPv6_supported()
      *  we should also check if the APIs are available.
      */
     ipv6_fn = JVM_FindLibraryEntry(RTLD_DEFAULT, "inet_pton");
-    if (ipv6_fn == NULL ) {
-        close(fd);
-        return JNI_FALSE;
-    }
-
-    /*
-     * We've got the library, let's get the pointers to some
-     * IPV6 specific functions. We have to do that because, at least
-     * on Solaris we may build on a system without IPV6 networking
-     * libraries, therefore we can't have a hard link to these
-     * functions.
-     */
-    getaddrinfo_ptr = (getaddrinfo_f)
-        JVM_FindLibraryEntry(RTLD_DEFAULT, "getaddrinfo");
-
-    freeaddrinfo_ptr = (freeaddrinfo_f)
-        JVM_FindLibraryEntry(RTLD_DEFAULT, "freeaddrinfo");
-
-    gai_strerror_ptr = (gai_strerror_f)
-        JVM_FindLibraryEntry(RTLD_DEFAULT, "gai_strerror");
-
-    getnameinfo_ptr = (getnameinfo_f)
-        JVM_FindLibraryEntry(RTLD_DEFAULT, "getnameinfo");
-
-    if (freeaddrinfo_ptr == NULL || getnameinfo_ptr == NULL) {
-        /* We need all 3 of them */
-        getaddrinfo_ptr = NULL;
-    }
-
     close(fd);
-    return JNI_TRUE;
+    if (ipv6_fn == NULL ) {
+        return JNI_FALSE;
+    } else {
+        return JNI_TRUE;
+    }
 #endif /* AF_INET6 */
 }
 #endif /* DONT_ENABLE_IPV6 */
@@ -593,6 +546,7 @@ static void initLoopbackRoutes() {
     char dest_str[40];
     struct in6_addr dest_addr;
     char device[16];
+    struct loopback_route *loRoutesTemp;
 
     if (loRoutes != 0) {
         free (loRoutes);
@@ -653,11 +607,15 @@ static void initLoopbackRoutes() {
             continue;
         } else {
             if (nRoutes == loRoutes_size) {
-                loRoutes = realloc (loRoutes, loRoutes_size *
-                                sizeof (struct loopback_route) * 2);
-                if (loRoutes == 0) {
-                    return ;
+                loRoutesTemp = realloc (loRoutes, loRoutes_size *
+                                        sizeof (struct loopback_route) * 2);
+
+                if (loRoutesTemp == 0) {
+                    free(loRoutes);
+                    fclose (f);
+                    return;
                 }
+                loRoutes=loRoutesTemp;
                 loRoutes_size *= 2;
             }
             memcpy (&loRoutes[nRoutes].addr,&dest_addr,sizeof(struct in6_addr));
@@ -675,7 +633,7 @@ static void initLoopbackRoutes() {
         int plen, scope, dad_status, if_idx;
 
         if ((f = fopen("/proc/net/if_inet6", "r")) != NULL) {
-            while (fscanf(f, "%4s%4s%4s%4s%4s%4s%4s%4s %02x %02x %02x %02x %20s\n",
+            while (fscanf(f, "%4s%4s%4s%4s%4s%4s%4s%4s %08x %02x %02x %02x %20s\n",
                       addr6p[0], addr6p[1], addr6p[2], addr6p[3],
                       addr6p[4], addr6p[5], addr6p[6], addr6p[7],
                   &if_idx, &plen, &scope, &dad_status, devname) == 13) {
@@ -810,6 +768,7 @@ void parseExclusiveBindProperty(JNIEnv *env) {
     }
 #endif
 }
+
 /* In the case of an IPv4 Inetaddress this method will return an
  * IPv4 mapped address where IPv6 is available and v4MappedAddress is TRUE.
  * Otherwise it will return a sockaddr_in structure for an IPv4 InetAddress.
@@ -867,15 +826,14 @@ NET_InetAddressToSockaddr(JNIEnv *env, jobject iaObj, int port, struct sockaddr 
          * address needs to be routed via the loopback interface. In this case,
          * we override the specified value with that of the loopback interface.
          * If no cached value exists and no value was specified by user, then
-         * we try to determine a value ffrom the routing table. In all these
+         * we try to determine a value from the routing table. In all these
          * cases the used value is cached for further use.
          */
 #ifdef __linux__
         if (IN6_IS_ADDR_LINKLOCAL(&(him6->sin6_addr))) {
             int cached_scope_id = 0, scope_id = 0;
-            int old_kernel = kernelIsV22();
 
-            if (ia6_cachedscopeidID && !old_kernel) {
+            if (ia6_cachedscopeidID) {
                 cached_scope_id = (int)(*env)->GetIntField(env, iaObj, ia6_cachedscopeidID);
                 /* if cached value exists then use it. Otherwise, check
                  * if scope is set in the address.
@@ -915,13 +873,11 @@ NET_InetAddressToSockaddr(JNIEnv *env, jobject iaObj, int port, struct sockaddr 
              * of sockaddr_in6.
              */
 
-            if (!old_kernel) {
-                struct sockaddr_in6 *him6 =
-                        (struct sockaddr_in6 *)him;
-                him6->sin6_scope_id = cached_scope_id != 0 ?
-                                            cached_scope_id    : scope_id;
-                *len = sizeof(struct sockaddr_in6);
-            }
+            struct sockaddr_in6 *him6 =
+                    (struct sockaddr_in6 *)him;
+            him6->sin6_scope_id = cached_scope_id != 0 ?
+                                        cached_scope_id    : scope_id;
+            *len = sizeof(struct sockaddr_in6);
         }
 #else
         /* handle scope_id for solaris */
@@ -1004,10 +960,6 @@ NET_IsEqual(jbyte* caddr1, jbyte* caddr2) {
         }
     }
     return 1;
-}
-
-jboolean NET_addrtransAvailable() {
-    return (jboolean)(getaddrinfo_ptr != NULL);
 }
 
 int NET_IsZeroAddr(jbyte* caddr) {
@@ -1203,7 +1155,7 @@ int getDefaultIPv6Interface(struct in6_addr *target_addr) {
         int plen, scope, dad_status, if_idx;
 
         if ((f = fopen("/proc/net/if_inet6", "r")) != NULL) {
-            while (fscanf(f, "%4s%4s%4s%4s%4s%4s%4s%4s %02x %02x %02x %02x %20s\n",
+            while (fscanf(f, "%4s%4s%4s%4s%4s%4s%4s%4s %08x %02x %02x %02x %20s\n",
                       addr6p[0], addr6p[1], addr6p[2], addr6p[3],
                       addr6p[4], addr6p[5], addr6p[6], addr6p[7],
                   &if_idx, &plen, &scope, &dad_status, devname) == 13) {
@@ -1236,7 +1188,7 @@ int getDefaultIPv6Interface(struct in6_addr *target_addr) {
 
 /*
  * Wrapper for getsockopt system routine - does any necessary
- * pre/post processing to deal with OS specific oddies :-
+ * pre/post processing to deal with OS specific oddities :-
  *
  * IP_TOS is a no-op with IPv6 sockets as it's setup when
  * the connection is established.
@@ -1315,7 +1267,7 @@ NET_GetSockOpt(int fd, int level, int opt, void *result,
  *
  * For IP_TOS socket option need to mask off bits as this
  * aren't automatically masked by the kernel and results in
- * an error. In addition IP_TOS is a noop with IPv6 as it
+ * an error. In addition IP_TOS is a NOOP with IPv6 as it
  * should be setup as connection time.
  */
 int
@@ -1349,7 +1301,7 @@ NET_SetSockOpt(int fd, int level, int  opt, const void *arg,
 
     /*
      * IPPROTO/IP_TOS :-
-     * 1. IPv6 on Solaris/Mac OS: no-op and will be set
+     * 1. IPv6 on Solaris/Mac OS: NOOP and will be set
      *    in flowinfo field when connecting TCP socket,
      *    or sending UDP packet.
      * 2. IPv6 on Linux: By default Linux ignores flowinfo
@@ -1528,7 +1480,7 @@ NET_SetSockOpt(int fd, int level, int  opt, const void *arg,
  * caught.
  *
  * On Solaris with IPv6 enabled we must use an exclusive
- * bind to guaranteed a unique port number across the IPv4 and
+ * bind to guarantee a unique port number across the IPv4 and
  * IPv6 port spaces.
  *
  */
@@ -1558,7 +1510,7 @@ NET_Bind(int fd, struct sockaddr *him, int len)
 
 #if defined(__solaris__) && defined(AF_INET6)
     /*
-     * Solaris has seperate IPv4 and IPv6 port spaces so we
+     * Solaris has separate IPv4 and IPv6 port spaces so we
      * use an exclusive bind when SO_REUSEADDR is not used to
      * give the illusion of a unified port space.
      * This also avoids problems with IPv6 sockets connecting

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,25 +25,31 @@
 
 package com.sun.tools.internal.jxc;
 
+import com.sun.tools.internal.jxc.ap.Options;
+import com.sun.tools.internal.xjc.BadCommandLineException;
+import com.sun.xml.internal.bind.util.Which;
+
+import javax.lang.model.SourceVersion;
+import javax.tools.DiagnosticCollector;
+import javax.tools.JavaCompiler;
+import javax.tools.JavaFileObject;
+import javax.tools.OptionChecker;
+import javax.tools.StandardJavaFileManager;
+import javax.tools.ToolProvider;
+import javax.xml.bind.JAXBContext;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
-import javax.xml.bind.JAXBContext;
-
-import com.sun.mirror.apt.AnnotationProcessorFactory;
-import com.sun.tools.internal.jxc.apt.Options;
-import com.sun.tools.internal.xjc.BadCommandLineException;
-import com.sun.tools.internal.xjc.api.util.APTClassLoader;
-import com.sun.tools.internal.xjc.api.util.ToolsJarNotFoundException;
-import com.sun.xml.internal.bind.util.Which;
 
 /**
  * CLI entry-point to the schema generator.
@@ -60,36 +66,24 @@ public class SchemaGenerator {
 
     public static int run(String[] args) throws Exception {
         try {
-            ClassLoader cl = SchemaGenerator.class.getClassLoader();
-            if(cl==null)    cl = ClassLoader.getSystemClassLoader();
-            ClassLoader classLoader = new APTClassLoader(cl,packagePrefixes);
-            return run(args, classLoader);
-        } catch( ToolsJarNotFoundException e) {
+            ClassLoader cl = SecureLoader.getClassClassLoader(SchemaGenerator.class);
+            if (cl==null) {
+                cl = SecureLoader.getSystemClassLoader();
+            }
+            return run(args, cl);
+        } catch(Exception e) {
             System.err.println(e.getMessage());
             return -1;
         }
     }
 
     /**
-     * List of package prefixes we want to load in the same package
-     */
-    private static final String[] packagePrefixes = {
-        "com.sun.tools.internal.jxc.",
-        "com.sun.tools.internal.xjc.",
-        "com.sun.istack.internal.tools.",
-        "com.sun.tools.apt.",
-        "com.sun.tools.javac.",
-        "com.sun.tools.javadoc.",
-        "com.sun.mirror."
-    };
-
-    /**
      * Runs the schema generator.
      *
      * @param classLoader
      *      the schema generator will run in this classLoader.
-     *      It needs to be able to load APT and JAXB RI classes. Note that
-     *      JAXB RI classes refer to APT classes. Must not be null.
+     *      It needs to be able to load annotation processing and JAXB RI classes. Note that
+     *      JAXB RI classes refer to annotation processing classes. Must not be null.
      *
      * @return
      *      exit code. 0 if success.
@@ -131,31 +125,17 @@ public class SchemaGenerator {
         }
 
         Class schemagenRunner = classLoader.loadClass(Runner.class.getName());
-        Method mainMethod = schemagenRunner.getDeclaredMethod("main",String[].class,File.class);
+        Method compileMethod = schemagenRunner.getDeclaredMethod("compile",String[].class,File.class);
 
         List<String> aptargs = new ArrayList<String>();
-
-        if(hasClass(options.arguments)) {
-            aptargs.add("-XclassesAsDecls");
-        }
 
         if (options.encoding != null) {
             aptargs.add("-encoding");
             aptargs.add(options.encoding);
         }
 
-        // make jaxb-api.jar visible to classpath
-        File jaxbApi = findJaxbApiJar();
-        if(jaxbApi!=null) {
-            if(options.classpath!=null) {
-                options.classpath = options.classpath+File.pathSeparatorChar+jaxbApi;
-            } else {
-                options.classpath = jaxbApi.getPath();
-            }
-        }
-
         aptargs.add("-cp");
-        aptargs.add(options.classpath);
+        aptargs.add(setClasspath(options.classpath)); // set original classpath + jaxb-api to be visible to annotation processor
 
         if(options.targetDir!=null) {
             aptargs.add("-d");
@@ -165,12 +145,37 @@ public class SchemaGenerator {
         aptargs.addAll(options.arguments);
 
         String[] argsarray = aptargs.toArray(new String[aptargs.size()]);
-        return (Integer)mainMethod.invoke(null,new Object[]{argsarray,options.episodeFile});
+        return ((Boolean) compileMethod.invoke(null, argsarray, options.episodeFile)) ? 0 : 1;
+    }
+
+    private static String setClasspath(String givenClasspath) {
+        StringBuilder cp = new StringBuilder();
+        appendPath(cp, givenClasspath);
+        ClassLoader cl = Thread.currentThread().getContextClassLoader();
+        while (cl != null) {
+            if (cl instanceof URLClassLoader) {
+                for (URL url : ((URLClassLoader) cl).getURLs()) {
+                    appendPath(cp, url.getPath());
+                }
+            }
+            cl = cl.getParent();
+        }
+
+        appendPath(cp, findJaxbApiJar());
+        return cp.toString();
+    }
+
+    private static void appendPath(StringBuilder cp, String url) {
+        if (url == null || url.trim().isEmpty())
+            return;
+        if (cp.length() != 0)
+            cp.append(File.pathSeparatorChar);
+        cp.append(url);
     }
 
     /**
      * Computes the file system path of <tt>jaxb-api.jar</tt> so that
-     * APT will see them in the <tt>-cp</tt> option.
+     * Annotation Processing will see them in the <tt>-cp</tt> option.
      *
      * <p>
      * In Java, you can't do this reliably (for that matter there's no guarantee
@@ -179,7 +184,7 @@ public class SchemaGenerator {
      * @return
      *      null if failed to locate it.
      */
-    private static File findJaxbApiJar() {
+    private static String findJaxbApiJar() {
         String url = Which.which(JAXBContext.class);
         if(url==null)       return null;    // impossible, but hey, let's be defensive
 
@@ -194,11 +199,11 @@ public class SchemaGenerator {
         try {
             File f = new File(new URL(jarFileUrl).toURI());
             if (f.exists() && f.getName().endsWith(".jar")) { // see 6510966
-                return f;
+                return f.getPath();
             }
             f = new File(new URL(jarFileUrl).getFile());
             if (f.exists() && f.getName().endsWith(".jar")) { // this is here for potential backw. compatibility issues
-                return f;
+                return f.getPath();
             }
         } catch (URISyntaxException ex) {
             Logger.getLogger(SchemaGenerator.class.getName()).log(Level.SEVERE, null, ex);
@@ -208,32 +213,123 @@ public class SchemaGenerator {
         return null;
     }
 
-    /**
-     * Returns true if the list of arguments have an argument
-     * that looks like a class name.
-     */
-    private static boolean hasClass(List<String> args) {
-        for (String arg : args) {
-            if(!arg.endsWith(".java"))
-                return true;
-        }
-        return false;
-    }
-
     private static void usage( ) {
         System.out.println(Messages.USAGE.format());
     }
 
     public static final class Runner {
-        public static int main(String[] args, File episode) throws Exception {
-            ClassLoader cl = Runner.class.getClassLoader();
-            Class apt = cl.loadClass("com.sun.tools.apt.Main");
-            Method processMethod = apt.getMethod("process",AnnotationProcessorFactory.class, String[].class);
+        public static boolean compile(String[] args, File episode) throws Exception {
 
-            com.sun.tools.internal.jxc.apt.SchemaGenerator r = new com.sun.tools.internal.jxc.apt.SchemaGenerator();
-            if(episode!=null)
+            JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+            DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
+            StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, null);
+            JavacOptions options = JavacOptions.parse(compiler, fileManager, args);
+            List<String> unrecognizedOptions = options.getUnrecognizedOptions();
+            if (!unrecognizedOptions.isEmpty())
+                Logger.getLogger(SchemaGenerator.class.getName()).log(Level.WARNING, "Unrecognized options found: {0}", unrecognizedOptions);
+            Iterable<? extends JavaFileObject> compilationUnits = fileManager.getJavaFileObjectsFromFiles(options.getFiles());
+            JavaCompiler.CompilationTask task = compiler.getTask(
+                    null,
+                    fileManager,
+                    diagnostics,
+                    options.getRecognizedOptions(),
+                    options.getClassNames(),
+                    compilationUnits);
+            com.sun.tools.internal.jxc.ap.SchemaGenerator r = new com.sun.tools.internal.jxc.ap.SchemaGenerator();
+            if (episode != null)
                 r.setEpisodeFile(episode);
-            return (Integer) processMethod.invoke(null, r, args);
+            task.setProcessors(Collections.singleton(r));
+            return task.call();
+        }
+    }
+
+    /**
+          *  @author Peter von der Ahe
+          */
+    private static final class JavacOptions {
+        private final List<String> recognizedOptions;
+        private final List<String> classNames;
+        private final List<File> files;
+        private final List<String> unrecognizedOptions;
+
+        private JavacOptions(List<String> recognizedOptions, List<String> classNames, List<File> files,
+                             List<String> unrecognizedOptions) {
+            this.recognizedOptions = recognizedOptions;
+            this.classNames = classNames;
+            this.files = files;
+            this.unrecognizedOptions = unrecognizedOptions;
+        }
+
+        public static JavacOptions parse(OptionChecker primary, OptionChecker secondary, String... arguments) {
+            List<String> recognizedOptions = new ArrayList<String>();
+            List<String> unrecognizedOptions = new ArrayList<String>();
+            List<String> classNames = new ArrayList<String>();
+            List<File> files = new ArrayList<File>();
+            for (int i = 0; i < arguments.length; i++) {
+                String argument = arguments[i];
+                int optionCount = primary.isSupportedOption(argument);
+                if (optionCount < 0) {
+                    optionCount = secondary.isSupportedOption(argument);
+                }
+                if (optionCount < 0) {
+                    File file = new File(argument);
+                    if (file.exists())
+                        files.add(file);
+                    else if (SourceVersion.isName(argument))
+                        classNames.add(argument);
+                    else
+                        unrecognizedOptions.add(argument);
+                } else {
+                    for (int j = 0; j < optionCount + 1; j++) {
+                        int index = i + j;
+                        if (index == arguments.length) throw new IllegalArgumentException(argument);
+                        recognizedOptions.add(arguments[index]);
+                    }
+                    i += optionCount;
+                }
+            }
+            return new JavacOptions(recognizedOptions, classNames, files, unrecognizedOptions);
+        }
+
+        /**
+                     * Returns the list of recognized options and their arguments.
+                     *
+                     * @return a list of options
+                     */
+        public List<String> getRecognizedOptions() {
+            return Collections.unmodifiableList(recognizedOptions);
+        }
+
+        /**
+                     * Returns the list of file names.
+                     *
+                     * @return a list of file names
+                     */
+        public List<File> getFiles() {
+            return Collections.unmodifiableList(files);
+        }
+
+        /**
+                     * Returns the list of class names.
+                     *
+                     * @return a list of class names
+                     */
+        public List<String> getClassNames() {
+            return Collections.unmodifiableList(classNames);
+        }
+
+        /**
+                     * Returns the list of unrecognized options.
+                     *
+                     * @return a list of unrecognized options
+                     */
+        public List<String> getUnrecognizedOptions() {
+            return Collections.unmodifiableList(unrecognizedOptions);
+        }
+
+        @Override
+        public String toString() {
+            return String.format("recognizedOptions = %s; classNames = %s; " + "files = %s; unrecognizedOptions = %s", recognizedOptions, classNames, files, unrecognizedOptions);
         }
     }
 }

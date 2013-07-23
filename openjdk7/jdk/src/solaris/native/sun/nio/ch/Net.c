@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,6 +38,18 @@
 #include "net_util_md.h"
 #include "nio_util.h"
 #include "nio.h"
+#include "sun_nio_ch_PollArrayWrapper.h"
+
+
+/**
+ * IP_MULTICAST_ALL supported since 2.6.31 but may not be available at
+ * build time.
+ */
+#ifdef __linux__
+  #ifndef IP_MULTICAST_ALL
+  #define IP_MULTICAST_ALL    49
+  #endif
+#endif
 
 #ifdef _ALLBSD_SOURCE
 
@@ -123,6 +135,11 @@ Java_sun_nio_ch_Net_isIPv6Available0(JNIEnv* env, jclass cl)
     return (ipv6_available()) ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jint JNICALL
+Java_sun_nio_ch_Net_isExclusiveBindAvailable(JNIEnv *env, jclass clazz) {
+    return -1;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_sun_nio_ch_Net_canIPv6SocketJoinIPv4Group0(JNIEnv* env, jclass cl)
 {
@@ -169,7 +186,7 @@ Java_sun_nio_ch_Net_socket0(JNIEnv *env, jclass cl, jboolean preferIPv6,
                        sizeof(int)) < 0) {
             JNU_ThrowByNameWithLastError(env,
                                          JNU_JAVANETPKG "SocketException",
-                                         "sun.nio.ch.Net.setIntOption");
+                                         "Unable to set IPV6_V6ONLY");
             close(fd);
             return -1;
         }
@@ -182,11 +199,27 @@ Java_sun_nio_ch_Net_socket0(JNIEnv *env, jclass cl, jboolean preferIPv6,
                        sizeof(arg)) < 0) {
             JNU_ThrowByNameWithLastError(env,
                                          JNU_JAVANETPKG "SocketException",
-                                         "sun.nio.ch.Net.setIntOption");
+                                         "Unable to set SO_REUSEADDR");
             close(fd);
             return -1;
         }
     }
+
+#if defined(__linux__)
+    if (type == SOCK_DGRAM) {
+        int arg = 0;
+        int level = (domain == AF_INET6) ? IPPROTO_IPV6 : IPPROTO_IP;
+        if ((setsockopt(fd, level, IP_MULTICAST_ALL, (char*)&arg, sizeof(arg)) < 0) &&
+            (errno != ENOPROTOOPT)) {
+            JNU_ThrowByNameWithLastError(env,
+                                         JNU_JAVANETPKG "SocketException",
+                                         "Unable to set IP_MULTICAST_ALL");
+            close(fd);
+            return -1;
+        }
+    }
+#endif
+
 #if defined(__linux__) && defined(AF_INET6)
     /* By default, Linux uses the route default */
     if (domain == AF_INET6 && type == SOCK_DGRAM) {
@@ -195,7 +228,7 @@ Java_sun_nio_ch_Net_socket0(JNIEnv *env, jclass cl, jboolean preferIPv6,
                        sizeof(arg)) < 0) {
             JNU_ThrowByNameWithLastError(env,
                                          JNU_JAVANETPKG "SocketException",
-                                         "sun.nio.ch.Net.setIntOption");
+                                         "Unable to set IPV6_MULTICAST_HOPS");
             close(fd);
             return -1;
         }
@@ -205,8 +238,8 @@ Java_sun_nio_ch_Net_socket0(JNIEnv *env, jclass cl, jboolean preferIPv6,
 }
 
 JNIEXPORT void JNICALL
-Java_sun_nio_ch_Net_bind0(JNIEnv *env, jclass clazz, jboolean preferIPv6,
-                          jobject fdo, jobject iao, int port)
+Java_sun_nio_ch_Net_bind0(JNIEnv *env, jclass clazz, jobject fdo, jboolean preferIPv6,
+                          jboolean useExclBind, jobject iao, int port)
 {
     SOCKADDR sa;
     int sa_len = SOCKADDR_LEN;
@@ -626,6 +659,26 @@ Java_sun_nio_ch_Net_shutdown(JNIEnv *env, jclass cl, jobject fdo, jint jhow)
     if ((shutdown(fdval(env, fdo), how) < 0) && (errno != ENOTCONN))
         handleSocketError(env, errno);
 }
+
+JNIEXPORT jint JNICALL
+Java_sun_nio_ch_Net_poll(JNIEnv* env, jclass this, jobject fdo, jint events, jlong timeout)
+{
+    struct pollfd pfd;
+    int rv;
+    pfd.fd = fdval(env, fdo);
+    pfd.events = events;
+    rv = poll(&pfd, 1, timeout);
+
+    if (rv >= 0) {
+        return pfd.revents;
+    } else if (errno == EINTR) {
+        return IOS_INTERRUPTED;
+    } else {
+        handleSocketError(env, errno);
+        return IOS_THROWN;
+    }
+}
+
 
 /* Declared in nio_util.h */
 

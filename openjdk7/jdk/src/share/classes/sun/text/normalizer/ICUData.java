@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -48,12 +48,12 @@ import java.util.MissingResourceException;
  */
 public final class ICUData {
 
-    private static InputStream getStream(final Class root, final String resourceName, boolean required) {
+    private static InputStream getStream(final Class<ICUData> root, final String resourceName, boolean required) {
         InputStream i = null;
 
         if (System.getSecurityManager() != null) {
-            i = (InputStream)AccessController.doPrivileged(new PrivilegedAction() {
-                    public Object run() {
+            i = AccessController.doPrivileged(new PrivilegedAction<InputStream>() {
+                    public InputStream run() {
                         return root.getResourceAsStream(resourceName);
                     }
                 });

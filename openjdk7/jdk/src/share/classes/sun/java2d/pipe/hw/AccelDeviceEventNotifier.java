@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+import java.lang.annotation.Native;
+
 
 /**
  * This class is used to notify listeners about accelerated device's
@@ -44,13 +46,13 @@ public class AccelDeviceEventNotifier {
      * resources associated with the device which are required for the device
      * to be reset.
      */
-    public static final int DEVICE_RESET = 0;
+    @Native public static final int DEVICE_RESET = 0;
 
     /**
      * A device is about to be disposed. The listeners have to release all
      * resources associated with the device.
      */
-    public static final int DEVICE_DISPOSED = 1;
+    @Native public static final int DEVICE_DISPOSED = 1;
 
     private final Map<AccelDeviceEventListener, Integer> listeners;
 

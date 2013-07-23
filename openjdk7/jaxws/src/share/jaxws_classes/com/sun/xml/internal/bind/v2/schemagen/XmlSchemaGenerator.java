@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -278,6 +278,7 @@ public final class XmlSchemaGenerator<T,C,F,M> {
     public void add( ElementInfo<T,C> elem ) {
         assert elem!=null;
 
+        @SuppressWarnings("UnusedAssignment")
         boolean nillable = false; // default value
 
         QName name = elem.getElementName();
@@ -1068,9 +1069,11 @@ public final class XmlSchemaGenerator<T,C,F,M> {
                                     elemName = te.getElementName();
                                 }
 
-                                Collection refs = propInfo.ref();
-                                if ((refs != null) && (!refs.isEmpty()) && (elemName != null)) {
-                                    ClassInfoImpl cImpl = (ClassInfoImpl)refs.iterator().next();
+                                Collection<TypeInfo> refs = propInfo.ref();
+                                TypeInfo ti;
+                                if ((refs != null) && (!refs.isEmpty()) && (elemName != null)
+                                        && ((ti = refs.iterator().next()) == null || ti instanceof ClassInfoImpl)) {
+                                    ClassInfoImpl cImpl = (ClassInfoImpl)ti;
                                     if ((cImpl != null) && (cImpl.getElementName() != null)) {
                                         e.ref(new QName(cImpl.getElementName().getNamespaceURI(), tn.getLocalPart()));
                                     } else {
@@ -1160,9 +1163,8 @@ public final class XmlSchemaGenerator<T,C,F,M> {
                 return true;
             }
 
-            // there's a circular reference from an anonymous subtype to a global element
-            if ((ci != null) && ((targetTagName != null) && (te.getScope() == null))) {
-                if (targetTagName.getLocalPart().equals(tn.getLocalPart())) {
+            if ((ci != null) && ((targetTagName != null) && (te.getScope() == null) && (targetTagName.getNamespaceURI() == null))) {
+                if (targetTagName.equals(tn)) {
                     return true;
                 }
             }

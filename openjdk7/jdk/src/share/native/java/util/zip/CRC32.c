@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 1999, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,4 +57,15 @@ Java_java_util_zip_CRC32_updateBytes(JNIEnv *env, jclass cls, jint crc,
 JNIEXPORT jint ZIP_CRC32(jint crc, const jbyte *buf, jint len)
 {
     return crc32(crc, (Bytef*)buf, len);
+}
+
+JNIEXPORT jint JNICALL
+Java_java_util_zip_CRC32_updateByteBuffer(JNIEnv *env, jclass cls, jint crc,
+                                          jlong address, jint off, jint len)
+{
+    Bytef *buf = (Bytef *)jlong_to_ptr(address);
+    if (buf) {
+        crc = crc32(crc, buf + off, len);
+    }
+    return crc;
 }

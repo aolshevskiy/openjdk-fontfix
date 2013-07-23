@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -236,6 +236,8 @@ import java.util.Objects;
             assert(MethodHandleNatives.refKindIsMethod(refKind));
             if (clazz.isInterface())
                 assert(refKind == REF_invokeInterface ||
+                       refKind == REF_invokeStatic    ||
+                       refKind == REF_invokeSpecial   ||
                        refKind == REF_invokeVirtual && isObjectPublicMethod());
         } else {
             assert(false);
@@ -268,7 +270,7 @@ import java.util.Objects;
             assert(refKind == REF_invokeSpecial) : this;
             return true;
         }
-        assert(false) : this;
+        assert(false) : this+" != "+MethodHandleNatives.refKindName((byte)originalRefKind);
         return true;
     }
     private boolean staticIsConsistent() {
@@ -391,10 +393,11 @@ import java.util.Objects;
 
     // private flags, not part of RECOGNIZED_MODIFIERS:
     static final int
-            IS_METHOD      = MN_IS_METHOD,      // method (not constructor)
-            IS_CONSTRUCTOR = MN_IS_CONSTRUCTOR, // constructor
-            IS_FIELD       = MN_IS_FIELD,       // field
-            IS_TYPE        = MN_IS_TYPE;        // nested type
+            IS_METHOD        = MN_IS_METHOD,        // method (not constructor)
+            IS_CONSTRUCTOR   = MN_IS_CONSTRUCTOR,   // constructor
+            IS_FIELD         = MN_IS_FIELD,         // field
+            IS_TYPE          = MN_IS_TYPE,          // nested type
+            CALLER_SENSITIVE = MN_CALLER_SENSITIVE; // @CallerSensitive annotation detected
 
     static final int ALL_ACCESS = Modifier.PUBLIC | Modifier.PRIVATE | Modifier.PROTECTED;
     static final int ALL_KINDS = IS_METHOD | IS_CONSTRUCTOR | IS_FIELD | IS_TYPE;
@@ -429,6 +432,10 @@ import java.util.Objects;
     /** Utility method to query whether this member is neither public, private, nor protected. */
     public boolean isPackage() {
         return !testAnyFlags(ALL_ACCESS);
+    }
+    /** Query whether this member has a CallerSensitive annotation. */
+    public boolean isCallerSensitive() {
+        return testAllFlags(CALLER_SENSITIVE);
     }
 
     /** Utility method to query whether this member is accessible from a given lookup class. */
@@ -480,14 +487,19 @@ import java.util.Objects;
         if (this.type == null)
             this.type = new Object[] { m.getReturnType(), m.getParameterTypes() };
         if (wantSpecial) {
+            assert(!isAbstract()) : this;
             if (getReferenceKind() == REF_invokeVirtual)
                 changeReferenceKind(REF_invokeSpecial, REF_invokeVirtual);
+            else if (getReferenceKind() == REF_invokeInterface)
+                // invokeSpecial on a default method
+                changeReferenceKind(REF_invokeSpecial, REF_invokeInterface);
         }
     }
     public MemberName asSpecial() {
         switch (getReferenceKind()) {
         case REF_invokeSpecial:     return this;
         case REF_invokeVirtual:     return clone().changeReferenceKind(REF_invokeSpecial, REF_invokeVirtual);
+        case REF_invokeInterface:   return clone().changeReferenceKind(REF_invokeSpecial, REF_invokeInterface);
         case REF_newInvokeSpecial:  return clone().changeReferenceKind(REF_invokeSpecial, REF_newInvokeSpecial);
         }
         throw new IllegalArgumentException(this.toString());

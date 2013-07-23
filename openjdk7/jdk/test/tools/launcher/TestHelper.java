@@ -21,6 +21,8 @@
  * questions.
  */
 
+import java.io.OutputStream;
+import java.io.InputStream;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -190,7 +192,7 @@ public class TestHelper {
                     System.out.println(m.getName() + ": OK");
                     passed++;
                     System.out.printf("Passed: %d, Failed: %d, ExitValue: %d%n",
-                                       passed, failed, testExitValue);
+                                      passed, failed, testExitValue);
                 } catch (Throwable ex) {
                     System.out.printf("Test %s failed: %s %n", m, ex.getCause());
                     failed++;
@@ -241,6 +243,21 @@ public class TestHelper {
             }
         }
         return null;
+    }
+
+    static File getClassFile(File javaFile) {
+        String s = javaFile.getAbsolutePath().replace(JAVA_FILE_EXT, CLASS_FILE_EXT);
+        return new File(s);
+    }
+
+    static File getJavaFile(File classFile) {
+        String s = classFile.getAbsolutePath().replace(CLASS_FILE_EXT, JAVA_FILE_EXT);
+        return new File(s);
+    }
+
+    static String baseName(File f) {
+        String s = f.getName();
+        return s.substring(0, s.indexOf("."));
     }
 
     /*
@@ -323,6 +340,15 @@ public class TestHelper {
             throw new RuntimeException(message);
         }
    }
+
+   static void copyStream(InputStream in, OutputStream out) throws IOException {
+        byte[] buf = new byte[8192];
+        int n = in.read(buf);
+        while (n > 0) {
+            out.write(buf, 0, n);
+            n = in.read(buf);
+        }
+    }
 
    static void copyFile(File src, File dst) throws IOException {
         Path parent = dst.toPath().getParent();
@@ -576,6 +602,16 @@ public class TestHelper {
             }
             appendError("string <" + str + "> not found");
             return false;
+        }
+
+        boolean notContains(String str) {
+             for (String x : testOutput) {
+                if (x.contains(str)) {
+                    appendError("string <" + str + "> found");
+                    return false;
+                }
+            }
+            return true;
         }
 
         boolean matches(String stringToMatch) {

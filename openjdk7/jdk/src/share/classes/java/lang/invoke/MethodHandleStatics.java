@@ -94,14 +94,10 @@ import sun.misc.Unsafe;
 
     // handy shared exception makers (they simplify the common case code)
     /*non-public*/ static InternalError newInternalError(String message, Throwable cause) {
-        InternalError e = new InternalError(message);
-        e.initCause(cause);
-        return e;
+        return new InternalError(message, cause);
     }
     /*non-public*/ static InternalError newInternalError(Throwable cause) {
-        InternalError e = new InternalError();
-        e.initCause(cause);
-        return e;
+        return new InternalError(cause);
     }
     /*non-public*/ static RuntimeException newIllegalStateException(String message) {
         return new IllegalStateException(message);

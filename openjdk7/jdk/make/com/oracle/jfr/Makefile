@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -73,9 +73,8 @@ $(JFR_LIBDIR)/%.jfc: $(JFC_SRCDIR)/%.jfc
 
 JFC_FILES := $(subst $(JFC_SRCDIR),$(JFR_LIBDIR),$(wildcard $(JFC_SRCDIR)/*.jfc))
 
--include ${JDK_TOPDIR}/make/closed/common/jfr.gmk
-
 $(JFC_XSD_FILE) : $(JFC_XSD_SRC)
 	$(install-file)
 
-all build: $(JFC_FILES) $(JFC_XSD_FILE)
+all build : $(JFC_FILES) $(JFC_XSD_FILE)
+

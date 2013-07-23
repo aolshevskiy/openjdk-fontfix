@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,7 @@ import java.util.jar.*;
 
  /*
   * @test
-  * @bug 6521334 6712743
+  * @bug 6521334 6712743 8007902
   * @summary check for memory leaks, test general packer/unpacker functionality\
   *          using native and java unpackers
   * @compile -XDignore.symbol.file Utils.java Pack200Test.java
@@ -66,7 +66,7 @@ public class Pack200Test {
         }
     }
 
-    private static void doPackUnpack() {
+    private static void doPackUnpack() throws IOException {
         for (File in : jarList) {
             JarOutputStream javaUnpackerStream = null;
             JarOutputStream nativeUnpackerStream = null;
@@ -117,12 +117,13 @@ public class Pack200Test {
                 Utils.close((Closeable) jarFile);
             }
         }
+        Utils.cleanup(); // cleanup artifacts, if successful run
     }
 
     /**
      * @param args the command line arguments
      */
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         // select the jars carefully, adding more jars will increase the
         // testing time, especially for jprt.
         jarList.add(Utils.locateJar("tools.jar"));

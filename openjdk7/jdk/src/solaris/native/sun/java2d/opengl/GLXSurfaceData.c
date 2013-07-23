@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,12 +45,8 @@ extern GetRasInfoFunc OGLSD_GetRasInfo;
 extern UnlockFunc     OGLSD_Unlock;
 extern DisposeFunc    OGLSD_Dispose;
 
-extern struct MComponentPeerIDs mComponentPeerIDs;
-
 extern void
     OGLSD_SetNativeDimensions(JNIEnv *env, OGLSDOps *oglsdo, jint w, jint h);
-
-jboolean surfaceCreationFailed = JNI_FALSE;
 
 #endif /* !HEADLESS */
 
@@ -59,21 +55,22 @@ Java_sun_java2d_opengl_GLXSurfaceData_initOps(JNIEnv *env, jobject glxsd,
                                               jobject peer, jlong aData)
 {
 #ifndef HEADLESS
-    OGLSDOps *oglsdo = (OGLSDOps *)SurfaceData_InitOps(env, glxsd,
-                                                       sizeof(OGLSDOps));
     GLXSDOps *glxsdo = (GLXSDOps *)malloc(sizeof(GLXSDOps));
-
-    J2dTraceLn(J2D_TRACE_INFO, "GLXSurfaceData_initOps");
-
-    if (oglsdo == NULL) {
-        JNU_ThrowOutOfMemoryError(env, "Initialization of SurfaceData failed.");
-        return;
-    }
 
     if (glxsdo == NULL) {
         JNU_ThrowOutOfMemoryError(env, "creating native GLX ops");
         return;
     }
+
+    OGLSDOps *oglsdo = (OGLSDOps *)SurfaceData_InitOps(env, glxsd,
+                                                       sizeof(OGLSDOps));
+    if (oglsdo == NULL) {
+        free(glxsdo);
+        JNU_ThrowOutOfMemoryError(env, "Initialization of SurfaceData failed.");
+        return;
+    }
+
+    J2dTraceLn(J2D_TRACE_INFO, "GLXSurfaceData_initOps");
 
     oglsdo->privOps = glxsdo;
 
@@ -86,34 +83,12 @@ Java_sun_java2d_opengl_GLXSurfaceData_initOps(JNIEnv *env, jobject glxsd,
     oglsdo->activeBuffer = GL_FRONT;
     oglsdo->needsInit = JNI_TRUE;
 
-#ifdef XAWT
     if (peer != NULL) {
         glxsdo->window = JNU_CallMethodByName(env, NULL, peer,
                                               "getContentWindow", "()J").j;
     } else {
         glxsdo->window = 0;
     }
-#else
-    if (peer != NULL) {
-        struct ComponentData *cdata;
-        cdata = (struct ComponentData *)
-            JNU_GetLongFieldAsPtr(env, peer, mComponentPeerIDs.pData);
-        if (cdata == NULL) {
-            free(glxsdo);
-            JNU_ThrowNullPointerException(env, "Component data missing");
-            return;
-        }
-        if (cdata->widget == NULL) {
-            free(glxsdo);
-            JNU_ThrowInternalError(env, "Widget is NULL in initOps");
-            return;
-        }
-        glxsdo->widget = cdata->widget;
-    } else {
-        glxsdo->widget = NULL;
-    }
-#endif
-
     glxsdo->configData = (AwtGraphicsConfigDataPtr)jlong_to_ptr(aData);
     if (glxsdo->configData == NULL) {
         free(glxsdo);
@@ -331,11 +306,7 @@ OGLSD_InitOGLWindow(JNIEnv *env, OGLSDOps *oglsdo)
 {
     GLXSDOps *glxsdo;
     Window window;
-#ifdef XAWT
     XWindowAttributes attr;
-#else
-    Widget widget;
-#endif
 
     J2dTraceLn(J2D_TRACE_INFO, "OGLSD_InitOGLWindow");
 
@@ -352,7 +323,6 @@ OGLSD_InitOGLWindow(JNIEnv *env, OGLSDOps *oglsdo)
         return JNI_FALSE;
     }
 
-#ifdef XAWT
     window = glxsdo->window;
     if (window == 0) {
         J2dRlsTraceLn(J2D_TRACE_ERROR,
@@ -363,22 +333,6 @@ OGLSD_InitOGLWindow(JNIEnv *env, OGLSDOps *oglsdo)
     XGetWindowAttributes(awt_display, window, &attr);
     oglsdo->width = attr.width;
     oglsdo->height = attr.height;
-#else
-    widget = glxsdo->widget;
-    if (widget == NULL) {
-        J2dTraceLn(J2D_TRACE_WARNING, "OGLSD_InitOGLWindow: widget is null");
-    }
-
-    if (!XtIsRealized(widget)) {
-        J2dRlsTraceLn(J2D_TRACE_ERROR,
-                      "OGLSD_InitOGLWindow: widget is unrealized");
-        return JNI_FALSE;
-    }
-
-    window = XtWindow(widget);
-    oglsdo->width = widget->core.width;
-    oglsdo->height = widget->core.height;
-#endif
 
     oglsdo->drawableType = OGLSD_WINDOW;
     oglsdo->isOpaque = JNI_TRUE;
@@ -391,18 +345,6 @@ OGLSD_InitOGLWindow(JNIEnv *env, OGLSDOps *oglsdo)
                 oglsdo->width, oglsdo->height);
 
     return JNI_TRUE;
-}
-
-static int
-GLXSD_BadAllocXErrHandler(Display *display, XErrorEvent *xerr)
-{
-    int ret = 0;
-    if (xerr->error_code == BadAlloc) {
-        surfaceCreationFailed = JNI_TRUE;
-    } else {
-        ret = (*xerror_saved_handler)(display, xerr);
-    }
-    return ret;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -420,6 +362,8 @@ Java_sun_java2d_opengl_GLXSurfaceData_initPbuffer
     int attrlist[] = {GLX_PBUFFER_WIDTH, 0,
                       GLX_PBUFFER_HEIGHT, 0,
                       GLX_PRESERVED_CONTENTS, GL_FALSE, 0};
+    jboolean errorOccurredFlag;
+    jobject errorHandlerRef;
 
     J2dTraceLn3(J2D_TRACE_INFO,
                 "GLXSurfaceData_initPbuffer: w=%d h=%d opq=%d",
@@ -447,12 +391,15 @@ Java_sun_java2d_opengl_GLXSurfaceData_initPbuffer
     attrlist[1] = width;
     attrlist[3] = height;
 
-    surfaceCreationFailed = JNI_FALSE;
-    EXEC_WITH_XERROR_HANDLER(
-        GLXSD_BadAllocXErrHandler,
-        pbuffer = j2d_glXCreatePbuffer(awt_display,
-                                       glxinfo->fbconfig, attrlist));
-    if ((pbuffer == 0) || surfaceCreationFailed) {
+    errorOccurredFlag = JNI_FALSE;
+    WITH_XERROR_HANDLER(env, "sun/awt/X11/XErrorHandler$GLXBadAllocHandler",
+        "()Lsun/awt/X11/XErrorHandler$GLXBadAllocHandler;", JNI_TRUE, errorHandlerRef);
+    pbuffer = j2d_glXCreatePbuffer(awt_display, glxinfo->fbconfig, attrlist);
+    XSync(awt_display, False);
+    RESTORE_XERROR_HANDLER(env, JNI_FALSE);
+    GET_HANDLER_ERROR_OCCURRED_FLAG(env, errorHandlerRef, errorOccurredFlag);
+
+    if ((pbuffer == 0) || errorOccurredFlag) {
         J2dRlsTraceLn(J2D_TRACE_ERROR,
             "GLXSurfaceData_initPbuffer: could not create glx pbuffer");
         return JNI_FALSE;

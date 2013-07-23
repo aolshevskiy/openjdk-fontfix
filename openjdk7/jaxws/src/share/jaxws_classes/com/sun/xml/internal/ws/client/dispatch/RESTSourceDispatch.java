@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,6 +36,7 @@ import com.sun.xml.internal.ws.client.WSServiceDelegate;
 import com.sun.xml.internal.ws.client.PortInfo;
 import com.sun.xml.internal.ws.encoding.xml.XMLMessage;
 import com.sun.xml.internal.ws.message.source.PayloadSourceMessage;
+import static com.sun.xml.internal.ws.binding.WebServiceFeatureList.toFeatureArray;
 
 import javax.xml.namespace.QName;
 import javax.xml.transform.Source;
@@ -67,7 +68,7 @@ final class RESTSourceDispatch extends DispatchImpl<Source> {
     Source toReturnValue(Packet response) {
         Message msg = response.getMessage();
         try {
-            return new StreamSource(XMLMessage.getDataSource(msg, binding).getInputStream());
+            return new StreamSource(XMLMessage.getDataSource(msg, binding.getFeatures()).getInputStream());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

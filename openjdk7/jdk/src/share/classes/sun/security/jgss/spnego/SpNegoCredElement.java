@@ -44,7 +44,7 @@ public class SpNegoCredElement implements GSSCredentialSpi {
 
     private GSSCredentialSpi cred = null;
 
-    SpNegoCredElement(GSSCredentialSpi cred) throws GSSException {
+    public SpNegoCredElement(GSSCredentialSpi cred) throws GSSException {
         this.cred = cred;
     }
 
@@ -87,5 +87,10 @@ public class SpNegoCredElement implements GSSCredentialSpi {
 
     public Oid getMechanism() {
         return GSSUtil.GSS_SPNEGO_MECH_OID;
+    }
+
+    @Override
+    public GSSCredentialSpi impersonate(GSSNameSpi name) throws GSSException {
+        return cred.impersonate(name);
     }
 }

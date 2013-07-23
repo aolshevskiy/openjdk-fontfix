@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 4252583 7083664
+# @bug 4252583
 # @summary policytool throws FileNotFoundException when user tries to
 #               save new policy file
 #
@@ -56,7 +56,6 @@ case "$OS" in
     NULL=/dev/null
     PS=";"
     FS="/"
-    CP="cp -f"
     ;;
   Windows* )
     NULL=NUL

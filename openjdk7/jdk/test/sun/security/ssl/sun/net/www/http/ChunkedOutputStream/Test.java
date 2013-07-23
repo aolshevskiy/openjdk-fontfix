@@ -21,16 +21,15 @@
  * questions.
  */
 
-//
-// SunJSSE does not support dynamic system properties, no way to re-use
-// system properties in samevm/agentvm mode.
-//
-
 /**
  * @test
  * @bug 5026745
  * @library ../../httpstest/
+ * @build TestHttpsServer HttpCallback
  * @run main/othervm Test
+ *
+ *     SunJSSE does not support dynamic system properties, no way to re-use
+ *     system properties in samevm/agentvm mode.
  * @summary Cannot flush output stream when writing to an HttpUrlConnection
  */
 
@@ -277,7 +276,7 @@ public class Test implements HttpCallback {
         }
     }
 
-    static HttpServer server;
+    static TestHttpsServer server;
 
     public static void main (String[] args) throws Exception {
         // setup properties to do ssl
@@ -298,7 +297,7 @@ public class Test implements HttpCallback {
             HttpsURLConnection.setDefaultHostnameVerifier(new NameVerifier());
 
             try {
-                server = new HttpServer (new Test(), 1, 10, 0);
+                server = new TestHttpsServer (new Test(), 1, 10, 0);
                 System.out.println ("Server started: listening on port: " + server.getLocalPort());
                 // the test server doesn't support keep-alive yet
                 // test1("http://localhost:"+server.getLocalPort()+"/d0");

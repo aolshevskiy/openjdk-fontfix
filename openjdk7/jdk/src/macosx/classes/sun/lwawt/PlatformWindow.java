@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -97,17 +97,6 @@ public interface PlatformWindow {
      */
     public SurfaceData replaceSurfaceData();
 
-    /*
-     * Creates a new image to serve as a back buffer.
-     */
-    public Image createBackBuffer();
-
-    /*
-     * Move the given part of the back buffer to the front buffer.
-     */
-    public void flip(int x1, int y1, int x2, int y2,
-                     BufferCapabilities.FlipContents flipAction);
-
     public void setModalBlocked(boolean blocked);
 
     public void toFront();
@@ -117,6 +106,8 @@ public interface PlatformWindow {
     public void setMenuBar(MenuBar mb);
 
     public void setAlwaysOnTop(boolean value);
+
+    public PlatformWindow getTopmostPlatformWindowUnderMouse();
 
     public void updateFocusableWindowState();
 
@@ -154,6 +145,8 @@ public interface PlatformWindow {
     public void enterFullScreenMode();
 
     public void exitFullScreenMode();
+
+    public boolean isFullScreenMode();
 
     public void setWindowState(int windowState);
 

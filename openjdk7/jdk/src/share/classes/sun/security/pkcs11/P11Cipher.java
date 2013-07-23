@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -164,6 +164,10 @@ final class P11Cipher extends CipherSpi {
     // if we do the padding
     private int bytesBuffered;
 
+    // length of key size in bytes; currently only used by AES given its oid
+    // specification mandates a fixed size of the key
+    private int fixedKeySize = -1;
+
     P11Cipher(Token token, String algorithm, long mechanism)
             throws PKCS11Exception, NoSuchAlgorithmException {
         super();
@@ -172,19 +176,26 @@ final class P11Cipher extends CipherSpi {
         this.mechanism = mechanism;
 
         String algoParts[] = algorithm.split("/");
-        keyAlgorithm = algoParts[0];
 
-        if (keyAlgorithm.equals("AES")) {
+        if (algoParts[0].startsWith("AES")) {
             blockSize = 16;
-        } else if (keyAlgorithm.equals("RC4") ||
-                keyAlgorithm.equals("ARCFOUR")) {
-            blockSize = 0;
-        } else { // DES, DESede, Blowfish
-            blockSize = 8;
+            int index = algoParts[0].indexOf('_');
+            if (index != -1) {
+                // should be well-formed since we specify what we support
+                fixedKeySize = Integer.parseInt(algoParts[0].substring(index+1))/8;
+            }
+            keyAlgorithm = "AES";
+        } else {
+            keyAlgorithm = algoParts[0];
+            if (keyAlgorithm.equals("RC4") ||
+                    keyAlgorithm.equals("ARCFOUR")) {
+                blockSize = 0;
+            } else { // DES, DESede, Blowfish
+                blockSize = 8;
+            }
         }
         this.blockMode =
-                (algoParts.length > 1 ? parseMode(algoParts[1]) : MODE_ECB);
-
+            (algoParts.length > 1 ? parseMode(algoParts[1]) : MODE_ECB);
         String defPadding = (blockSize == 0 ? "NoPadding" : "PKCS5Padding");
         String paddingStr =
                 (algoParts.length > 2 ? algoParts[2] : defPadding);
@@ -258,7 +269,7 @@ final class P11Cipher extends CipherSpi {
 
     // see JCE spec
     protected byte[] engineGetIV() {
-        return (iv == null) ? null : (byte[]) iv.clone();
+        return (iv == null) ? null : iv.clone();
     }
 
     // see JCE spec
@@ -315,7 +326,7 @@ final class P11Cipher extends CipherSpi {
         byte[] ivValue;
         if (params != null) {
             try {
-                IvParameterSpec ivSpec = (IvParameterSpec)
+                IvParameterSpec ivSpec =
                         params.getParameterSpec(IvParameterSpec.class);
                 ivValue = ivSpec.getIV();
             } catch (InvalidParameterSpecException e) {
@@ -333,6 +344,9 @@ final class P11Cipher extends CipherSpi {
             SecureRandom random)
             throws InvalidKeyException, InvalidAlgorithmParameterException {
         cancelOperation();
+        if (fixedKeySize != -1 && key.getEncoded().length != fixedKeySize) {
+            throw new InvalidKeyException("Key size is invalid");
+        }
         switch (opmode) {
             case Cipher.ENCRYPT_MODE:
                 encrypt = true;
@@ -446,7 +460,7 @@ final class P11Cipher extends CipherSpi {
         }
 
         int result = inLen + bytesBuffered;
-        if (blockSize != 0) {
+        if (blockSize != 0 && blockMode != MODE_CTR) {
             // minus the number of bytes in the last incomplete block.
             result -= (result & (blockSize - 1));
         }

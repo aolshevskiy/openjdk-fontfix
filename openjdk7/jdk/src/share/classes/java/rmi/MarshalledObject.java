@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -156,6 +156,7 @@ public final class MarshalledObject<T> implements Serializable {
             (locBytes == null ? null : new ByteArrayInputStream(locBytes));
         MarshalledObjectInputStream in =
             new MarshalledObjectInputStream(bin, lin);
+        @SuppressWarnings("unchecked")
         T obj = (T) in.readObject();
         in.close();
         return obj;
@@ -190,7 +191,7 @@ public final class MarshalledObject<T> implements Serializable {
             return true;
 
         if (obj != null && obj instanceof MarshalledObject) {
-            MarshalledObject other = (MarshalledObject) obj;
+            MarshalledObject<?> other = (MarshalledObject<?>) obj;
 
             // if either is a ref to null, both must be
             if (objBytes == null || other.objBytes == null)

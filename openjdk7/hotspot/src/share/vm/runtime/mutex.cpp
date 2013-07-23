@@ -26,22 +26,19 @@
 #include "precompiled.hpp"
 #include "runtime/mutex.hpp"
 #include "runtime/osThread.hpp"
+#include "runtime/thread.inline.hpp"
 #include "utilities/events.hpp"
 #ifdef TARGET_OS_FAMILY_linux
 # include "mutex_linux.inline.hpp"
-# include "thread_linux.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_solaris
 # include "mutex_solaris.inline.hpp"
-# include "thread_solaris.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "mutex_windows.inline.hpp"
-# include "thread_windows.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_bsd
 # include "mutex_bsd.inline.hpp"
-# include "thread_bsd.inline.hpp"
 #endif
 
 // o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o
@@ -1312,7 +1309,7 @@ void Monitor::set_owner_implementation(Thread *new_owner) {
           this->rank() != Mutex::suspend_resume &&
           locks != NULL && locks->rank() <= this->rank() &&
           !SafepointSynchronize::is_at_safepoint() &&
-          this != Interrupt_lock &&
+          this != Interrupt_lock && this != ProfileVM_lock &&
           !(this == Safepoint_lock && contains(locks, Terminator_lock) &&
             SafepointSynchronize::is_synchronizing())) {
         new_owner->print_owned_locks();

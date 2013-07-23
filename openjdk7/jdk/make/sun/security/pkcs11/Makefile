@@ -110,6 +110,9 @@ ifndef OPENJDK
   endif
 endif
 
+JAVAC_MAX_WARNINGS=false
+JAVAC_LINT_OPTIONS=-Xlint:all,-deprecation
+JAVAC_WARNINGS_FATAL=true
 include $(BUILDDIR)/common/Defs.gmk
 
 #
@@ -148,7 +151,7 @@ OTHER_INCLUDES += \
 #
 CLASSDESTDIR = $(TEMPDIR)/classes
 JAVAHFLAGS = -bootclasspath \
-  "$(CLASSDESTDIR)$(CLASSPATH_SEPARATOR)$(CLASSBINDIR)$(JCE_PATH)"
+    "$(CLASSDESTDIR)$(CLASSPATH_SEPARATOR)$(CLASSBINDIR)$(JCE_PATH)"
 
 include $(BUILDDIR)/common/Mapfile-vers.gmk
 
@@ -157,10 +160,8 @@ include $(BUILDDIR)/common/Library.gmk
 #
 # Libraries to link
 #
-ifeq ($(PLATFORM), windows)
-  OTHER_LDLIBS = $(JVMLIB)
-else
-  OTHER_LDLIBS = $(LIBDL) $(JVMLIB)
+ifneq ($(PLATFORM), windows)
+  OTHER_LDLIBS = $(LIBDL)
 endif
 
 # Other config files

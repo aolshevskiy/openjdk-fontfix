@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -31,13 +31,6 @@ BUILDDIR = ../..
 PRODUCT = sun
 include $(BUILDDIR)/common/Defs.gmk
 
-ifndef OPENJDK
-  ORG_EXISTS := $(call DirExists,$(CLOSED_SRC)/share/classes/sun/org,,)
-  ifneq ("$(ORG_EXISTS)", "") 
-    SCRIPT_SUBDIR = script
-  endif
-endif
-
 # jarsigner is part of JRE
 SUBDIRS = java security net/ssl jarsigner
 
@@ -47,7 +40,6 @@ SUBDIRS_enterprise = crypto/provider jndi \
                      org rowset net/httpserver
 SUBDIRS_misc       = $(SCRIPT_SUBDIR) tracing nio demo
 
-# Omit mirror since it's built with the apt tool.
 SUBDIRS_tools      = tools
 
 include $(BUILDDIR)/common/Subdirs.gmk

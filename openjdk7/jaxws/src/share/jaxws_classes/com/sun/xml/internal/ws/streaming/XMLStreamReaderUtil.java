@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -92,6 +92,61 @@ public class XMLStreamReaderUtil {
                 "xmlreader.unexpectedCharacterContent", reader.getText());
         }
         return state;
+    }
+
+    public static void toNextTag(XMLStreamReader reader, QName name) {
+        // skip any whitespace
+        if (reader.getEventType() != XMLStreamConstants.START_ELEMENT &&
+                reader.getEventType() != XMLStreamConstants.END_ELEMENT) {
+            XMLStreamReaderUtil.nextElementContent(reader);
+        }
+        if(reader.getEventType() == XMLStreamConstants.END_ELEMENT && name.equals(reader.getName())) {
+            XMLStreamReaderUtil.nextElementContent(reader);
+        }
+    }
+
+    /**
+     * Moves next and read spaces from the reader as long as to the next element.
+     * Comments are ignored
+     * @param reader
+     * @return
+     */
+    public static String nextWhiteSpaceContent(XMLStreamReader reader) {
+        next(reader);
+        return currentWhiteSpaceContent(reader);
+    }
+
+    /**
+     * Read spaces from the reader as long as to the next element, starting from
+     * current position. Comments are ignored.
+     * @param reader
+     * @return
+     */
+    public static String currentWhiteSpaceContent(XMLStreamReader reader) {
+
+        // since the there might be several valid chunks (spaces/comment/spaces)
+        // StringBuilder must be used; it's initialized lazily, only when needed
+        StringBuilder whiteSpaces = null;
+
+        for (;;) {
+            switch (reader.getEventType()) {
+                case START_ELEMENT:
+                case END_ELEMENT:
+                case END_DOCUMENT:
+                    return whiteSpaces == null ? null : whiteSpaces.toString();
+                case CHARACTERS:
+                    if (reader.isWhiteSpace()) {
+                        if (whiteSpaces == null) {
+                            whiteSpaces = new StringBuilder();
+                        }
+                        whiteSpaces.append(reader.getText());
+                    } else {
+                        throw new XMLStreamReaderException(
+                                "xmlreader.unexpectedCharacterContent", reader.getText());
+                    }
+            }
+            next(reader);
+        }
     }
 
     public static int nextContent(XMLStreamReader reader) {

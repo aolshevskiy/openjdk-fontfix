@@ -29,7 +29,6 @@
 #include "memory/oopFactory.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/klass.hpp"
-#include "oops/klassOop.hpp"
 #include "oops/objArrayKlass.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/arguments.hpp"
@@ -54,30 +53,44 @@
 #include "services/memoryService.hpp"
 #include "services/runtimeService.hpp"
 #include "services/threadService.hpp"
+#include "utilities/macros.hpp"
 
 PerfVariable* Management::_begin_vm_creation_time = NULL;
 PerfVariable* Management::_end_vm_creation_time = NULL;
 PerfVariable* Management::_vm_init_done_time = NULL;
 
-klassOop Management::_sensor_klass = NULL;
-klassOop Management::_threadInfo_klass = NULL;
-klassOop Management::_memoryUsage_klass = NULL;
-klassOop Management::_memoryPoolMXBean_klass = NULL;
-klassOop Management::_memoryManagerMXBean_klass = NULL;
-klassOop Management::_garbageCollectorMXBean_klass = NULL;
-klassOop Management::_managementFactory_klass = NULL;
-klassOop Management::_garbageCollectorImpl_klass = NULL;
-klassOop Management::_gcInfo_klass = NULL;
+Klass* Management::_sensor_klass = NULL;
+Klass* Management::_threadInfo_klass = NULL;
+Klass* Management::_memoryUsage_klass = NULL;
+Klass* Management::_memoryPoolMXBean_klass = NULL;
+Klass* Management::_memoryManagerMXBean_klass = NULL;
+Klass* Management::_garbageCollectorMXBean_klass = NULL;
+Klass* Management::_managementFactory_klass = NULL;
+Klass* Management::_garbageCollectorImpl_klass = NULL;
+Klass* Management::_gcInfo_klass = NULL;
+Klass* Management::_diagnosticCommandImpl_klass = NULL;
+Klass* Management::_managementFactoryHelper_klass = NULL;
+
 
 jmmOptionalSupport Management::_optional_support = {0};
 TimeStamp Management::_stamp;
 
 void management_init() {
+#if INCLUDE_MANAGEMENT
   Management::init();
   ThreadService::init();
   RuntimeService::init();
   ClassLoadingService::init();
+#else
+  ThreadService::init();
+  // Make sure the VM version is initialized
+  // This is normally called by RuntimeService::init().
+  // Since that is conditionalized out, we need to call it here.
+  Abstract_VM_Version::initialize();
+#endif // INCLUDE_MANAGEMENT
 }
+
+#if INCLUDE_MANAGEMENT
 
 void Management::init() {
   EXCEPTION_MARK;
@@ -113,14 +126,19 @@ void Management::init() {
 
   _optional_support.isBootClassPathSupported = 1;
   _optional_support.isObjectMonitorUsageSupported = 1;
+#if INCLUDE_SERVICES
   // This depends on the heap inspector
   _optional_support.isSynchronizerUsageSupported = 1;
+#endif // INCLUDE_SERVICES
   _optional_support.isThreadAllocatedMemorySupported = 1;
+  _optional_support.isRemoteDiagnosticCommandsSupported = 1;
 
   // Registration of the diagnostic commands
   DCmdRegistrant::register_dcmds();
   DCmdRegistrant::register_dcmds_ext();
-  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<NMTDCmd>(true, false));
+  uint32_t full_export = DCmd_Source_Internal | DCmd_Source_AttachAPI
+                         | DCmd_Source_MBean;
+  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<NMTDCmd>(full_export, true, false));
 }
 
 void Management::initialize(TRAPS) {
@@ -134,7 +152,7 @@ void Management::initialize(TRAPS) {
     // Load and initialize the sun.management.Agent class
     // invoke startAgent method to start the management server
     Handle loader = Handle(THREAD, SystemDictionary::java_system_loader());
-    klassOop k = SystemDictionary::resolve_or_fail(vmSymbols::sun_management_Agent(),
+    Klass* k = SystemDictionary::resolve_or_fail(vmSymbols::sun_management_Agent(),
                                                    loader,
                                                    Handle(),
                                                    true,
@@ -154,12 +172,15 @@ void Management::get_optional_support(jmmOptionalSupport* support) {
   memcpy(support, &_optional_support, sizeof(jmmOptionalSupport));
 }
 
-klassOop Management::load_and_initialize_klass(Symbol* sh, TRAPS) {
-  klassOop k = SystemDictionary::resolve_or_fail(sh, true, CHECK_NULL);
+Klass* Management::load_and_initialize_klass(Symbol* sh, TRAPS) {
+  Klass* k = SystemDictionary::resolve_or_fail(sh, true, CHECK_NULL);
   instanceKlassHandle ik (THREAD, k);
   if (ik->should_be_initialized()) {
     ik->initialize(CHECK_NULL);
   }
+  // If these classes change to not be owned by the boot loader, they need
+  // to be walked to keep their class loader alive in oops_do.
+  assert(ik->class_loader() == NULL, "need to follow in oops_do");
   return ik();
 }
 
@@ -182,79 +203,83 @@ jlong Management::timestamp() {
 void Management::oops_do(OopClosure* f) {
   MemoryService::oops_do(f);
   ThreadService::oops_do(f);
-
-  f->do_oop((oop*) &_sensor_klass);
-  f->do_oop((oop*) &_threadInfo_klass);
-  f->do_oop((oop*) &_memoryUsage_klass);
-  f->do_oop((oop*) &_memoryPoolMXBean_klass);
-  f->do_oop((oop*) &_memoryManagerMXBean_klass);
-  f->do_oop((oop*) &_garbageCollectorMXBean_klass);
-  f->do_oop((oop*) &_managementFactory_klass);
-  f->do_oop((oop*) &_garbageCollectorImpl_klass);
-  f->do_oop((oop*) &_gcInfo_klass);
 }
 
-klassOop Management::java_lang_management_ThreadInfo_klass(TRAPS) {
+Klass* Management::java_lang_management_ThreadInfo_klass(TRAPS) {
   if (_threadInfo_klass == NULL) {
     _threadInfo_klass = load_and_initialize_klass(vmSymbols::java_lang_management_ThreadInfo(), CHECK_NULL);
   }
   return _threadInfo_klass;
 }
 
-klassOop Management::java_lang_management_MemoryUsage_klass(TRAPS) {
+Klass* Management::java_lang_management_MemoryUsage_klass(TRAPS) {
   if (_memoryUsage_klass == NULL) {
     _memoryUsage_klass = load_and_initialize_klass(vmSymbols::java_lang_management_MemoryUsage(), CHECK_NULL);
   }
   return _memoryUsage_klass;
 }
 
-klassOop Management::java_lang_management_MemoryPoolMXBean_klass(TRAPS) {
+Klass* Management::java_lang_management_MemoryPoolMXBean_klass(TRAPS) {
   if (_memoryPoolMXBean_klass == NULL) {
     _memoryPoolMXBean_klass = load_and_initialize_klass(vmSymbols::java_lang_management_MemoryPoolMXBean(), CHECK_NULL);
   }
   return _memoryPoolMXBean_klass;
 }
 
-klassOop Management::java_lang_management_MemoryManagerMXBean_klass(TRAPS) {
+Klass* Management::java_lang_management_MemoryManagerMXBean_klass(TRAPS) {
   if (_memoryManagerMXBean_klass == NULL) {
     _memoryManagerMXBean_klass = load_and_initialize_klass(vmSymbols::java_lang_management_MemoryManagerMXBean(), CHECK_NULL);
   }
   return _memoryManagerMXBean_klass;
 }
 
-klassOop Management::java_lang_management_GarbageCollectorMXBean_klass(TRAPS) {
+Klass* Management::java_lang_management_GarbageCollectorMXBean_klass(TRAPS) {
   if (_garbageCollectorMXBean_klass == NULL) {
       _garbageCollectorMXBean_klass = load_and_initialize_klass(vmSymbols::java_lang_management_GarbageCollectorMXBean(), CHECK_NULL);
   }
   return _garbageCollectorMXBean_klass;
 }
 
-klassOop Management::sun_management_Sensor_klass(TRAPS) {
+Klass* Management::sun_management_Sensor_klass(TRAPS) {
   if (_sensor_klass == NULL) {
     _sensor_klass = load_and_initialize_klass(vmSymbols::sun_management_Sensor(), CHECK_NULL);
   }
   return _sensor_klass;
 }
 
-klassOop Management::sun_management_ManagementFactory_klass(TRAPS) {
+Klass* Management::sun_management_ManagementFactory_klass(TRAPS) {
   if (_managementFactory_klass == NULL) {
     _managementFactory_klass = load_and_initialize_klass(vmSymbols::sun_management_ManagementFactory(), CHECK_NULL);
   }
   return _managementFactory_klass;
 }
 
-klassOop Management::sun_management_GarbageCollectorImpl_klass(TRAPS) {
+Klass* Management::sun_management_GarbageCollectorImpl_klass(TRAPS) {
   if (_garbageCollectorImpl_klass == NULL) {
     _garbageCollectorImpl_klass = load_and_initialize_klass(vmSymbols::sun_management_GarbageCollectorImpl(), CHECK_NULL);
   }
   return _garbageCollectorImpl_klass;
 }
 
-klassOop Management::com_sun_management_GcInfo_klass(TRAPS) {
+Klass* Management::com_sun_management_GcInfo_klass(TRAPS) {
   if (_gcInfo_klass == NULL) {
     _gcInfo_klass = load_and_initialize_klass(vmSymbols::com_sun_management_GcInfo(), CHECK_NULL);
   }
   return _gcInfo_klass;
+}
+
+Klass* Management::sun_management_DiagnosticCommandImpl_klass(TRAPS) {
+  if (_diagnosticCommandImpl_klass == NULL) {
+    _diagnosticCommandImpl_klass = load_and_initialize_klass(vmSymbols::sun_management_DiagnosticCommandImpl(), CHECK_NULL);
+  }
+  return _diagnosticCommandImpl_klass;
+}
+
+Klass* Management::sun_management_ManagementFactoryHelper_klass(TRAPS) {
+  if (_managementFactoryHelper_klass == NULL) {
+    _managementFactoryHelper_klass = load_and_initialize_klass(vmSymbols::sun_management_ManagementFactoryHelper(), CHECK_NULL);
+  }
+  return _managementFactoryHelper_klass;
 }
 
 static void initialize_ThreadInfo_constructor_arguments(JavaCallArguments* args, ThreadSnapshot* snapshot, TRAPS) {
@@ -301,7 +326,7 @@ static void initialize_ThreadInfo_constructor_arguments(JavaCallArguments* args,
 
 // Helper function to construct a ThreadInfo object
 instanceOop Management::create_thread_info_instance(ThreadSnapshot* snapshot, TRAPS) {
-  klassOop k = Management::java_lang_management_ThreadInfo_klass(CHECK_NULL);
+  Klass* k = Management::java_lang_management_ThreadInfo_klass(CHECK_NULL);
   instanceKlassHandle ik (THREAD, k);
 
   JavaValue result(T_VOID);
@@ -331,7 +356,7 @@ instanceOop Management::create_thread_info_instance(ThreadSnapshot* snapshot,
                                                     typeArrayHandle depths_array,
                                                     objArrayHandle synchronizers_array,
                                                     TRAPS) {
-  klassOop k = Management::java_lang_management_ThreadInfo_klass(CHECK_NULL);
+  Klass* k = Management::java_lang_management_ThreadInfo_klass(CHECK_NULL);
   instanceKlassHandle ik (THREAD, k);
 
   JavaValue result(T_VOID);
@@ -386,7 +411,7 @@ static GCMemoryManager* get_gc_memory_manager_from_jobject(jobject mgr, TRAPS) {
   oop mgr_obj = JNIHandles::resolve(mgr);
   instanceHandle h(THREAD, (instanceOop) mgr_obj);
 
-  klassOop k = Management::java_lang_management_GarbageCollectorMXBean_klass(CHECK_NULL);
+  Klass* k = Management::java_lang_management_GarbageCollectorMXBean_klass(CHECK_NULL);
   if (!h->is_a(k)) {
     THROW_MSG_(vmSymbols::java_lang_IllegalArgumentException(),
                "the object is not an instance of java.lang.management.GarbageCollectorMXBean class",
@@ -431,8 +456,8 @@ static void validate_thread_id_array(typeArrayHandle ids_ah, TRAPS) {
 
 static void validate_thread_info_array(objArrayHandle infoArray_h, TRAPS) {
   // check if the element of infoArray is of type ThreadInfo class
-  klassOop threadinfo_klass = Management::java_lang_management_ThreadInfo_klass(CHECK);
-  klassOop element_klass = objArrayKlass::cast(infoArray_h->klass())->element_klass();
+  Klass* threadinfo_klass = Management::java_lang_management_ThreadInfo_klass(CHECK);
+  Klass* element_klass = ObjArrayKlass::cast(infoArray_h->klass())->element_klass();
   if (element_klass != threadinfo_klass) {
     THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
               "infoArray element type is not ThreadInfo class");
@@ -572,7 +597,7 @@ JVM_ENTRY(jobjectArray, jmm_GetMemoryPools(JNIEnv* env, jobject obj))
   }
 
   // Allocate the resulting MemoryPoolMXBean[] object
-  klassOop k = Management::java_lang_management_MemoryPoolMXBean_klass(CHECK_NULL);
+  Klass* k = Management::java_lang_management_MemoryPoolMXBean_klass(CHECK_NULL);
   instanceKlassHandle ik (THREAD, k);
   objArrayOop r = oopFactory::new_objArray(ik(), num_memory_pools, CHECK_NULL);
   objArrayHandle poolArray(THREAD, r);
@@ -617,7 +642,7 @@ JVM_ENTRY(jobjectArray, jmm_GetMemoryManagers(JNIEnv* env, jobject obj))
   }
 
   // Allocate the resulting MemoryManagerMXBean[] object
-  klassOop k = Management::java_lang_management_MemoryManagerMXBean_klass(CHECK_NULL);
+  Klass* k = Management::java_lang_management_MemoryManagerMXBean_klass(CHECK_NULL);
   instanceKlassHandle ik (THREAD, k);
   objArrayOop r = oopFactory::new_objArray(ik(), num_mgrs, CHECK_NULL);
   objArrayHandle mgrArray(THREAD, r);
@@ -694,7 +719,7 @@ JVM_ENTRY(void, jmm_SetPoolSensor(JNIEnv* env, jobject obj, jmmThresholdType typ
     THROW(vmSymbols::java_lang_NullPointerException());
   }
 
-  klassOop sensor_klass = Management::sun_management_Sensor_klass(CHECK);
+  Klass* sensor_klass = Management::sun_management_Sensor_klass(CHECK);
   oop s = JNIHandles::resolve(sensorObj);
   assert(s->is_instance(), "Sensor should be an instanceOop");
   instanceHandle sensor_h(THREAD, (instanceOop) s);
@@ -868,12 +893,6 @@ JVM_ENTRY(jobject, jmm_GetMemoryUsage(JNIEnv* env, jboolean heap))
       }
     }
   }
-
-  // In our current implementation, we make sure that all non-heap
-  // pools have defined init and max sizes. Heap pools do not matter,
-  // as we never use total_init and total_max for them.
-  assert(heap || !has_undefined_init_size, "Undefined init size");
-  assert(heap || !has_undefined_max_size,  "Undefined max size");
 
   MemoryUsage usage((heap ? InitialHeapSize : total_init),
                     total_used,
@@ -1304,7 +1323,7 @@ JVM_ENTRY(jobjectArray, jmm_DumpThreads(JNIEnv *env, jlongArray thread_ids, jboo
   int num_snapshots = dump_result.num_snapshots();
 
   // create the result ThreadInfo[] object
-  klassOop k = Management::java_lang_management_ThreadInfo_klass(CHECK_NULL);
+  Klass* k = Management::java_lang_management_ThreadInfo_klass(CHECK_NULL);
   instanceKlassHandle ik (THREAD, k);
   objArrayOop r = oopFactory::new_objArray(ik(), num_snapshots, CHECK_NULL);
   objArrayHandle result_h(THREAD, r);
@@ -1413,7 +1432,7 @@ JVM_ENTRY(jobjectArray, jmm_GetLoadedClasses(JNIEnv *env))
 
   for (int i = 0; i < num_classes; i++) {
     KlassHandle kh = lce.get_klass(i);
-    oop mirror = Klass::cast(kh())->java_mirror();
+    oop mirror = kh()->java_mirror();
     classes_ah->obj_at_put(i, mirror);
   }
 
@@ -1721,7 +1740,7 @@ JVM_ENTRY(jint, jmm_GetVMGlobals(JNIEnv *env,
     objArrayOop ta = objArrayOop(JNIHandles::resolve_non_null(names));
     objArrayHandle names_ah(THREAD, ta);
     // Make sure we have a String array
-    klassOop element_klass = objArrayKlass::cast(names_ah->klass())->element_klass();
+    Klass* element_klass = ObjArrayKlass::cast(names_ah->klass())->element_klass();
     if (element_klass != SystemDictionary::String_klass()) {
       THROW_MSG_(vmSymbols::java_lang_IllegalArgumentException(),
                  "Array element type is not String class", 0);
@@ -1897,7 +1916,7 @@ JVM_ENTRY(jint, jmm_GetInternalThreadTimes(JNIEnv *env,
   objArrayHandle names_ah(THREAD, na);
 
   // Make sure we have a String array
-  klassOop element_klass = objArrayKlass::cast(names_ah->klass())->element_klass();
+  Klass* element_klass = ObjArrayKlass::cast(names_ah->klass())->element_klass();
   if (element_klass != SystemDictionary::String_klass()) {
     THROW_MSG_(vmSymbols::java_lang_IllegalArgumentException(),
                "Array element type is not String class", 0);
@@ -2013,8 +2032,8 @@ static objArrayOop get_memory_usage_objArray(jobjectArray array, int length, TRA
   }
 
   // check if the element of array is of type MemoryUsage class
-  klassOop usage_klass = Management::java_lang_management_MemoryUsage_klass(CHECK_0);
-  klassOop element_klass = objArrayKlass::cast(array_h->klass())->element_klass();
+  Klass* usage_klass = Management::java_lang_management_MemoryUsage_klass(CHECK_0);
+  Klass* element_klass = ObjArrayKlass::cast(array_h->klass())->element_klass();
   if (element_klass != usage_klass) {
     THROW_MSG_(vmSymbols::java_lang_IllegalArgumentException(),
                "The element type is not MemoryUsage class", 0);
@@ -2114,13 +2133,14 @@ JVM_END
 
 // Dump heap - Returns 0 if succeeds.
 JVM_ENTRY(jint, jmm_DumpHeap0(JNIEnv *env, jstring outputfile, jboolean live))
+#if INCLUDE_SERVICES
   ResourceMark rm(THREAD);
   oop on = JNIHandles::resolve_external_guard(outputfile);
   if (on == NULL) {
     THROW_MSG_(vmSymbols::java_lang_NullPointerException(),
                "Output file name cannot be null.", -1);
   }
-  char* name = java_lang_String::as_utf8_string(on);
+  char* name = java_lang_String::as_platform_dependent_str(on, CHECK_(-1));
   if (name == NULL) {
     THROW_MSG_(vmSymbols::java_lang_NullPointerException(),
                "Output file name cannot be null.", -1);
@@ -2131,11 +2151,14 @@ JVM_ENTRY(jint, jmm_DumpHeap0(JNIEnv *env, jstring outputfile, jboolean live))
     THROW_MSG_(vmSymbols::java_io_IOException(), errmsg, -1);
   }
   return 0;
+#else  // INCLUDE_SERVICES
+  return -1;
+#endif // INCLUDE_SERVICES
 JVM_END
 
 JVM_ENTRY(jobjectArray, jmm_GetDiagnosticCommands(JNIEnv *env))
   ResourceMark rm(THREAD);
-  GrowableArray<const char *>* dcmd_list = DCmdFactory::DCmd_list();
+  GrowableArray<const char *>* dcmd_list = DCmdFactory::DCmd_list(DCmd_Source_MBean);
   objArrayOop cmd_array_oop = oopFactory::new_objArray(SystemDictionary::String_klass(),
           dcmd_list->length(), CHECK_NULL);
   objArrayHandle cmd_array(THREAD, cmd_array_oop);
@@ -2158,13 +2181,13 @@ JVM_ENTRY(void, jmm_GetDiagnosticCommandInfo(JNIEnv *env, jobjectArray cmds,
   objArrayHandle cmds_ah(THREAD, ca);
 
   // Make sure we have a String array
-  klassOop element_klass = objArrayKlass::cast(cmds_ah->klass())->element_klass();
+  Klass* element_klass = ObjArrayKlass::cast(cmds_ah->klass())->element_klass();
   if (element_klass != SystemDictionary::String_klass()) {
     THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
                "Array element type is not String class");
   }
 
-  GrowableArray<DCmdInfo *>* info_list = DCmdFactory::DCmdInfo_list();
+  GrowableArray<DCmdInfo *>* info_list = DCmdFactory::DCmdInfo_list(DCmd_Source_MBean);
 
   int num_cmds = cmds_ah->length();
   for (int i = 0; i < num_cmds; i++) {
@@ -2187,6 +2210,10 @@ JVM_ENTRY(void, jmm_GetDiagnosticCommandInfo(JNIEnv *env, jobjectArray cmds,
     infoArray[i].name = info->name();
     infoArray[i].description = info->description();
     infoArray[i].impact = info->impact();
+    JavaPermission p = info->permission();
+    infoArray[i].permission_class = p._class;
+    infoArray[i].permission_name = p._name;
+    infoArray[i].permission_action = p._action;
     infoArray[i].num_arguments = info->num_arguments();
     infoArray[i].enabled = info->is_enabled();
   }
@@ -2206,7 +2233,8 @@ JVM_ENTRY(void, jmm_GetDiagnosticCommandArgumentsInfo(JNIEnv *env,
               "Command line content cannot be null.");
   }
   DCmd* dcmd = NULL;
-  DCmdFactory*factory = DCmdFactory::factory(cmd_name, strlen(cmd_name));
+  DCmdFactory*factory = DCmdFactory::factory(DCmd_Source_MBean, cmd_name,
+                                             strlen(cmd_name));
   if (factory != NULL) {
     dcmd = factory->create_resource_instance(NULL);
   }
@@ -2226,6 +2254,7 @@ JVM_ENTRY(void, jmm_GetDiagnosticCommandArgumentsInfo(JNIEnv *env,
     infoArray[i].default_string = array->at(i)->default_string();
     infoArray[i].mandatory = array->at(i)->is_mandatory();
     infoArray[i].option = array->at(i)->is_option();
+    infoArray[i].multiple = array->at(i)->is_multiple();
     infoArray[i].position = array->at(i)->position();
   }
   return;
@@ -2244,9 +2273,13 @@ JVM_ENTRY(jstring, jmm_ExecuteDiagnosticCommand(JNIEnv *env, jstring commandline
                    "Command line content cannot be null.");
   }
   bufferedStream output;
-  DCmd::parse_and_execute(&output, cmdline, ' ', CHECK_NULL);
+  DCmd::parse_and_execute(DCmd_Source_MBean, &output, cmdline, ' ', CHECK_NULL);
   oop result = java_lang_String::create_oop_from_str(output.as_string(), CHECK_NULL);
   return (jstring) JNIHandles::make_local(env, result);
+JVM_END
+
+JVM_ENTRY(void, jmm_SetDiagnosticFrameworkNotificationEnabled(JNIEnv *env, jboolean enabled))
+  DCmdFactory::set_jmx_notification_enabled(enabled?true:false);
 JVM_END
 
 jlong Management::ticks_to_ms(jlong ticks) {
@@ -2295,12 +2328,16 @@ const struct jmmInterface_1_ jmm_interface = {
   jmm_GetDiagnosticCommands,
   jmm_GetDiagnosticCommandInfo,
   jmm_GetDiagnosticCommandArgumentsInfo,
-  jmm_ExecuteDiagnosticCommand
+  jmm_ExecuteDiagnosticCommand,
+  jmm_SetDiagnosticFrameworkNotificationEnabled
 };
+#endif // INCLUDE_MANAGEMENT
 
 void* Management::get_jmm_interface(int version) {
+#if INCLUDE_MANAGEMENT
   if (version == JMM_VERSION_1_0) {
     return (void*) &jmm_interface;
   }
+#endif // INCLUDE_MANAGEMENT
   return NULL;
 }

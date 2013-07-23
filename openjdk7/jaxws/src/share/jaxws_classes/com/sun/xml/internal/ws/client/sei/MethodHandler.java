@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,12 @@
 
 package com.sun.xml.internal.ws.client.sei;
 
+import java.lang.reflect.Method;
+
+import javax.xml.namespace.QName;
 import javax.xml.ws.WebServiceException;
+
+import com.sun.xml.internal.ws.api.databinding.ClientCallBridge;
 
 /**
  * Handles an invocation of a method.
@@ -39,9 +44,11 @@ import javax.xml.ws.WebServiceException;
 public abstract class MethodHandler {
 
     protected final SEIStub owner;
+    protected Method method;
 
-    protected MethodHandler(SEIStub owner) {
+    protected MethodHandler(SEIStub owner, Method m) {
         this.owner = owner;
+        method = m;
     }
 
     /**

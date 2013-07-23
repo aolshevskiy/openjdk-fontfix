@@ -524,7 +524,7 @@ public class DnsClient {
                 "\tResponse Q:" + resps);
         }
         byte[] pkt;
-        if ((pkt = (byte[]) resps.get(xid)) != null) {
+        if ((pkt = resps.get(xid)) != null) {
             checkResponseCode(new Header(pkt, pkt.length));
             synchronized (queuesLock) {
                 resps.remove(xid);

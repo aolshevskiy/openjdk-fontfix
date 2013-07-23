@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,19 +43,11 @@ void PSMarkSweepDecorator::set_destination_decorator_tenured() {
   _destination_decorator = heap->old_gen()->object_mark_sweep();
 }
 
-void PSMarkSweepDecorator::set_destination_decorator_perm_gen() {
-  ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
-  assert(heap->kind() == CollectedHeap::ParallelScavengeHeap, "Sanity");
-
-  _destination_decorator = heap->perm_gen()->object_mark_sweep();
-}
-
 void PSMarkSweepDecorator::advance_destination_decorator() {
   ParallelScavengeHeap* heap = (ParallelScavengeHeap*)Universe::heap();
   assert(heap->kind() == CollectedHeap::ParallelScavengeHeap, "Sanity");
 
   assert(_destination_decorator != NULL, "Sanity");
-  guarantee(_destination_decorator != heap->perm_gen()->object_mark_sweep(), "Cannot advance perm gen decorator");
 
   PSMarkSweepDecorator* first = heap->old_gen()->object_mark_sweep();
   PSMarkSweepDecorator* second = heap->young_gen()->eden_mark_sweep();
@@ -96,8 +88,7 @@ void PSMarkSweepDecorator::precompact() {
    * by the MarkSweepAlwaysCompactCount parameter. This is a significant
    * performance improvement!
    */
-  bool skip_dead = (MarkSweepAlwaysCompactCount < 1)
-    || ((PSMarkSweep::total_invocations() % MarkSweepAlwaysCompactCount) != 0);
+  bool skip_dead = ((PSMarkSweep::total_invocations() % MarkSweepAlwaysCompactCount) != 0);
 
   size_t allowed_deadspace = 0;
   if (skip_dead) {
@@ -172,7 +163,6 @@ void PSMarkSweepDecorator::precompact() {
         start_array->allocate_block(compact_top);
       }
 
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::register_live_oop(oop(q), size));
       compact_top += size;
       assert(compact_top <= dest->space()->end(),
         "Exceeding space in destination");
@@ -233,7 +223,6 @@ void PSMarkSweepDecorator::precompact() {
             start_array->allocate_block(compact_top);
           }
 
-          VALIDATE_MARK_SWEEP_ONLY(MarkSweep::register_live_oop(oop(q), sz));
           compact_top += sz;
           assert(compact_top <= dest->space()->end(),
             "Exceeding space in destination");
@@ -312,11 +301,8 @@ void PSMarkSweepDecorator::adjust_pointers() {
     HeapWord* end = _first_dead;
 
     while (q < end) {
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::track_interior_pointers(oop(q)));
       // point all the oops to the new location
       size_t size = oop(q)->adjust_pointers();
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::check_interior_pointers());
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::validate_live_oop(oop(q), size));
       q += size;
     }
 
@@ -336,11 +322,8 @@ void PSMarkSweepDecorator::adjust_pointers() {
     Prefetch::write(q, interval);
     if (oop(q)->is_gc_marked()) {
       // q is alive
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::track_interior_pointers(oop(q)));
       // point all the oops to the new location
       size_t size = oop(q)->adjust_pointers();
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::check_interior_pointers());
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::validate_live_oop(oop(q), size));
       debug_only(prev_q = q);
       q += size;
     } else {
@@ -374,7 +357,6 @@ void PSMarkSweepDecorator::compact(bool mangle_free_space ) {
     while (q < end) {
       size_t size = oop(q)->size();
       assert(!oop(q)->is_gc_marked(), "should be unmarked (special dense prefix handling)");
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::live_oop_moved_to(q, size, q));
       debug_only(prev_q = q);
       q += size;
     }
@@ -409,7 +391,6 @@ void PSMarkSweepDecorator::compact(bool mangle_free_space ) {
       Prefetch::write(compaction_top, copy_interval);
 
       // copy object and reinit its mark
-      VALIDATE_MARK_SWEEP_ONLY(MarkSweep::live_oop_moved_to(q, size, compaction_top));
       assert(q != compaction_top, "everything in this pass should be moving");
       Copy::aligned_conjoint_words(q, compaction_top, size);
       oop(compaction_top)->init_mark();

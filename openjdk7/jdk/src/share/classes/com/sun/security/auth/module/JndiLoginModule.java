@@ -32,7 +32,8 @@ import javax.security.auth.spi.*;
 import javax.naming.*;
 import javax.naming.directory.*;
 
-import java.io.IOException;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.Map;
 import java.util.LinkedList;
 import java.util.ResourceBundle;
@@ -41,7 +42,6 @@ import com.sun.security.auth.UnixPrincipal;
 import com.sun.security.auth.UnixNumericUserPrincipal;
 import com.sun.security.auth.UnixNumericGroupPrincipal;
 
-import sun.security.util.AuthResources;
 
 /**
  * <p> The module prompts for a username and password
@@ -153,8 +153,14 @@ import sun.security.util.AuthResources;
  */
 public class JndiLoginModule implements LoginModule {
 
-    static final java.util.ResourceBundle rb =
-        java.util.ResourceBundle.getBundle("sun.security.util.AuthResources");
+    private static final ResourceBundle rb = AccessController.doPrivileged(
+            new PrivilegedAction<ResourceBundle>() {
+                public ResourceBundle run() {
+                    return ResourceBundle.getBundle(
+                            "sun.security.util.AuthResources");
+                }
+            }
+    );
 
     /** JNDI Provider */
     public final String USER_PROVIDER = "user.provider.url";
@@ -189,7 +195,7 @@ public class JndiLoginModule implements LoginModule {
     // initial state
     private Subject subject;
     private CallbackHandler callbackHandler;
-    private Map sharedState;
+    private Map<String, Object> sharedState;
     private Map<String, ?> options;
 
     private static final String CRYPT = "{crypt}";
@@ -217,13 +223,18 @@ public class JndiLoginModule implements LoginModule {
      *                  <code>Configuration</code> for this particular
      *                  <code>LoginModule</code>.
      */
+    // Unchecked warning from (Map<String, Object>)sharedState is safe
+    // since javax.security.auth.login.LoginContext passes a raw HashMap.
+    // Unchecked warnings from options.get(String) are safe since we are
+    // passing known keys.
+    @SuppressWarnings("unchecked")
     public void initialize(Subject subject, CallbackHandler callbackHandler,
                            Map<String,?> sharedState,
                            Map<String,?> options) {
 
         this.subject = subject;
         this.callbackHandler = callbackHandler;
-        this.sharedState = sharedState;
+        this.sharedState = (Map<String, Object>)sharedState;
         this.options = options;
 
         // initialize any configured options

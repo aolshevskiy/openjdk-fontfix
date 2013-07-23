@@ -1112,6 +1112,7 @@ PRINT("syncFromJavaPixels")
                     CGAffineTransform currCTM = CGContextGetCTM(qsdo->cgRef);
                     CGAffineTransform inverse = CGAffineTransformInvert(currCTM);
                     CGContextConcatCTM(qsdo->cgRef, inverse);
+                    CGContextConcatCTM(qsdo->cgRef, CGAffineTransformMake(1, 0, 0, 1, 0, 0));
                     CGContextSetBlendMode(qsdo->cgRef, kCGBlendModeCopy);
                     CGContextSetAlpha(qsdo->cgRef, 1.0f);
                     CGContextDrawImage(qsdo->cgRef, CGRectMake(0, 0, width, height), javaImg);

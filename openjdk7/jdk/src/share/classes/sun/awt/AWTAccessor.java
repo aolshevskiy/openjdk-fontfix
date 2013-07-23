@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,14 @@
 
 package sun.awt;
 
+import sun.misc.Unsafe;
+
 import java.awt.*;
 import java.awt.KeyboardFocusManager;
 import java.awt.DefaultKeyboardFocusManager;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.geom.Point2D;
-
-import sun.misc.Unsafe;
 import java.awt.peer.ComponentPeer;
 
 import java.lang.reflect.InvocationTargetException;
@@ -484,6 +484,11 @@ public final class AWTAccessor {
          */
         void invokeAndWait(Object source, Runnable r)
             throws InterruptedException, InvocationTargetException;
+
+        /**
+         * Sets the delegate for the EventQueue used by FX/AWT single threaded mode
+         */
+        public void setFwDispatcher(EventQueue eventQueue, FwDispatcher dispatcher);
     }
 
     /*
@@ -521,11 +526,11 @@ public final class AWTAccessor {
         boolean isMultipleMode(FileDialog fileDialog);
     }
 
-    /**
+    /*
      * An accessor for the ScrollPaneAdjustable class.
      */
     public interface ScrollPaneAdjustableAccessor {
-        /**
+        /*
          * Sets the value of this scrollbar to the specified value.
          */
         void setTypedValue(final ScrollPaneAdjustable adj, final int v,
@@ -637,6 +642,11 @@ public final class AWTAccessor {
          * Sets extendedKeyCode field for KeyEvent
          */
         void setExtendedKeyCode(KeyEvent ev, long extendedKeyCode);
+
+        /**
+         * Gets original source for KeyEvent
+         */
+        Component getOriginalSource(KeyEvent ev);
     }
 
     /**
@@ -906,14 +916,14 @@ public final class AWTAccessor {
         return fileDialogAccessor;
     }
 
-    /**
+    /*
      * Set an accessor object for the java.awt.ScrollPaneAdjustable class.
      */
     public static void setScrollPaneAdjustableAccessor(ScrollPaneAdjustableAccessor adj) {
         scrollPaneAdjustableAccessor = adj;
     }
 
-    /**
+    /*
      * Retrieve the accessor object for the java.awt.ScrollPaneAdjustable
      * class.
      */
@@ -1093,7 +1103,6 @@ public final class AWTAccessor {
         }
         return defaultKeyboardFocusManagerAccessor;
     }
-
     /*
      * Set an accessor object for the java.awt.SequencedEvent class.
      */

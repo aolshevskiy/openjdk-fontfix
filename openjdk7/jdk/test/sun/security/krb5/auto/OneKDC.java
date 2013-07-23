@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,17 +67,26 @@ public class OneKDC extends KDC {
         addPrincipalRandKey("krbtgt/" + REALM);
         addPrincipalRandKey(SERVER);
         addPrincipalRandKey(BACKEND);
+
+        String extraConfig = "";
+        if (etype != null) {
+            extraConfig += "default_tkt_enctypes=" + etype
+                    + "\ndefault_tgs_enctypes=" + etype;
+            if (etype.startsWith("des")) {
+                extraConfig += "\nallow_weak_crypto = true";
+            }
+        }
         KDC.saveConfig(KRB5_CONF, this,
                 "forwardable = true",
                 "default_keytab_name = " + KTAB,
-                etype == null ? "" : "default_tkt_enctypes=" + etype + "\ndefault_tgs_enctypes=" + etype);
+                extraConfig);
         System.setProperty("java.security.krb5.conf", KRB5_CONF);
         // Whatever krb5.conf had been loaded before, we reload ours now.
         Config.refresh();
 
         writeKtab(KTAB);
-        new File(KRB5_CONF).deleteOnExit();
-        new File(KTAB).deleteOnExit();
+        Security.setProperty("auth.login.defaultCallbackHandler",
+                "OneKDC$CallbackForClient");
     }
 
     /**
@@ -95,7 +104,7 @@ public class OneKDC extends KDC {
                 "    com.sun.security.auth.module.Krb5LoginModule required;\n};\n" +
                 "com.sun.security.jgss.krb5.accept {\n" +
                 "    com.sun.security.auth.module.Krb5LoginModule required\n" +
-                "    principal=\"" + SERVER + "\"\n" +
+                "    principal=\"*\"\n" +
                 "    useKeyTab=true\n" +
                 "    isInitiator=false\n" +
                 "    storeKey=true;\n};\n" +
@@ -114,8 +123,6 @@ public class OneKDC extends KDC {
                 "    isInitiator=false;\n};\n"
                 ).getBytes());
         fos.close();
-        f.deleteOnExit();
-        Security.setProperty("auth.login.defaultCallbackHandler", "OneKDC$CallbackForClient");
     }
 
     /**

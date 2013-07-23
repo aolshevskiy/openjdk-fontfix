@@ -582,9 +582,9 @@ JvmtiEnvBase::vframeFor(JavaThread* java_thread, jint depth) {
 
 
 jclass
-JvmtiEnvBase::get_jni_class_non_null(klassOop k) {
+JvmtiEnvBase::get_jni_class_non_null(Klass* k) {
   assert(k != NULL, "k != NULL");
-  return (jclass)jni_reference(Klass::cast(k)->java_mirror());
+  return (jclass)jni_reference(k->java_mirror());
 }
 
 //
@@ -592,7 +592,7 @@ JvmtiEnvBase::get_jni_class_non_null(klassOop k) {
 //
 
 bool
-JvmtiEnvBase::get_field_descriptor(klassOop k, jfieldID field, fieldDescriptor* fd) {
+JvmtiEnvBase::get_field_descriptor(Klass* k, jfieldID field, fieldDescriptor* fd) {
   if (!jfieldIDWorkaround::is_valid_jfieldID(k, field)) {
     return false;
   }
@@ -603,7 +603,7 @@ JvmtiEnvBase::get_field_descriptor(klassOop k, jfieldID field, fieldDescriptor* 
   } else {
     // Non-static field. The fieldID is really the offset of the field within the object.
     int offset = jfieldIDWorkaround::from_instance_jfieldID(k, field);
-    found = instanceKlass::cast(k)->find_field_from_offset(offset, false, fd);
+    found = InstanceKlass::cast(k)->find_field_from_offset(offset, false, fd);
   }
   return found;
 }
@@ -922,7 +922,7 @@ JvmtiEnvBase::get_frame_location(JavaThread *java_thread, jint depth,
 
   HandleMark hm(current_thread);
   javaVFrame *jvf = javaVFrame::cast(vf);
-  methodOop method = jvf->method();
+  Method* method = jvf->method();
   if (method->is_native()) {
     *location_ptr = -1;
   } else {
@@ -997,13 +997,19 @@ JvmtiEnvBase::get_object_monitor_usage(JavaThread* calling_thread, jobject objec
       // move our object at this point. However, our owner value is safe
       // since it is either the Lock word on a stack or a JavaThread *.
       owning_thread = Threads::owning_thread_from_monitor_owner(owner, !at_safepoint);
-      assert(owning_thread != NULL, "sanity check");
-      if (owning_thread != NULL) {  // robustness
+      // Cannot assume (owning_thread != NULL) here because this function
+      // may not have been called at a safepoint and the owning_thread
+      // might not be suspended.
+      if (owning_thread != NULL) {
         // The monitor's owner either has to be the current thread, at safepoint
         // or it has to be suspended. Any of these conditions will prevent both
         // contending and waiting threads from modifying the state of
         // the monitor.
         if (!at_safepoint && !JvmtiEnv::is_thread_fully_suspended(owning_thread, true, &debug_bits)) {
+          // Don't worry! This return of JVMTI_ERROR_THREAD_NOT_SUSPENDED
+          // will not make it back to the JVM/TI agent. The error code will
+          // get intercepted in JvmtiEnv::GetObjectMonitorUsage() which
+          // will retry the call via a VM_GetObjectMonitorUsage VM op.
           return JVMTI_ERROR_THREAD_NOT_SUSPENDED;
         }
         HandleMark hm;
@@ -1357,7 +1363,7 @@ JvmtiEnvBase::check_top_frame(JavaThread* current_thread, JavaThread* java_threa
     // Method return type signature.
     char* ty_sign = 1 + strchr(signature->as_C_string(), ')');
 
-    if (!VM_GetOrSetLocal::is_assignable(ty_sign, Klass::cast(ob_kh()), current_thread)) {
+    if (!VM_GetOrSetLocal::is_assignable(ty_sign, ob_kh(), current_thread)) {
       return JVMTI_ERROR_TYPE_MISMATCH;
     }
     *ret_ob_h = ob_h;

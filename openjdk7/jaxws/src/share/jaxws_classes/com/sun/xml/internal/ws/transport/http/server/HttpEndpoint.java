@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,11 +29,12 @@ import com.sun.net.httpserver.HttpContext;
 import com.sun.xml.internal.ws.transport.http.HttpAdapter;
 import com.sun.xml.internal.ws.transport.http.HttpAdapterList;
 import com.sun.xml.internal.ws.server.ServerRtException;
-import com.sun.xml.internal.ws.server.WSEndpointImpl;
 import com.sun.xml.internal.ws.resources.ServerMessages;
 
 import javax.xml.ws.EndpointReference;
 import java.util.concurrent.Executor;
+import java.net.MalformedURLException;
+import java.net.URL;
 
 import org.w3c.dom.Element;
 
@@ -88,11 +89,16 @@ public final class HttpEndpoint extends com.sun.xml.internal.ws.api.server.HttpE
      * @return address of the Endpoint
      */
     private String getEPRAddress() {
-        if(address == null) {
-            // Application created its own HttpContext
-            return httpContext.getServer().getAddress().toString();
-        } else
-            return address;
+        if (address == null)
+                return httpContext.getServer().getAddress().toString();
+        try {
+                URL u = new URL(address);
+                if (u.getPort() == 0) {
+                        return new URL(u.getProtocol(),u.getHost(),
+                                        httpContext.getServer().getAddress().getPort(),u.getFile()).toString();
+                }
+        } catch (MalformedURLException murl) {}
+        return address;
     }
 
     public void stop() {
@@ -120,9 +126,8 @@ public final class HttpEndpoint extends com.sun.xml.internal.ws.api.server.HttpE
     }
 
     public <T extends EndpointReference> T getEndpointReference(Class<T> clazz, Element...referenceParameters) {
-        WSEndpointImpl endpointImpl = (WSEndpointImpl) adapter.getEndpoint();
         String eprAddress = getEPRAddress();
-        return clazz.cast(endpointImpl.getEndpointReference(clazz, eprAddress,eprAddress+"?wsdl", referenceParameters));
+        return clazz.cast(adapter.getEndpoint().getEndpointReference(clazz, eprAddress,eprAddress+"?wsdl", referenceParameters));
     }
 
 }

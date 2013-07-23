@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,9 @@
 #include "precompiled.hpp"
 #include "asm/codeBuffer.hpp"
 #include "compiler/disassembler.hpp"
+#include "memory/gcLocker.hpp"
+#include "oops/methodData.hpp"
+#include "oops/oop.inline.hpp"
 #include "utilities/copy.hpp"
 #include "utilities/xmlstream.hpp"
 
@@ -142,7 +145,7 @@ CodeBuffer::~CodeBuffer() {
 
 void CodeBuffer::initialize_oop_recorder(OopRecorder* r) {
   assert(_oop_recorder == &_default_oop_recorder && _default_oop_recorder.is_unused(), "do this once");
-  DEBUG_ONLY(_default_oop_recorder.oop_size());  // force unused OR to be frozen
+  DEBUG_ONLY(_default_oop_recorder.freeze());  // force unused OR to be frozen
   _oop_recorder = r;
 }
 
@@ -249,6 +252,10 @@ address CodeBuffer::locator_address(int locator) const {
   if (locator < 0)  return NULL;
   address start = code_section(locator_sect(locator))->start();
   return start + locator_pos(locator);
+}
+
+bool CodeBuffer::is_backward_branch(Label& L) {
+  return L.is_bound() && insts_end() <= locator_address(L.loc());
 }
 
 address CodeBuffer::decode_begin() {
@@ -489,6 +496,84 @@ void CodeBuffer::compute_final_layout(CodeBuffer* dest) const {
   dest->verify_section_allocation();
 }
 
+// Append an oop reference that keeps the class alive.
+static void append_oop_references(GrowableArray<oop>* oops, Klass* k) {
+  oop cl = k->klass_holder();
+  if (cl != NULL && !oops->contains(cl)) {
+    oops->append(cl);
+  }
+}
+
+void CodeBuffer::finalize_oop_references(methodHandle mh) {
+  No_Safepoint_Verifier nsv;
+
+  GrowableArray<oop> oops;
+
+  // Make sure that immediate metadata records something in the OopRecorder
+  for (int n = (int) SECT_FIRST; n < (int) SECT_LIMIT; n++) {
+    // pull code out of each section
+    CodeSection* cs = code_section(n);
+    if (cs->is_empty())  continue;  // skip trivial section
+    RelocIterator iter(cs);
+    while (iter.next()) {
+      if (iter.type() == relocInfo::metadata_type) {
+        metadata_Relocation* md = iter.metadata_reloc();
+        if (md->metadata_is_immediate()) {
+          Metadata* m = md->metadata_value();
+          if (oop_recorder()->is_real(m)) {
+            if (m->is_methodData()) {
+              m = ((MethodData*)m)->method();
+            }
+            if (m->is_method()) {
+              m = ((Method*)m)->method_holder();
+            }
+            if (m->is_klass()) {
+              append_oop_references(&oops, (Klass*)m);
+            } else {
+              // XXX This will currently occur for MDO which don't
+              // have a backpointer.  This has to be fixed later.
+              m->print();
+              ShouldNotReachHere();
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!oop_recorder()->is_unused()) {
+    for (int i = 0; i < oop_recorder()->metadata_count(); i++) {
+      Metadata* m = oop_recorder()->metadata_at(i);
+      if (oop_recorder()->is_real(m)) {
+        if (m->is_methodData()) {
+          m = ((MethodData*)m)->method();
+        }
+        if (m->is_method()) {
+          m = ((Method*)m)->method_holder();
+        }
+        if (m->is_klass()) {
+          append_oop_references(&oops, (Klass*)m);
+        } else {
+          m->print();
+          ShouldNotReachHere();
+        }
+      }
+    }
+
+  }
+
+  // Add the class loader of Method* for the nmethod itself
+  append_oop_references(&oops, mh->method_holder());
+
+  // Add any oops that we've found
+  Thread* thread = Thread::current();
+  for (int i = 0; i < oops.length(); i++) {
+    oop_recorder()->find_index((jobject)thread->handle_area()->allocate_handle(oops.at(i)));
+  }
+}
+
+
+
 csize_t CodeBuffer::total_offset_of(CodeSection* cs) const {
   csize_t size_so_far = 0;
   for (int n = (int) SECT_FIRST; n < (int) SECT_LIMIT; n++) {
@@ -665,7 +750,18 @@ void CodeBuffer::relocate_code_to(CodeBuffer* dest) const {
 
     // Make the new code copy use the old copy's relocations:
     dest_cs->initialize_locs_from(cs);
+  }
 
+  // Do relocation after all sections are copied.
+  // This is necessary if the code uses constants in stubs, which are
+  // relocated when the corresponding instruction in the code (e.g., a
+  // call) is relocated. Stubs are placed behind the main code
+  // section, so that section has to be copied before relocating.
+  for (int n = (int) SECT_FIRST; n < (int)SECT_LIMIT; n++) {
+    // pull code out of each section
+    const CodeSection* cs = code_section(n);
+    if (cs->is_empty()) continue;  // skip trivial section
+    CodeSection* dest_cs = dest->code_section(n);
     { // Repair the pc relative information in the code after the move
       RelocIterator iter(dest_cs);
       while (iter.next()) {

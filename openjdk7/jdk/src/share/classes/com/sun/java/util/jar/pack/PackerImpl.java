@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -69,8 +69,7 @@ public class PackerImpl  extends TLGlobals implements Pack200.Packer {
      * Get the set of options for the pack and unpack engines.
      * @return A sorted association of option key strings to option values.
      */
-    @SuppressWarnings("unchecked")
-    public SortedMap properties() {
+    public SortedMap<String, String> properties() {
         return props;
     }
 
@@ -157,7 +156,6 @@ public class PackerImpl  extends TLGlobals implements Pack200.Packer {
 
     // All the worker bees.....
     // The packer worker.
-    @SuppressWarnings("unchecked")
     private class DoPack {
         final int verbose = props.getInteger(Utils.DEBUG_VERBOSE);
 
@@ -166,8 +164,11 @@ public class PackerImpl  extends TLGlobals implements Pack200.Packer {
             if (verbose > 0) Utils.log.info(props.toString());
         }
 
-        // Here's where the bits are collected before getting packed:
-        final Package pkg = new Package();
+        // Here's where the bits are collected before getting packed, we also
+        // initialize the version numbers now.
+        final Package pkg = new Package(Package.Version.makeVersion(props, "min.class"),
+                                        Package.Version.makeVersion(props, "max.class"),
+                                        Package.Version.makeVersion(props, "package"));
 
         final String unknownAttrCommand;
         {
@@ -178,6 +179,15 @@ public class PackerImpl  extends TLGlobals implements Pack200.Packer {
                 throw new RuntimeException("Bad option: " + Pack200.Packer.UNKNOWN_ATTRIBUTE + " = " + uaMode);
             }
             unknownAttrCommand = uaMode.intern();
+        }
+        final String classFormatCommand;
+        {
+            String fmtMode = props.getProperty(Utils.CLASS_FORMAT_ERROR, Pack200.Packer.PASS);
+            if (!(Pack200.Packer.PASS.equals(fmtMode) ||
+                  Pack200.Packer.ERROR.equals(fmtMode))) {
+                throw new RuntimeException("Bad option: " + Utils.CLASS_FORMAT_ERROR + " = " + fmtMode);
+            }
+            classFormatCommand = fmtMode.intern();
         }
 
         final Map<Attribute.Layout, Attribute> attrDefs;
@@ -199,9 +209,8 @@ public class PackerImpl  extends TLGlobals implements Pack200.Packer {
             };
             for (int i = 0; i < ctypes.length; i++) {
                 String pfx = keys[i];
-                Map<Object, Object> map = props.prefixMap(pfx);
-                for (Object k : map.keySet()) {
-                    String key = (String)k;
+                Map<String, String> map = props.prefixMap(pfx);
+                for (String key : map.keySet()) {
                     assert(key.startsWith(pfx));
                     String name = key.substring(pfx.length());
                     String layout = props.getProperty(key);
@@ -280,23 +289,6 @@ public class PackerImpl  extends TLGlobals implements Pack200.Packer {
                 i.set(file);
             }
             if (verbose > 0) Utils.log.info("passFiles = " + passFiles);
-        }
-
-        {
-            // Fill in permitted range of major/minor version numbers.
-            int ver;
-            if ((ver = props.getInteger(Utils.COM_PREFIX+"min.class.majver")) != 0)
-                pkg.min_class_majver = (short) ver;
-            if ((ver = props.getInteger(Utils.COM_PREFIX+"min.class.minver")) != 0)
-                pkg.min_class_minver = (short) ver;
-            if ((ver = props.getInteger(Utils.COM_PREFIX+"max.class.majver")) != 0)
-                pkg.max_class_majver = (short) ver;
-            if ((ver = props.getInteger(Utils.COM_PREFIX+"max.class.minver")) != 0)
-                pkg.max_class_minver = (short) ver;
-            if ((ver = props.getInteger(Utils.COM_PREFIX+"package.minver")) != 0)
-                pkg.package_minver = (short) ver;
-            if ((ver = props.getInteger(Utils.COM_PREFIX+"package.majver")) != 0)
-                pkg.package_majver = (short) ver;
         }
 
         {
@@ -522,8 +514,7 @@ public class PackerImpl  extends TLGlobals implements Pack200.Packer {
                     }
                 } else if (ioe instanceof ClassReader.ClassFormatException) {
                     ClassReader.ClassFormatException ce = (ClassReader.ClassFormatException) ioe;
-                    // %% TODO: Do we invent a new property for this or reuse %%
-                    if (unknownAttrCommand.equals(Pack200.Packer.PASS)) {
+                    if (classFormatCommand.equals(Pack200.Packer.PASS)) {
                         Utils.log.info(ce.toString());
                         Utils.log.warning(message + " unknown class format: " +
                                 fname);
@@ -605,9 +596,6 @@ public class PackerImpl  extends TLGlobals implements Pack200.Packer {
             if (props.getBoolean(Utils.COM_PREFIX+"strip.constants"))    pkg.stripAttributeKind("Constant");
             if (props.getBoolean(Utils.COM_PREFIX+"strip.exceptions"))   pkg.stripAttributeKind("Exceptions");
             if (props.getBoolean(Utils.COM_PREFIX+"strip.innerclasses")) pkg.stripAttributeKind("InnerClasses");
-
-            // Must choose an archive version; PackageWriter does not.
-            if (pkg.package_majver <= 0)  pkg.choosePackageVersion();
 
             PackageWriter pw = new PackageWriter(pkg, out);
             pw.archiveNextCount = nextCount;

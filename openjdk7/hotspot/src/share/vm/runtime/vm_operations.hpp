@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,13 +56,12 @@
   template(PrintJNI)                              \
   template(HeapDumper)                            \
   template(DeoptimizeTheWorld)                    \
+  template(CollectForMetadataAllocation)          \
   template(GC_HeapInspection)                     \
   template(GenCollectFull)                        \
   template(GenCollectFullConcurrent)              \
   template(GenCollectForAllocation)               \
-  template(GenCollectForPermanentAllocation)      \
   template(ParallelGCFailedAllocation)            \
-  template(ParallelGCFailedPermanentAllocation)   \
   template(ParallelGCSystemGC)                    \
   template(CGC_Operation)                         \
   template(CMS_Initial_Mark)                      \
@@ -303,9 +302,9 @@ class VM_UnlinkSymbols: public VM_Operation {
 
 class VM_Verify: public VM_Operation {
  private:
-  KlassHandle _dependee;
+  bool _silent;
  public:
-  VM_Verify() {}
+  VM_Verify(bool silent = VerifySilently) : _silent(silent) {}
   VMOp_Type type() const { return VMOp_Verify; }
   void doit();
 };

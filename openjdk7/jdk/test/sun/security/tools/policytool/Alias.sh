@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 4449491 7083664
+# @bug 4449491
 # @summary policytool should allow principal type to be empty
 #               (keystore alias substitution)
 #
@@ -56,7 +56,7 @@ case "$OS" in
     NULL=/dev/null
     PS=";"
     FS="/"
-    ;;	
+    ;;
   Windows* )
     NULL=NUL
     PS=";"

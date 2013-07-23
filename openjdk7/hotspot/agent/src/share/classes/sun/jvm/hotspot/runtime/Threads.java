@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,9 +32,7 @@ import sun.jvm.hotspot.runtime.solaris_x86.SolarisX86JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.solaris_amd64.SolarisAMD64JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.win32_amd64.Win32AMD64JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.win32_x86.Win32X86JavaThreadPDAccess;
-import sun.jvm.hotspot.runtime.win32_ia64.Win32IA64JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.linux_x86.LinuxX86JavaThreadPDAccess;
-import sun.jvm.hotspot.runtime.linux_ia64.LinuxIA64JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.linux_amd64.LinuxAMD64JavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.linux_sparc.LinuxSPARCJavaThreadPDAccess;
 import sun.jvm.hotspot.runtime.bsd_x86.BsdX86JavaThreadPDAccess;
@@ -44,6 +42,7 @@ import sun.jvm.hotspot.utilities.*;
 public class Threads {
     private static JavaThreadFactory threadFactory;
     private static AddressField      threadListField;
+    private static CIntegerField     numOfThreadsField;
     private static VirtualConstructor virtualConstructor;
     private static JavaThreadPDAccess access;
 
@@ -59,6 +58,7 @@ public class Threads {
         Type type = db.lookupType("Threads");
 
         threadListField = type.getAddressField("_thread_list");
+        numOfThreadsField = type.getCIntegerField("_number_of_threads");
 
         // Instantiate appropriate platform-specific JavaThreadFactory
         String os  = VM.getVM().getOS();
@@ -79,14 +79,10 @@ public class Threads {
                 access =  new Win32X86JavaThreadPDAccess();
             } else if (cpu.equals("amd64")) {
                 access =  new Win32AMD64JavaThreadPDAccess();
-            } else if (cpu.equals("ia64")) {
-                access =  new Win32IA64JavaThreadPDAccess();
             }
         } else if (os.equals("linux")) {
             if (cpu.equals("x86")) {
                 access = new LinuxX86JavaThreadPDAccess();
-            } else if (cpu.equals("ia64")) {
-                access = new LinuxIA64JavaThreadPDAccess();
             } else if (cpu.equals("amd64")) {
                 access = new LinuxAMD64JavaThreadPDAccess();
             } else if (cpu.equals("sparc")) {
@@ -106,6 +102,10 @@ public class Threads {
             if (cpu.equals("x86")) {
                 access = new BsdX86JavaThreadPDAccess();
             } else if (cpu.equals("amd64") || cpu.equals("x86_64")) {
+                access = new BsdAMD64JavaThreadPDAccess();
+            }
+        } else if (os.equals("darwin")) {
+            if (cpu.equals("amd64") || cpu.equals("x86_64")) {
                 access = new BsdAMD64JavaThreadPDAccess();
             }
         }
@@ -148,6 +148,10 @@ public class Threads {
         }
 
         return createJavaThreadWrapper(threadAddr);
+    }
+
+    public int getNumberOfThreads() {
+        return (int) numOfThreadsField.getValue();
     }
 
     /** Routine for instantiating appropriately-typed wrapper for a

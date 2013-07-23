@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,15 +31,16 @@
 #include "gc_implementation/shared/copyFailedInfo.hpp"
 #include "memory/allocation.hpp"
 #include "memory/referenceType.hpp"
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/g1/g1YCTypes.hpp"
 #endif
+#include "utilities/macros.hpp"
 
 typedef uint GCId;
 
 class EvacuationInfo;
 class GCHeapSummary;
-class PermGenSummary;
+class MetaspaceSummary;
 class PSHeapSummary;
 class ReferenceProcessorStats;
 class TimePartitions;
@@ -96,7 +97,7 @@ class ParallelOldGCInfo VALUE_OBJ_CLASS_SPEC {
   void* dense_prefix() const { return _dense_prefix; }
 };
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 
 class G1YoungGCInfo VALUE_OBJ_CLASS_SPEC {
   G1YCType _type;
@@ -108,20 +109,18 @@ class G1YoungGCInfo VALUE_OBJ_CLASS_SPEC {
   G1YCType type() const { return _type; }
 };
 
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
 class GCTracer : public ResourceObj {
-  friend class ObjectCountEventSenderClosure;
  protected:
   SharedGCInfo _shared_gc_info;
 
  public:
   void report_gc_start(GCCause::Cause cause, jlong timestamp);
   void report_gc_end(jlong timestamp, TimePartitions* time_partitions);
-  void report_gc_heap_summary(GCWhen::Type when, const GCHeapSummary& heap_summary, const PermGenSummary& perm_gen_summary) const;
+  void report_gc_heap_summary(GCWhen::Type when, const GCHeapSummary& heap_summary, const MetaspaceSummary& meta_space_summary) const;
   void report_gc_reference_stats(const ReferenceProcessorStats& rp) const;
-  void report_object_count_after_gc(BoolObjectClosure* object_filter);
-
+  void report_object_count_after_gc(BoolObjectClosure* object_filter) NOT_SERVICES_RETURN;
   bool has_reported_gc_start() const;
 
  protected:
@@ -132,11 +131,9 @@ class GCTracer : public ResourceObj {
  private:
   void send_garbage_collection_event() const;
   void send_gc_heap_summary_event(GCWhen::Type when, const GCHeapSummary& heap_summary) const;
-  void send_perm_gen_summary_event(GCWhen::Type when, const PermGenSummary& perm_gen_summary) const;
+  void send_meta_space_summary_event(GCWhen::Type when, const MetaspaceSummary& meta_space_summary) const;
   void send_reference_stats_event(ReferenceType type, size_t count) const;
   void send_phase_events(TimePartitions* time_partitions) const;
-  void send_object_count_after_gc_event(klassOop klass, jlong count, julong total_size) const;
-  bool should_send_object_count_after_gc_event() const;
 };
 
 class YoungGCTracer : public GCTracer {
@@ -204,7 +201,7 @@ class ParNewTracer : public YoungGCTracer {
   ParNewTracer() : YoungGCTracer(ParNew) {}
 };
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 class G1NewTracer : public YoungGCTracer {
   G1YoungGCInfo _g1_young_gc_info;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,16 +39,10 @@
 
  private:
 
-#ifdef _ALLBSD_SOURCE
-
 #ifdef __APPLE__
   typedef thread_t thread_id_t;
 #else
   typedef pthread_t thread_id_t;
-#endif
-
-#else
-  typedef pid_t thread_id_t;
 #endif
 
   // _pthread_id is the pthread id, which is used by library calls

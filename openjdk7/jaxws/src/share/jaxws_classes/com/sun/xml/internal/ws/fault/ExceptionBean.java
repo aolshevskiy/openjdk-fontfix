@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,7 @@ import org.w3c.dom.Node;
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Marshaller;
+import javax.xml.bind.PropertyException;
 import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlElementWrapper;
@@ -57,7 +58,9 @@ final class ExceptionBean {
      */
     public static void marshal( Throwable t, Node parent ) throws JAXBException {
         Marshaller m = JAXB_CONTEXT.createMarshaller();
-        m.setProperty("com.sun.xml.internal.bind.namespacePrefixMapper",nsp);
+        try {
+                m.setProperty("com.sun.xml.internal.bind.namespacePrefixMapper",nsp);
+        } catch (PropertyException pe) {}
         m.marshal(new ExceptionBean(t), parent );
     }
 
@@ -149,7 +152,9 @@ final class ExceptionBean {
             try {
                 return Integer.parseInt(v);
             } catch (NumberFormatException e) {
-                if(v.equals("native"))  return -2;
+                if ("native".equals(v)) {
+                    return -2;
+                }
                 return -1;
             }
         }
@@ -163,7 +168,7 @@ final class ExceptionBean {
      * Checks if the given element is the XML representation of {@link ExceptionBean}.
      */
     public static boolean isStackTraceXml(Element n) {
-        return n.getLocalName().equals(LOCAL_NAME) && n.getNamespaceURI().equals(NS);
+        return LOCAL_NAME.equals(n.getLocalName()) && NS.equals(n.getNamespaceURI());
     }
 
     private static final JAXBContext JAXB_CONTEXT;
@@ -186,7 +191,9 @@ final class ExceptionBean {
 
     private static final NamespacePrefixMapper nsp = new NamespacePrefixMapper() {
         public String getPreferredPrefix(String namespaceUri, String suggestion, boolean requirePrefix) {
-            if(namespaceUri.equals(NS)) return "";
+            if (NS.equals(namespaceUri)) {
+                return "";
+            }
             return suggestion;
         }
     };

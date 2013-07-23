@@ -28,20 +28,17 @@ package sun.lwawt.macosx;
 import sun.awt.SunToolkit;
 import sun.lwawt.LWToolkit;
 
-import java.awt.MenuContainer;
 import java.awt.MenuItem;
 import java.awt.MenuShortcut;
 import java.awt.event.*;
 import java.awt.peer.MenuItemPeer;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public class CMenuItem extends CMenuComponent implements MenuItemPeer {
-
-    private final AtomicBoolean enabled = new AtomicBoolean(true);
 
     public CMenuItem(MenuItem target) {
         super(target);
         initialize(target);
+
     }
 
     // This way we avoiding invocation of the setters twice
@@ -127,19 +124,9 @@ public class CMenuItem extends CMenuComponent implements MenuItemPeer {
         setEnabled(false);
     }
 
-    public final boolean isEnabled() {
-        return enabled.get();
-    }
-
     @Override
     public void setEnabled(boolean b) {
-        final Object parent = LWToolkit.targetToPeer(getTarget().getParent());
-        if (parent instanceof CMenuItem) {
-            b &= ((CMenuItem) parent).isEnabled();
-        }
-        if (enabled.compareAndSet(!b, b)) {
-            nativeSetEnabled(getModel(), b);
-        }
+        nativeSetEnabled(getModel(), b);
     }
 
     private native long nativeCreate(long parentMenu, boolean isSeparator);

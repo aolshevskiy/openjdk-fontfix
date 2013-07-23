@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -340,11 +340,12 @@ class ClassLoader: AllStatic {
   // Force compilation of all methods in all classes in bootstrap class path (stress test)
 #ifndef PRODUCT
  private:
-  static int _compile_the_world_counter;
+  static int _compile_the_world_class_counter;
+  static int _compile_the_world_method_counter;
  public:
   static void compile_the_world();
   static void compile_the_world_in(char* name, Handle loader, TRAPS);
-  static int  compile_the_world_counter() { return _compile_the_world_counter; }
+  static int  compile_the_world_counter() { return _compile_the_world_class_counter; }
 #endif //PRODUCT
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,6 +50,8 @@ import sun.management.snmp.util.MibLogger;
  * The class is used for representing SNMP metadata for the "JvmMemory" group.
  */
 public class JvmMemoryMetaImpl extends JvmMemoryMeta {
+
+    static final long serialVersionUID = -6500448253825893071L;
     /**
      * Constructor for the metadata associated to "JvmMemory".
      */

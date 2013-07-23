@@ -26,6 +26,7 @@
 package sun.awt.X11;
 
 import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.DataFlavor;
 import java.util.SortedMap;
 import java.io.IOException;
 import java.security.AccessController;
@@ -83,7 +84,8 @@ public final class XClipboard extends SunClipboard implements OwnershipListener
     }
 
     protected synchronized void setContentsNative(Transferable contents) {
-        SortedMap formatMap = DataTransferer.getInstance().getFormatsForTransferable
+        SortedMap<Long,DataFlavor> formatMap =
+            DataTransferer.getInstance().getFormatsForTransferable
                 (contents, DataTransferer.adaptFlavorMap(flavorMap));
         long[] formats = DataTransferer.keysToLongArray(formatMap);
 
@@ -177,6 +179,7 @@ public final class XClipboard extends SunClipboard implements OwnershipListener
             }
             synchronized (XClipboard.classLock) {
                 if (targetsAtom2Clipboard != null && !targetsAtom2Clipboard.isEmpty()) {
+                    // The viewer is still registered, schedule next poll.
                     XToolkit.schedule(this, XClipboard.getPollInterval());
                 }
             }
@@ -189,7 +192,8 @@ public final class XClipboard extends SunClipboard implements OwnershipListener
                 final XSelectionEvent xse = ev.get_xselection();
                 XClipboard clipboard = null;
                 synchronized (XClipboard.classLock) {
-                    if (targetsAtom2Clipboard != null && !targetsAtom2Clipboard.isEmpty()) {
+                    if (targetsAtom2Clipboard != null && targetsAtom2Clipboard.isEmpty()) {
+                        // The viewer was unregistered, remove the dispatcher.
                         XToolkit.removeEventDispatcher(XWindow.getXAWTRootWindow().getWindow(), this);
                         return;
                     }

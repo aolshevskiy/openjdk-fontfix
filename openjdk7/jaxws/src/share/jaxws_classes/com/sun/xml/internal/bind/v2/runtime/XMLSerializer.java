@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,7 +40,6 @@ import javax.xml.bind.ValidationEventHandler;
 import javax.xml.bind.ValidationEventLocator;
 import javax.xml.bind.annotation.DomHandler;
 import javax.xml.bind.annotation.XmlNs;
-import javax.xml.bind.annotation.XmlSchemaType;
 import javax.xml.bind.attachment.AttachmentMarshaller;
 import javax.xml.bind.helpers.NotIdentifiableEventImpl;
 import javax.xml.bind.helpers.ValidationEventImpl;
@@ -123,10 +122,8 @@ public final class XMLSerializer extends Coordinator {
     /** The XML printer. */
     private XmlOutput out;
 
-    // TODO: fix the access modifier
     public final NameList nameList;
 
-    // TODO: fix the access modifier
     public final int[] knownUri2prefixIndexMap;
 
     private final NamespaceContextImpl nsContext;
@@ -311,7 +308,12 @@ public final class XMLSerializer extends Coordinator {
             nse = nse.push();
             out.beginStartTag(tagName);
             out.endStartTag();
+            if(data != null)
+                try {
                         out.text(data,false);
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException(Messages.ILLEGAL_CONTENT.format(fieldName, e.getMessage()));
+                }
             out.endTag(tagName);
             nse = nse.pop();
         } else {
@@ -320,7 +322,11 @@ public final class XMLSerializer extends Coordinator {
             startElement(tagName,null);
             endNamespaceDecls(null);
             endAttributes();
-            out.text(data,false);
+                try {
+                    out.text(data, false);
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException(Messages.ILLEGAL_CONTENT.format(fieldName, e.getMessage()));
+                }
             endElement();
         }
     }
@@ -331,6 +337,7 @@ public final class XMLSerializer extends Coordinator {
             nse = nse.push();
             out.beginStartTag(tagName);
             out.endStartTag();
+            if(data != null)
                 out.text(data,false);
             out.endTag(tagName);
             nse = nse.pop();
@@ -349,17 +356,6 @@ public final class XMLSerializer extends Coordinator {
         intData.reset(data);
         leafElement(tagName,intData,fieldName);
     }
-
-    // TODO: consider some of these in future if we expand the writer to use something other than SAX
-//    void leafElement( QName tagName, byte value, String fieldName ) throws SAXException;
-//    void leafElement( QName tagName, char value, String fieldName ) throws SAXException;
-//    void leafElement( QName tagName, short value, String fieldName ) throws SAXException;
-//    void leafElement( QName tagName, int value, String fieldName ) throws SAXException;
-//    void leafElement( QName tagName, long value, String fieldName ) throws SAXException;
-//    void leafElement( QName tagName, float value, String fieldName ) throws SAXException;
-//    void leafElement( QName tagName, double value, String fieldName ) throws SAXException;
-//    void leafElement( QName tagName, boolean value, String fieldName ) throws SAXException;
-
 
     /**
      * Marshalls text.
@@ -798,8 +794,8 @@ public final class XMLSerializer extends Coordinator {
     }
 
     public Transformer getIdentityTransformer() {
-        if(identityTransformer==null)
-            identityTransformer = JAXBContextImpl.createTransformer();
+        if (identityTransformer==null)
+            identityTransformer = JAXBContextImpl.createTransformer(grammar.disableSecurityProcessing);
         return identityTransformer;
     }
 

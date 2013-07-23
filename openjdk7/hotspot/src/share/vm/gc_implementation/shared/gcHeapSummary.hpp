@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -60,6 +60,21 @@ public:
   size_t size() const { return (uintptr_t)_end - (uintptr_t)_start; }
 };
 
+class MetaspaceSizes : public StackObj {
+  size_t _capacity;
+  size_t _used;
+  size_t _reserved;
+
+ public:
+  MetaspaceSizes() : _capacity(0), _used(0), _reserved(0) {}
+  MetaspaceSizes(size_t capacity, size_t used, size_t reserved) :
+    _capacity(capacity), _used(used), _reserved(reserved) {}
+
+  size_t capacity() const { return _capacity; }
+  size_t used() const { return _used; }
+  size_t reserved() const { return _reserved; }
+};
+
 class GCHeapSummary;
 class PSHeapSummary;
 
@@ -109,18 +124,19 @@ class PSHeapSummary : public GCHeapSummary {
    }
 };
 
-class PermGenSummary : public StackObj {
-  VirtualSpaceSummary _perm_space;
-  SpaceSummary        _object_space;
+class MetaspaceSummary : public StackObj {
+  MetaspaceSizes _meta_space;
+  MetaspaceSizes _data_space;
+  MetaspaceSizes _class_space;
 
  public:
-  PermGenSummary() :
-       _perm_space(), _object_space() { }
-  PermGenSummary(const VirtualSpaceSummary& perm_space, const SpaceSummary& object_space) :
-       _perm_space(perm_space), _object_space(object_space) { }
+  MetaspaceSummary() : _meta_space(), _data_space(), _class_space() {}
+  MetaspaceSummary(const MetaspaceSizes& meta_space, const MetaspaceSizes& data_space, const MetaspaceSizes& class_space) :
+       _meta_space(meta_space), _data_space(data_space), _class_space(class_space) { }
 
-  const VirtualSpaceSummary& perm_space() const { return _perm_space; }
-  const SpaceSummary& object_space() const { return _object_space; }
+  const MetaspaceSizes& meta_space() const { return _meta_space; }
+  const MetaspaceSizes& data_space() const { return _data_space; }
+  const MetaspaceSizes& class_space() const { return _class_space; }
 };
 
 #endif // SHARE_VM_GC_IMPLEMENTATION_SHARED_GCHEAPSUMMARY_HPP

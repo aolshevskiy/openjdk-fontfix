@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.xml.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -45,7 +44,7 @@ public final class PolicyMessages {
     }
 
     /**
-     * WSP1007: Policy exception occured when finishing WSDL parsing.
+     * WSP1007: Policy exception occurred when finishing WSDL parsing.
      *
      */
     public static String WSP_1007_POLICY_EXCEPTION_WHILE_FINISHING_PARSING_WSDL() {
@@ -81,7 +80,7 @@ public final class PolicyMessages {
     }
 
     /**
-     * WSP1048: Policy map setup failed - exception occured whily trying to modify policy map content.
+     * WSP1048: Policy map setup failed - exception occurred while trying to modify policy map content.
      *
      */
     public static String WSP_1017_MAP_UPDATE_FAILED() {
@@ -153,7 +152,7 @@ public final class PolicyMessages {
     }
 
     /**
-     * WSP1013: Exception occured while reading policy element. Following was read so far: {0}.
+     * WSP1013: Exception occurred while reading policy element. Following was read so far: {0}.
      *
      */
     public static String WSP_1013_EXCEPTION_WHEN_READING_POLICY_ELEMENT(Object arg0) {
@@ -232,6 +231,18 @@ public final class PolicyMessages {
         return localizer.localize(localizableWSP_1012_FAILED_CONFIGURE_WSDL_MODEL());
     }
 
+    public static Localizable localizableWSP_1021_FAULT_NOT_BOUND(Object arg0) {
+        return messageFactory.getMessage("WSP_1021_FAULT_NOT_BOUND", arg0);
+    }
+
+    /**
+     * WSP1021: Fault "{0}" not bound. Check names in port and binding definitions.
+     *
+     */
+    public static String WSP_1021_FAULT_NOT_BOUND(Object arg0) {
+        return localizer.localize(localizableWSP_1021_FAULT_NOT_BOUND(arg0));
+    }
+
     public static Localizable localizableWSP_1011_FAILED_TO_RETRIEVE_EFFECTIVE_POLICY_FOR_SUBJECT(Object arg0) {
         return messageFactory.getMessage("WSP_1011_FAILED_TO_RETRIEVE_EFFECTIVE_POLICY_FOR_SUBJECT", arg0);
     }
@@ -261,7 +272,7 @@ public final class PolicyMessages {
     }
 
     /**
-     * WSP1001: XMLStreamException occured when reading policy reference element.
+     * WSP1001: XMLStreamException occurred when reading policy reference element.
      *
      */
     public static String WSP_1001_XML_EXCEPTION_WHEN_PROCESSING_POLICY_REFERENCE() {

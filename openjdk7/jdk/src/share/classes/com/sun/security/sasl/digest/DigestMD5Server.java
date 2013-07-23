@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,23 +25,16 @@
 
 package com.sun.security.sasl.digest;
 
-import java.security.AccessController;
-import java.security.Provider;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.io.ByteArrayOutputStream;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.util.Random;
 import java.util.StringTokenizer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Arrays;
 
-import java.util.logging.Logger;
 import java.util.logging.Level;
 
 import javax.security.sasl.*;
@@ -147,9 +140,11 @@ final class DigestMD5Server extends DigestMD5Base implements SaslServer {
     private byte[] myCiphers;
     private List<String> serverRealms;
 
-    DigestMD5Server(String protocol, String serverName, Map props,
-        CallbackHandler cbh) throws SaslException {
-        super(props, MY_CLASS_NAME, 1, protocol + "/" + serverName, cbh);
+    DigestMD5Server(String protocol, String serverName, Map<String, ?> props,
+            CallbackHandler cbh) throws SaslException {
+        super(props, MY_CLASS_NAME, 1,
+                protocol + "/" + (serverName==null?"*":serverName),
+                cbh);
 
         serverRealms = new ArrayList<String>();
 
@@ -179,8 +174,13 @@ final class DigestMD5Server extends DigestMD5Base implements SaslServer {
         encoding = (useUTF8 ? "UTF8" : "8859_1");
 
         // By default, use server name as realm
-        if (serverRealms.size() == 0) {
-            serverRealms.add(serverName);
+        if (serverRealms.isEmpty()) {
+            if (serverName == null) {
+                throw new SaslException(
+                        "A realm must be provided in props or serverName");
+            } else {
+                serverRealms.add(serverName);
+            }
         }
     }
 
@@ -468,19 +468,23 @@ final class DigestMD5Server extends DigestMD5Base implements SaslServer {
 
         // Check that QOP is one sent by server
         byte cQop;
-        if (negotiatedQop.equals("auth")) {
-            cQop = NO_PROTECTION;
-        } else if (negotiatedQop.equals("auth-int")) {
-            cQop = INTEGRITY_ONLY_PROTECTION;
-            integrity = true;
-            rawSendSize = sendMaxBufSize - 16;
-        } else if (negotiatedQop.equals("auth-conf")) {
-            cQop = PRIVACY_PROTECTION;
-            integrity = privacy = true;
-            rawSendSize = sendMaxBufSize - 26;
-        } else {
-            throw new SaslException("DIGEST-MD5: digest response format " +
-                "violation. Invalid QOP: " + negotiatedQop);
+        switch (negotiatedQop) {
+            case "auth":
+                cQop = NO_PROTECTION;
+                break;
+            case "auth-int":
+                cQop = INTEGRITY_ONLY_PROTECTION;
+                integrity = true;
+                rawSendSize = sendMaxBufSize - 16;
+                break;
+            case "auth-conf":
+                cQop = PRIVACY_PROTECTION;
+                integrity = privacy = true;
+                rawSendSize = sendMaxBufSize - 26;
+                break;
+            default:
+                throw new SaslException("DIGEST-MD5: digest response format " +
+                    "violation. Invalid QOP: " + negotiatedQop);
         }
         if ((cQop&allQop) == 0) {
             throw new SaslException("DIGEST-MD5: server does not support " +
@@ -542,7 +546,7 @@ final class DigestMD5Server extends DigestMD5Base implements SaslServer {
         // host should match one of service's configured service names
         // Check against digest URI that mech was created with
 
-        if (digestUri.equalsIgnoreCase(digestUriFromResponse)) {
+        if (uriMatches(digestUri, digestUriFromResponse)) {
             digestUri = digestUriFromResponse; // account for case-sensitive diffs
         } else {
             throw new SaslException("DIGEST-MD5: digest response format " +
@@ -654,6 +658,21 @@ final class DigestMD5Server extends DigestMD5Base implements SaslServer {
                 passwd[i] = 0;
             }
         }
+    }
+
+    private static boolean uriMatches(String thisUri, String incomingUri) {
+        // Full match
+        if (thisUri.equalsIgnoreCase(incomingUri)) {
+            return true;
+        }
+        // Unbound match
+        if (thisUri.endsWith("/*")) {
+            int protoAndSlash = thisUri.length() - 1;
+            String thisProtoAndSlash = thisUri.substring(0, protoAndSlash);
+            String incomingProtoAndSlash = incomingUri.substring(0, protoAndSlash);
+            return thisProtoAndSlash.equalsIgnoreCase(incomingProtoAndSlash);
+        }
+        return false;
     }
 
     /**

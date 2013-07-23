@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,18 +28,7 @@
 #include "memory/allocation.inline.hpp"
 #include "runtime/mutex.hpp"
 #include "runtime/mutexLocker.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
+#include "runtime/thread.inline.hpp"
 
 PtrQueue::PtrQueue(PtrQueueSet* qset, bool perm, bool active) :
   _qset(qset), _buf(NULL), _index(0), _active(active),
@@ -63,15 +52,6 @@ void PtrQueue::flush() {
   }
 }
 
-
-static int byte_index_to_index(int ind) {
-  assert((ind % oopSize) == 0, "Invariant.");
-  return ind / oopSize;
-}
-
-static int index_to_byte_index(int byte_ind) {
-  return byte_ind * oopSize;
-}
 
 void PtrQueue::enqueue_known_active(void* ptr) {
   assert(0 <= _index && _index <= _sz, "Invariant.");

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,30 +45,6 @@ public class GB18030
 
     public GB18030() {
         super("GB18030", ExtendedCharsets.aliasesFor("GB18030"));
-    }
-
-    public short[] getDecoderIndex1() {
-        return decoderIndex1;
-    }
-
-    public String[] getDecoderIndex2() {
-        return decoderIndex2;
-    }
-
-    public short[] getSubDecoderIndex1() {
-        return index1;
-    }
-
-    public String[] getSubDecoderIndex2() {
-        return index2;
-    }
-
-    public short[] getEncoderIndex1() {
-        return encoderIndex1;
-    }
-
-    public String[] getEncoderIndex2() {
-        return encoderIndex2;
     }
 
     public boolean contains(Charset cs) {

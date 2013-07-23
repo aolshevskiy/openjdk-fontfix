@@ -399,7 +399,7 @@ public class XMenuWindow extends XBaseMenuWindow {
         if (!isCreated()) {
             return;
         }
-        if (log.isLoggable(PlatformLogger.FINER)) {
+        if (log.isLoggable(PlatformLogger.Level.FINER)) {
             log.finer("showing menu window + " + getWindow() + " at " + bounds);
         }
         XToolkit.awtLock();
@@ -432,9 +432,9 @@ public class XMenuWindow extends XBaseMenuWindow {
     /**
      * Paints menu window
      */
-    public void paint(Graphics g) {
+    @Override
+    public void paintPeer(Graphics g) {
         resetColors();
-
         int width = getWidth();
         int height = getHeight();
 

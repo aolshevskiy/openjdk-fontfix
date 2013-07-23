@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,10 +32,13 @@ import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.pipe.Codec;
 import com.sun.xml.internal.ws.api.pipe.Tube;
 
+import javax.xml.namespace.QName;
 import javax.xml.ws.Binding;
 import javax.xml.ws.WebServiceFeature;
 import javax.xml.ws.handler.Handler;
 import java.util.List;
+import java.util.Set;
+
 
 /**
  * JAX-WS implementation of {@link Binding}.
@@ -56,7 +59,7 @@ public interface WSBinding extends Binding {
      * TODO: clarify what to do with XML/HTTP binding
      *
      * <p>
-     * This is just a shor-cut for  {@code getBindingID().getSOAPVersion()}
+     * This is just a short-cut for  {@code getBindingID().getSOAPVersion()}
      *
      * @return
      *      If the binding is using SOAP, this method returns
@@ -95,7 +98,8 @@ public interface WSBinding extends Binding {
      */
     @NotNull BindingID getBindingId();
 
-    @NotNull List<Handler> getHandlerChain();
+    @NotNull@Override
+    List<Handler> getHandlerChain();
 
     /**
      * Checks if a particular {@link WebServiceFeature} is enabled.
@@ -104,6 +108,17 @@ public interface WSBinding extends Binding {
      *      true if enabled.
      */
     boolean isFeatureEnabled(@NotNull Class<? extends WebServiceFeature> feature);
+
+    /**
+     * Experimental: Checks if a particular {@link WebServiceFeature} on an operation is enabled.
+     *
+     * @param operationName
+     *      The WSDL name of the operation.
+     * @return
+     *      true if enabled.
+     */
+    boolean isOperationFeatureEnabled(@NotNull Class<? extends WebServiceFeature> feature,
+            @NotNull final QName operationName);
 
     /**
      * Gets a {@link WebServiceFeature} of the specific type.
@@ -117,7 +132,78 @@ public interface WSBinding extends Binding {
     @Nullable <F extends WebServiceFeature> F getFeature(@NotNull Class<F> featureType);
 
     /**
+     * Experimental: Gets a {@link WebServiceFeature} of the specific type that applies to an operation.
+     *
+     * @param featureType
+     *      The type of the feature to retrieve.
+     * @param operationName
+     *      The WSDL name of the operation.
+     * @return
+     *      If the feature is present and enabled, return a non-null instance.
+     *      Otherwise null.
+     */
+    @Nullable <F extends WebServiceFeature> F getOperationFeature(@NotNull Class<F> featureType,
+            @NotNull final QName operationName);
+
+    /**
      * Returns a list of features associated with {@link WSBinding}.
      */
     @NotNull WSFeatureList getFeatures();
+
+    /**
+     * Experimental: Returns a list of features associated with {@link WSBinding} that apply to
+     * a particular operation.
+     *
+     * @param operationName
+     *      The WSDL name of the operation.
+     */
+    @NotNull WSFeatureList getOperationFeatures(@NotNull final QName operationName);
+
+    /**
+     * Experimental: Returns a list of features associated with {@link WSBinding} that apply to
+     * the input message of an operation.
+     *
+     * @param operationName
+     *      The WSDL name of the operation.
+     */
+    @NotNull WSFeatureList getInputMessageFeatures(@NotNull final QName operationName);
+
+    /**
+     * Experimental: Returns a list of features associated with {@link WSBinding} that apply to
+     * the output message of an operation.
+     *
+     * @param operationName
+     *      The WSDL name of the operation.
+     */
+    @NotNull WSFeatureList getOutputMessageFeatures(@NotNull final QName operationName);
+
+    /**
+     * Experimental: Returns a list of features associated with {@link WSBinding} that apply to
+     * one of the fault messages of an operation.
+     *
+     * @param operationName
+     *      The WSDL name of the operation.
+     * @param messageName
+     *      The WSDL name of the fault message.
+     */
+    @NotNull WSFeatureList getFaultMessageFeatures(@NotNull final QName operationName,
+            @NotNull final QName messageName);
+
+    /**
+     * Returns set of header QNames known to be supported by this binding.
+     * @return Set of known QNames
+     */
+    @NotNull Set<QName> getKnownHeaders();
+
+    /**
+     * Adds header QName to set known to be supported by this binding
+     * @param knownHeader Known header QName
+     * @return true, if new entry was added; false, if known header QName was already known
+     */
+    boolean addKnownHeader(QName knownHeader);
+
+    /**
+     * @return A MessageContextFactory configured according to the binding's features.
+     */
+    @NotNull com.oracle.webservices.internal.api.message.MessageContextFactory getMessageContextFactory();
 }

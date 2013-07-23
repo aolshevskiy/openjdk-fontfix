@@ -62,7 +62,10 @@ G1BlockOffsetSharedArray::address_for_index(size_t index) const {
   check_index(index, "index out of range");
   HeapWord* result = _reserved.start() + (index << LogN_words);
   assert(result >= _reserved.start() && result < _reserved.end(),
-         "bad address from index");
+         err_msg("bad address from index result " PTR_FORMAT
+                 " _reserved.start() " PTR_FORMAT " _reserved.end() "
+                 PTR_FORMAT,
+                 result, _reserved.start(), _reserved.end()));
   return result;
 }
 

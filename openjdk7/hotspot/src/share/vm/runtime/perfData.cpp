@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -192,7 +192,7 @@ PerfLong::PerfLong(CounterNS ns, const char* namep, Units u, Variability v)
 }
 
 int PerfLong::format(char* buffer, int length) {
-  return jio_snprintf(buffer, length,"%lld", *(jlong*)_valuep);
+  return jio_snprintf(buffer, length, JLONG_FORMAT, *(jlong*)_valuep);
 }
 
 PerfLongVariant::PerfLongVariant(CounterNS ns, const char* namep, Units u,
@@ -213,7 +213,10 @@ PerfLongVariant::PerfLongVariant(CounterNS ns, const char* namep, Units u,
 
 void PerfLongVariant::sample() {
 
-  assert(_sample_helper != NULL || _sampled != NULL, "unexpected state");
+  // JJJ - This should not happen.  Maybe the first sample is taken
+  // while the _sample_helper is being null'ed out.
+  // assert(_sample_helper != NULL || _sampled != NULL, "unexpected state");
+  if (_sample_helper == NULL) return;
 
   if (_sample_helper != NULL) {
     *(jlong*)_valuep = _sample_helper->take_sample();
@@ -588,6 +591,10 @@ bool PerfDataList::by_name(void* name, PerfData* pd) {
 }
 
 PerfData* PerfDataList::find_by_name(const char* name) {
+
+  // if add_item hasn't been called the list won't be initialized
+  if (this == NULL)
+    return NULL;
 
   int i = _set->find((void*)name, PerfDataList::by_name);
 

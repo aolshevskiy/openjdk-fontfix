@@ -38,11 +38,11 @@ mkdir -p ${srcroot}
 
 # Bundle information
 drops_dir="/java/devtools/share/jdk8-drops"
-url1="http://download.java.net/glassfish/components/jax-ws/openjdk/jdk7"
-bundle1="jdk7-jaxws2_2_4-2012_05_02.zip"
+url1="http://download.java.net/glassfish/components/jax-ws/openjdk/jdk8"
+bundle1="jdk8-jaxws-2_2-SNAPSHOT-2012_01_11-patched.zip"
 srcdir1="${srcroot}/share/jaxws_classes"
-url2="http://java.net/downloads/jax-ws/JDK7"
-bundle2="jdk7-jaf-2010_08_19.zip"
+url2="http://download.java.net/glassfish/components/jax-ws/openjdk/jdk8"
+bundle2="jdk8-jaf-2011_07_22.zip"
 srcdir2="${srcroot}/share/jaf_classes"
 
 # Function to get a bundle and explode it and normalize the source files.

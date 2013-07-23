@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -92,15 +92,15 @@ final class ConditionalSpecialCasing {
     };
 
     // A hash table that contains the above entries
-    static Hashtable entryTable = new Hashtable();
+    static Hashtable<Integer, HashSet<Entry>> entryTable = new Hashtable<>();
     static {
         // create hashtable from the entry
         for (int i = 0; i < entry.length; i ++) {
             Entry cur = entry[i];
             Integer cp = new Integer(cur.getCodePoint());
-            HashSet set = (HashSet)entryTable.get(cp);
+            HashSet<Entry> set = entryTable.get(cp);
             if (set == null) {
-                set = new HashSet();
+                set = new HashSet<Entry>();
             }
             set.add(cur);
             entryTable.put(cp, set);
@@ -151,13 +151,13 @@ final class ConditionalSpecialCasing {
     }
 
     private static char[] lookUpTable(String src, int index, Locale locale, boolean bLowerCasing) {
-        HashSet set = (HashSet)entryTable.get(new Integer(src.codePointAt(index)));
+        HashSet<Entry> set = entryTable.get(new Integer(src.codePointAt(index)));
 
         if (set != null) {
-            Iterator iter = set.iterator();
+            Iterator<Entry> iter = set.iterator();
             String currentLang = locale.getLanguage();
             while (iter.hasNext()) {
-                Entry entry = (Entry)iter.next();
+                Entry entry = iter.next();
                 String conditionLang= entry.getLanguage();
                 if (((conditionLang == null) || (conditionLang.equals(currentLang))) &&
                         isConditionMet(src, index, locale, entry.getCondition())) {

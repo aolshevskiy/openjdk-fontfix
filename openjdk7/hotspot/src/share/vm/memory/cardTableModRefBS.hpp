@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -280,16 +280,11 @@ public:
   }
 
   CardTableModRefBS(MemRegion whole_heap, int max_covered_regions);
+  ~CardTableModRefBS();
 
   // *** Barrier set functions.
 
   bool has_write_ref_pre_barrier() { return false; }
-
-  inline bool write_ref_needs_barrier(void* field, oop new_val) {
-    // Note that this assumes the perm gen is the highest generation
-    // in the address space
-    return new_val != NULL && !new_val->is_perm();
-  }
 
   // Record a reference update. Note that these versions are precise!
   // The scanning code has to handle the fact that the write barrier may be

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -84,7 +84,7 @@ class UnixChannelFactory {
                     }
                     continue;
                 }
-                if (option == LinkOption.NOFOLLOW_LINKS && supportsNoFollowLinks()) {
+                if (option == LinkOption.NOFOLLOW_LINKS && O_NOFOLLOW != 0) {
                     flags.noFollowLinks = true;
                     continue;
                 }
@@ -100,10 +100,10 @@ class UnixChannelFactory {
     /**
      * Constructs a file channel from an existing (open) file descriptor
      */
-    static FileChannel newFileChannel(int fd, String path, boolean reading, boolean writing) {
+    static FileChannel newFileChannel(int fd, boolean reading, boolean writing) {
         FileDescriptor fdObj = new FileDescriptor();
         fdAccess.set(fdObj, fd);
-        return FileChannelImpl.open(fdObj, path, reading, writing, null);
+        return FileChannelImpl.open(fdObj, reading, writing, null);
     }
 
     /**
@@ -134,8 +134,7 @@ class UnixChannelFactory {
             throw new IllegalArgumentException("APPEND + TRUNCATE_EXISTING not allowed");
 
         FileDescriptor fdObj = open(dfd, path, pathForPermissionCheck, flags, mode);
-        return FileChannelImpl.open(fdObj, path.toString(),
-            flags.read, flags.write, flags.append, null);
+        return FileChannelImpl.open(fdObj, flags.read, flags.write, flags.append, null);
     }
 
     /**
@@ -219,7 +218,7 @@ class UnixChannelFactory {
         // follow links by default
         boolean followLinks = true;
         if (!flags.createNew && (flags.noFollowLinks || flags.deleteOnClose)) {
-            if (flags.deleteOnClose && !supportsNoFollowLinks()) {
+            if (flags.deleteOnClose && O_NOFOLLOW == 0) {
                 try {
                     if (UnixFileAttributes.get(path, false).isSymbolicLink())
                         throw new UnixException("DELETE_ON_CLOSE specified and file is a symbolic link");

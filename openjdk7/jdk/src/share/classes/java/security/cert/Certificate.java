@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package java.security.cert;
 
 import java.util.Arrays;
 
+import java.security.Provider;
 import java.security.PublicKey;
 import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
@@ -89,8 +90,8 @@ public abstract class Certificate implements java.io.Serializable {
 
     /**
      * Compares this certificate for equality with the specified
-     * object. If the <code>other</code> object is an
-     * <code>instanceof</code> <code>Certificate</code>, then
+     * object. If the {@code other} object is an
+     * {@code instanceof} {@code Certificate}, then
      * its encoded form is retrieved and compared with the
      * encoded form of this certificate.
      *
@@ -185,6 +186,35 @@ public abstract class Certificate implements java.io.Serializable {
         throws CertificateException, NoSuchAlgorithmException,
         InvalidKeyException, NoSuchProviderException,
         SignatureException;
+
+    /**
+     * Verifies that this certificate was signed using the
+     * private key that corresponds to the specified public key.
+     * This method uses the signature verification engine
+     * supplied by the specified provider. Note that the specified
+     * Provider object does not have to be registered in the provider list.
+     *
+     * <p> This method was added to version 1.8 of the Java Platform
+     * Standard Edition. In order to maintain backwards compatibility with
+     * existing service providers, this method cannot be {@code abstract}
+     * and by default throws an {@code UnsupportedOperationException}.
+     *
+     * @param key the PublicKey used to carry out the verification.
+     * @param sigProvider the signature provider.
+     *
+     * @exception NoSuchAlgorithmException on unsupported signature
+     * algorithms.
+     * @exception InvalidKeyException on incorrect key.
+     * @exception SignatureException on signature errors.
+     * @exception CertificateException on encoding errors.
+     * @exception UnsupportedOperationException if the method is not supported
+     * @since 1.8
+     */
+    public void verify(PublicKey key, Provider sigProvider)
+        throws CertificateException, NoSuchAlgorithmException,
+        InvalidKeyException, SignatureException {
+        throw new UnsupportedOperationException();
+    }
 
     /**
      * Returns a string representation of this certificate.

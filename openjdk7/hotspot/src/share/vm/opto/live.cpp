@@ -44,7 +44,7 @@
 // block is put on the worklist.
 //   The locally live-in stuff is computed once and added to predecessor
 // live-out sets.  This separate compilation is done in the outer loop below.
-PhaseLive::PhaseLive( const PhaseCFG &cfg, LRG_List &names, Arena *arena ) : Phase(LIVE), _cfg(cfg), _names(names), _arena(arena), _live(0) {
+PhaseLive::PhaseLive( const PhaseCFG &cfg, const LRG_List &names, Arena *arena ) : Phase(LIVE), _cfg(cfg), _names(names), _arena(arena), _live(0) {
 }
 
 void PhaseLive::compute(uint maxlrg) {
@@ -331,6 +331,7 @@ void PhaseChaitin::verify_base_ptrs( ResourceArea *a ) const {
 #ifdef _LP64
                       UseCompressedOops && check->as_Mach()->ideal_Opcode() == Op_CastPP ||
                       UseCompressedOops && check->as_Mach()->ideal_Opcode() == Op_DecodeN ||
+                      UseCompressedKlassPointers && check->as_Mach()->ideal_Opcode() == Op_DecodeNKlass ||
 #endif
                       check->as_Mach()->ideal_Opcode() == Op_LoadP ||
                       check->as_Mach()->ideal_Opcode() == Op_LoadKlass)) {

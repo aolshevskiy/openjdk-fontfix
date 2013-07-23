@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,49 +26,24 @@
 package sun.security.provider;
 
 import java.io.*;
-import java.lang.RuntimePermission;
 import java.lang.reflect.*;
-import java.lang.ref.*;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URI;
 import java.util.*;
-import java.util.Enumeration;
-import java.util.Hashtable;
-import java.util.List;
-import java.util.StringTokenizer;
-import java.util.PropertyPermission;
-import java.util.ArrayList;
-import java.util.ListIterator;
-import java.util.WeakHashMap;
 import java.text.MessageFormat;
-import com.sun.security.auth.PrincipalComparator;
 import java.security.*;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import javax.security.auth.PrivateCredentialPermission;
 import javax.security.auth.Subject;
 import javax.security.auth.x500.X500Principal;
 import java.io.FilePermission;
 import java.net.SocketPermission;
 import java.net.NetPermission;
-import java.util.PropertyPermission;
 import java.util.concurrent.atomic.AtomicReference;
-/*
-import javax.security.auth.AuthPermission;
-import javax.security.auth.kerberos.ServicePermission;
-import javax.security.auth.kerberos.DelegationPermission;
-import java.io.SerializablePermission;
-import java.util.logging.LoggingPermission;
-import java.sql.SQLPermission;
-import java.lang.reflect.ReflectPermission;
-import javax.sound.sampled.AudioPermission;
-import javax.net.ssl.SSLPermission;
-*/
 import sun.misc.JavaSecurityProtectionDomainAccess;
 import static sun.misc.JavaSecurityProtectionDomainAccess.ProtectionDomainCache;
 import sun.misc.SharedSecrets;
-import sun.security.util.Password;
 import sun.security.util.PolicyUtil;
 import sun.security.util.PropertyExpander;
 import sun.security.util.Debug;
@@ -801,12 +776,9 @@ public class PolicyFile extends java.security.Policy {
             debug.println("Adding policy entry: ");
             debug.println("  signedBy " + ge.signedBy);
             debug.println("  codeBase " + ge.codeBase);
-            if (ge.principals != null && ge.principals.size() > 0) {
-                ListIterator<PolicyParser.PrincipalEntry> li =
-                                                ge.principals.listIterator();
-                while (li.hasNext()) {
-                    PolicyParser.PrincipalEntry pppe = li.next();
-                debug.println("  " + pppe.toString());
+            if (ge.principals != null) {
+                for (PolicyParser.PrincipalEntry pppe : ge.principals) {
+                    debug.println("  " + pppe.toString());
                 }
             }
         }
@@ -962,10 +934,14 @@ public class PolicyFile extends java.security.Policy {
                InvocationTargetException
     {
         //XXX we might want to keep a hash of created factories...
-        Class<?> pc = Class.forName(type);
+        Class<?> pc = Class.forName(type, false, null);
         Permission answer = getKnownInstance(pc, name, actions);
         if (answer != null) {
             return answer;
+        }
+        if (!Permission.class.isAssignableFrom(pc)) {
+            // not the right subtype
+            throw new ClassCastException(type + " is not a Permission");
         }
 
         if (name == null && actions == null) {
@@ -1006,9 +982,8 @@ public class PolicyFile extends java.security.Policy {
      * via reflection. Keep list short to not penalize non-JDK-defined
      * permissions.
      */
-    private static final Permission getKnownInstance(Class claz,
+    private static final Permission getKnownInstance(Class<?> claz,
         String name, String actions) {
-        // XXX shorten list to most popular ones?
         if (claz.equals(FilePermission.class)) {
             return new FilePermission(name, actions);
         } else if (claz.equals(SocketPermission.class)) {
@@ -1021,30 +996,6 @@ public class PolicyFile extends java.security.Policy {
             return new NetPermission(name, actions);
         } else if (claz.equals(AllPermission.class)) {
             return SecurityConstants.ALL_PERMISSION;
-/*
-        } else if (claz.equals(ReflectPermission.class)) {
-            return new ReflectPermission(name, actions);
-        } else if (claz.equals(SecurityPermission.class)) {
-            return new SecurityPermission(name, actions);
-        } else if (claz.equals(PrivateCredentialPermission.class)) {
-            return new PrivateCredentialPermission(name, actions);
-        } else if (claz.equals(AuthPermission.class)) {
-            return new AuthPermission(name, actions);
-        } else if (claz.equals(ServicePermission.class)) {
-            return new ServicePermission(name, actions);
-        } else if (claz.equals(DelegationPermission.class)) {
-            return new DelegationPermission(name, actions);
-        } else if (claz.equals(SerializablePermission.class)) {
-            return new SerializablePermission(name, actions);
-        } else if (claz.equals(AudioPermission.class)) {
-            return new AudioPermission(name, actions);
-        } else if (claz.equals(SSLPermission.class)) {
-            return new SSLPermission(name, actions);
-        } else if (claz.equals(LoggingPermission.class)) {
-            return new LoggingPermission(name, actions);
-        } else if (claz.equals(SQLPermission.class)) {
-            return new SQLPermission(name, actions);
-*/
         } else {
             return null;
         }
@@ -1086,7 +1037,7 @@ public class PolicyFile extends java.security.Policy {
 
             if (cert != null) {
                 if (vcerts == null)
-                    vcerts = new ArrayList<Certificate>();
+                    vcerts = new ArrayList<>();
                 vcerts.add(cert);
             }
         }
@@ -1253,7 +1204,10 @@ public class PolicyFile extends java.security.Policy {
      * @return the set of permissions according to the policy.
      */
     private PermissionCollection getPermissions(Permissions perms,
-                               final CodeSource cs) {
+                                                final CodeSource cs) {
+
+        if (cs == null)
+            return perms;
 
         CodeSource canonCodeSource = AccessController.doPrivileged(
             new java.security.PrivilegedAction<CodeSource>(){
@@ -1333,7 +1287,7 @@ public class PolicyFile extends java.security.Policy {
 
         List<PolicyParser.PrincipalEntry> entryPs = entry.getPrincipals();
         if (debug != null) {
-            ArrayList<PolicyParser.PrincipalEntry> accPs = new ArrayList<>();
+            List<PolicyParser.PrincipalEntry> accPs = new ArrayList<>();
             if (principals != null) {
                 for (int i = 0; i < principals.length; i++) {
                     accPs.add(new PolicyParser.PrincipalEntry
@@ -1346,7 +1300,7 @@ public class PolicyFile extends java.security.Policy {
                 "\tActive Principals: " + accPs);
         }
 
-        if (entryPs == null || entryPs.size() == 0) {
+        if (entryPs == null || entryPs.isEmpty()) {
 
             // policy entry has no principals -
             // add perms regardless of principals in current ACC
@@ -1372,79 +1326,71 @@ public class PolicyFile extends java.security.Policy {
         // has principals.  see if policy entry principals match
         // principals in current ACC
 
-        for (int i = 0; i < entryPs.size(); i++) {
-            PolicyParser.PrincipalEntry pppe = entryPs.get(i);
+        for (PolicyParser.PrincipalEntry pppe : entryPs) {
 
-            // see if principal entry is a PrincipalComparator
+            // Check for wildcards
+            if (pppe.isWildcardClass()) {
+                // a wildcard class matches all principals in current ACC
+                continue;
+            }
 
+            if (pppe.isWildcardName()) {
+                // a wildcard name matches any principal with the same class
+                if (wildcardPrincipalNameImplies(pppe.principalClass,
+                                                 principals)) {
+                    continue;
+                }
+                if (debug != null) {
+                    debug.println("evaluation (principal name wildcard) failed");
+                }
+                // policy entry principal not in current ACC -
+                // immediately return and go to next policy entry
+                return;
+            }
+
+            Set<Principal> pSet = new HashSet<>(Arrays.asList(principals));
+            Subject subject = new Subject(true, pSet,
+                                          Collections.EMPTY_SET,
+                                          Collections.EMPTY_SET);
             try {
-                Class<?> pClass = Class.forName
-                                (pppe.principalClass,
-                                true,
-                                Thread.currentThread().getContextClassLoader());
+                ClassLoader cl = Thread.currentThread().getContextClassLoader();
+                Class<?> pClass = Class.forName(pppe.principalClass, false, cl);
+                if (!Principal.class.isAssignableFrom(pClass)) {
+                    // not the right subtype
+                    throw new ClassCastException(pppe.principalClass +
+                                                 " is not a Principal");
+                }
 
-                if (!PrincipalComparator.class.isAssignableFrom(pClass)) {
+                Constructor<?> c = pClass.getConstructor(PARAMS1);
+                Principal p = (Principal)c.newInstance(new Object[] {
+                                                       pppe.principalName });
 
-                    // common case - dealing with regular Principal class.
-                    // see if policy entry principal is in current ACC
+                if (debug != null) {
+                    debug.println("found Principal " + p.getClass().getName());
+                }
 
-                    if (!checkEntryPs(principals, pppe)) {
-                        if (debug != null) {
-                            debug.println("evaluation (principals) failed");
-                        }
-
-                        // policy entry principal not in current ACC -
-                        // immediately return and go to next policy entry
-                        return;
-                    }
-
-                } else {
-
-                    // dealing with a PrincipalComparator
-
-                    Constructor<?> c = pClass.getConstructor(PARAMS1);
-                    PrincipalComparator pc = (PrincipalComparator)c.newInstance
-                                        (new Object[] { pppe.principalName });
-
+                // check if the Principal implies the current
+                // thread's principals
+                if (!p.implies(subject)) {
                     if (debug != null) {
-                        debug.println("found PrincipalComparator " +
-                                        pc.getClass().getName());
+                        debug.println("evaluation (principal implies) failed");
                     }
 
-                    // check if the PrincipalComparator
-                    // implies the current thread's principals
-
-                    Set<Principal> pSet = new HashSet<>(principals.length);
-                    for (int j = 0; j < principals.length; j++) {
-                        pSet.add(principals[j]);
-                    }
-                    Subject subject = new Subject(true,
-                                                pSet,
-                                                Collections.EMPTY_SET,
-                                                Collections.EMPTY_SET);
-
-                    if (!pc.implies(subject)) {
-                        if (debug != null) {
-                            debug.println
-                                ("evaluation (principal comparator) failed");
-                        }
-
-                        // policy principal does not imply the current Subject -
-                        // immediately return and go to next policy entry
-                        return;
-                    }
+                    // policy principal does not imply the current Subject -
+                    // immediately return and go to next policy entry
+                    return;
                 }
             } catch (Exception e) {
-                // fall back to regular principal comparison.
+                // fall back to default principal comparison.
                 // see if policy entry principal is in current ACC
 
                 if (debug != null) {
                     e.printStackTrace();
                 }
 
-                if (!checkEntryPs(principals, pppe)) {
+                if (!pppe.implies(subject)) {
                     if (debug != null) {
-                        debug.println("evaluation (principals) failed");
+                        debug.println("evaluation (default principal implies) failed");
                     }
 
                     // policy entry principal not in current ACC -
@@ -1454,7 +1400,7 @@ public class PolicyFile extends java.security.Policy {
             }
 
             // either the principal information matched,
-            // or the PrincipalComparator.implies succeeded.
+            // or the Principal.implies succeeded.
             // continue loop and test the next policy principal
         }
 
@@ -1465,6 +1411,21 @@ public class PolicyFile extends java.security.Policy {
             debug.println("evaluation (codesource/principals) passed");
         }
         addPerms(perms, principals, entry);
+    }
+
+    /**
+     * Returns true if the array of principals contains at least one
+     * principal of the specified class.
+     */
+    private static boolean wildcardPrincipalNameImplies(String principalClass,
+                                                        Principal[] principals)
+    {
+        for (Principal p : principals) {
+            if (principalClass.equals(p.getClass().getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void addPerms(Permissions perms,
@@ -1489,47 +1450,6 @@ public class PolicyFile extends java.security.Policy {
     }
 
     /**
-     * This method returns, true, if the principal in the policy entry,
-     * pppe, is part of the current thread's principal array, pList.
-     * This method also returns, true, if the policy entry's principal
-     * is appropriately wildcarded.
-     *
-     * Note that the provided <i>pppe</i> argument may have
-     * wildcards (*) for both the <code>Principal</code> class and name.
-     *
-     * @param pList an array of principals from the current thread's
-     *          AccessControlContext.
-     *
-     * @param pppe a Principal specified in a policy grant entry.
-     *
-     * @return true if the current thread's pList "contains" the
-     *          principal in the policy entry, pppe.  This method
-     *          also returns true if the policy entry's principal
-     *          appropriately wildcarded.
-     */
-    private boolean checkEntryPs(Principal[] pList,
-                                PolicyParser.PrincipalEntry pppe) {
-
-        for (int i = 0; i < pList.length; i++) {
-
-            if (pppe.principalClass.equals
-                        (PolicyParser.PrincipalEntry.WILDCARD_CLASS) ||
-                pppe.principalClass.equals
-                        (pList[i].getClass().getName())) {
-
-                if (pppe.principalName.equals
-                        (PolicyParser.PrincipalEntry.WILDCARD_NAME) ||
-                    pppe.principalName.equals
-                        (pList[i].getName())) {
-
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
      * <p>
      *
      * @param sp the SelfPermission that needs to be expanded <p>
@@ -1547,7 +1467,7 @@ public class PolicyFile extends java.security.Policy {
                             Principal[] pdp,
                             Permissions perms) {
 
-        if (entryPs == null || entryPs.size() == 0) {
+        if (entryPs == null || entryPs.isEmpty()) {
             // No principals in the grant to substitute
             if (debug != null) {
                 debug.println("Ignoring permission "
@@ -1572,8 +1492,7 @@ public class PolicyFile extends java.security.Policy {
             sb.append(sp.getSelfName().substring(startIndex, v));
 
             // expand SELF
-            ListIterator<PolicyParser.PrincipalEntry> pli =
-                                                entryPs.listIterator();
+            Iterator<PolicyParser.PrincipalEntry> pli = entryPs.iterator();
             while (pli.hasNext()) {
                 PolicyParser.PrincipalEntry pppe = pli.next();
                 String[][] principalInfo = getPrincipalInfo(pppe,pdp);
@@ -1600,8 +1519,8 @@ public class PolicyFile extends java.security.Policy {
         try {
             // first try to instantiate the permission
             perms.add(getInstance(sp.getSelfType(),
-                                sb.toString(),
-                                sp.getSelfActions()));
+                                  sb.toString(),
+                                  sp.getSelfActions()));
         } catch (ClassNotFoundException cnfe) {
             // ok, the permission is not in the bootclasspath.
             // before we add an UnresolvedPermission, check to see
@@ -1677,10 +1596,7 @@ public class PolicyFile extends java.security.Policy {
         // 2) the entry's Principal name is wildcarded only
         // 3) the entry's Principal class and name are wildcarded
 
-        if (!pe.principalClass.equals
-            (PolicyParser.PrincipalEntry.WILDCARD_CLASS) &&
-            !pe.principalName.equals
-            (PolicyParser.PrincipalEntry.WILDCARD_NAME)) {
+        if (!pe.isWildcardClass() && !pe.isWildcardName()) {
 
             // build an info array for the principal
             // from the Policy entry
@@ -1689,24 +1605,19 @@ public class PolicyFile extends java.security.Policy {
             info[0][1] = pe.principalName;
             return info;
 
-        } else if (!pe.principalClass.equals
-                   (PolicyParser.PrincipalEntry.WILDCARD_CLASS) &&
-                   pe.principalName.equals
-                   (PolicyParser.PrincipalEntry.WILDCARD_NAME)) {
+        } else if (!pe.isWildcardClass() && pe.isWildcardName()) {
 
             // build an info array for every principal
             // in the current domain which has a principal class
             // that is equal to policy entry principal class name
             List<Principal> plist = new ArrayList<>();
             for (int i = 0; i < pdp.length; i++) {
-                if(pe.principalClass.equals(pdp[i].getClass().getName()))
+                if (pe.principalClass.equals(pdp[i].getClass().getName()))
                     plist.add(pdp[i]);
             }
             String[][] info = new String[plist.size()][2];
             int i = 0;
-            java.util.Iterator<Principal> pIterator = plist.iterator();
-            while (pIterator.hasNext()) {
-                Principal p = pIterator.next();
+            for (Principal p : plist) {
                 info[i][0] = p.getClass().getName();
                 info[i][1] = p.getName();
                 i++;
@@ -1767,7 +1678,7 @@ public class PolicyFile extends java.security.Policy {
             // Done
             return certs;
 
-        ArrayList<Certificate> userCertList = new ArrayList<>();
+        List<Certificate> userCertList = new ArrayList<>();
         i = 0;
         while (i < certs.length) {
             userCertList.add(certs[i]);
@@ -1890,13 +1801,11 @@ public class PolicyFile extends java.security.Policy {
     private boolean replacePrincipals(
         List<PolicyParser.PrincipalEntry> principals, KeyStore keystore) {
 
-        if (principals == null || principals.size() == 0 || keystore == null)
+        if (principals == null || principals.isEmpty() || keystore == null)
             return true;
 
-        ListIterator<PolicyParser.PrincipalEntry> i = principals.listIterator();
-        while (i.hasNext()) {
-            PolicyParser.PrincipalEntry pppe = i.next();
-            if (pppe.principalClass.equals(PolicyParser.REPLACE_NAME)) {
+        for (PolicyParser.PrincipalEntry pppe : principals) {
+            if (pppe.isReplaceName()) {
 
                 // perform replacement
                 // (only X509 replacement is possible now)
@@ -2245,8 +2154,7 @@ public class PolicyFile extends java.security.Policy {
 
                     if (this.certs == null) {
                         // extract the signer certs
-                        ArrayList<Certificate> signerCerts =
-                            new ArrayList<>();
+                        List<Certificate> signerCerts = new ArrayList<>();
                         i = 0;
                         while (i < certs.length) {
                             signerCerts.add(certs[i]);
@@ -2403,17 +2311,17 @@ public class PolicyFile extends java.security.Policy {
         final List<PolicyEntry> identityPolicyEntries;
 
         // Maps aliases to certs
-        final Map aliasMapping;
+        final Map<Object, Object> aliasMapping;
 
         // Maps ProtectionDomain to PermissionCollection
         private final ProtectionDomainCache[] pdMapping;
         private java.util.Random random;
 
         PolicyInfo(int numCaches) {
-            policyEntries = new ArrayList<PolicyEntry>();
+            policyEntries = new ArrayList<>();
             identityPolicyEntries =
                 Collections.synchronizedList(new ArrayList<PolicyEntry>(2));
-            aliasMapping = Collections.synchronizedMap(new HashMap(11));
+            aliasMapping = Collections.synchronizedMap(new HashMap<>(11));
 
             pdMapping = new ProtectionDomainCache[numCaches];
             JavaSecurityProtectionDomainAccess jspda

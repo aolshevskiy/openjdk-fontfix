@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,19 +50,17 @@ import java.util.*;
  */
 public class ServerSOAPHandlerTube extends HandlerTube {
 
-    private WSBinding binding;
     private Set<String> roles;
 
     /**
      * Creates a new instance of SOAPHandlerTube
      */
     public ServerSOAPHandlerTube(WSBinding binding, WSDLPort port, Tube next) {
-        super(next, port);
+        super(next, port, binding);
         if (binding.getSOAPVersion() != null) {
             // SOAPHandlerTube should n't be used for bindings other than SOAP.
             // TODO: throw Exception
         }
-        this.binding = binding;
         setUpHandlersOnce();
     }
 
@@ -75,8 +73,7 @@ public class ServerSOAPHandlerTube extends HandlerTube {
      * With this handle, SOAPHandlerTube can call LogicalHandlerTube.closeHandlers()
      */
     public ServerSOAPHandlerTube(WSBinding binding, Tube next, HandlerTube cousinTube) {
-        super(next, cousinTube);
-        this.binding = binding;
+        super(next, cousinTube, binding);
         setUpHandlersOnce();
     }
 
@@ -85,7 +82,6 @@ public class ServerSOAPHandlerTube extends HandlerTube {
      */
     private ServerSOAPHandlerTube(ServerSOAPHandlerTube that, TubeCloner cloner) {
         super(that, cloner);
-        this.binding = that.binding;
         this.handlers = that.handlers;
         this.roles = that.roles;
     }
@@ -97,7 +93,7 @@ public class ServerSOAPHandlerTube extends HandlerTube {
 
     private void setUpHandlersOnce() {
         handlers = new ArrayList<Handler>();
-        HandlerConfiguration handlerConfig = ((BindingImpl) binding).getHandlerConfig();
+        HandlerConfiguration handlerConfig = ((BindingImpl) getBinding()).getHandlerConfig();
         List<SOAPHandler> soapSnapShot= handlerConfig.getSoapHandlers();
         if (!soapSnapShot.isEmpty()) {
             handlers.addAll(soapSnapShot);
@@ -106,12 +102,16 @@ public class ServerSOAPHandlerTube extends HandlerTube {
         }
     }
 
+    protected void resetProcessor() {
+        processor = null;
+    }
+
     void setUpProcessor() {
-        if(!handlers.isEmpty())
-            processor = new SOAPHandlerProcessor(false, this, binding, handlers);
+        if(!handlers.isEmpty() && processor == null)
+            processor = new SOAPHandlerProcessor(false, this, getBinding(), handlers);
     }
     MessageUpdatableContext getContext(Packet packet) {
-        SOAPMessageContextImpl context = new SOAPMessageContextImpl(binding, packet,roles);
+        SOAPMessageContextImpl context = new SOAPMessageContextImpl(getBinding(), packet,roles);
         return context;
     }
 
@@ -137,8 +137,9 @@ public class ServerSOAPHandlerTube extends HandlerTube {
 
         //Lets copy all the MessageContext.OUTBOUND_ATTACHMENT_PROPERTY to the message
         Map<String, DataHandler> atts = (Map<String, DataHandler>) context.get(MessageContext.OUTBOUND_MESSAGE_ATTACHMENTS);
-        AttachmentSet attSet = packet.getMessage().getAttachments();
-        for(String cid : atts.keySet()){
+        AttachmentSet attSet = context.packet.getMessage().getAttachments();
+        for (Map.Entry<String, DataHandler> entry : atts.entrySet()) {
+            String cid = entry.getKey();
             if (attSet.get(cid) == null) { // Otherwise we would be adding attachments twice
                 Attachment att = new DataHandlerAttachment(cid, atts.get(cid));
                 attSet.add(att);

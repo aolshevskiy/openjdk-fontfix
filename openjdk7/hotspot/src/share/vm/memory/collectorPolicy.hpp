@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,11 @@
 #ifndef SHARE_VM_MEMORY_COLLECTORPOLICY_HPP
 #define SHARE_VM_MEMORY_COLLECTORPOLICY_HPP
 
+#include "memory/allocation.hpp"
 #include "memory/barrierSet.hpp"
+#include "memory/generationSpec.hpp"
 #include "memory/genRemSet.hpp"
-#include "memory/permGen.hpp"
+#include "utilities/macros.hpp"
 
 // This class (or more correctly, subtypes of this class)
 // are used to define global garbage collector attributes.
@@ -47,27 +49,22 @@
 class GenCollectorPolicy;
 class TwoGenerationCollectorPolicy;
 class AdaptiveSizePolicy;
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 class ConcurrentMarkSweepPolicy;
 class G1CollectorPolicy;
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
 class GCPolicyCounters;
-class PermanentGenerationSpec;
 class MarkSweepPolicy;
 
 class CollectorPolicy : public CHeapObj<mtGC> {
  protected:
-  PermanentGenerationSpec *_permanent_generation;
   GCPolicyCounters* _gc_policy_counters;
 
   // Requires that the concrete subclass sets the alignment constraints
   // before calling.
   virtual void initialize_flags();
   virtual void initialize_size_info();
-  // Initialize "_permanent_generation" to a spec for the given kind of
-  // Perm Gen.
-  void initialize_perm_generation(PermGen::Name pgnm);
 
   size_t _initial_heap_byte_size;
   size_t _max_heap_byte_size;
@@ -138,27 +135,22 @@ class CollectorPolicy : public CHeapObj<mtGC> {
   virtual GenCollectorPolicy*           as_generation_policy()            { return NULL; }
   virtual TwoGenerationCollectorPolicy* as_two_generation_policy()        { return NULL; }
   virtual MarkSweepPolicy*              as_mark_sweep_policy()            { return NULL; }
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   virtual ConcurrentMarkSweepPolicy*    as_concurrent_mark_sweep_policy() { return NULL; }
   virtual G1CollectorPolicy*            as_g1_policy()                    { return NULL; }
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
   // Note that these are not virtual.
   bool is_generation_policy()            { return as_generation_policy() != NULL; }
   bool is_two_generation_policy()        { return as_two_generation_policy() != NULL; }
   bool is_mark_sweep_policy()            { return as_mark_sweep_policy() != NULL; }
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   bool is_concurrent_mark_sweep_policy() { return as_concurrent_mark_sweep_policy() != NULL; }
   bool is_g1_policy()                    { return as_g1_policy() != NULL; }
-#else  // SERIALGC
+#else  // INCLUDE_ALL_GCS
   bool is_concurrent_mark_sweep_policy() { return false; }
   bool is_g1_policy()                    { return false; }
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
-
-  virtual PermanentGenerationSpec *permanent_generation() {
-    assert(_permanent_generation != NULL, "Sanity check");
-    return _permanent_generation;
-  }
 
   virtual BarrierSet::Name barrier_set_name() = 0;
   virtual GenRemSet::Name  rem_set_name() = 0;
@@ -181,6 +173,12 @@ class CollectorPolicy : public CHeapObj<mtGC> {
   // This method controls how a collector handles one or more
   // of its generations being fully allocated.
   virtual HeapWord *satisfy_failed_allocation(size_t size, bool is_tlab) = 0;
+  // This method controls how a collector handles a metadata allocation
+  // failure.
+  virtual MetaWord* satisfy_failed_metadata_allocation(ClassLoaderData* loader_data,
+                                                       size_t size,
+                                                       Metaspace::MetadataType mdtype);
+
   // Performace Counter support
   GCPolicyCounters* counters()     { return _gc_policy_counters; }
 
@@ -324,7 +322,7 @@ class TwoGenerationCollectorPolicy : public GenCollectorPolicy {
 
   // Returns true is gen0 sizes were adjusted
   bool adjust_gen0_sizes(size_t* gen0_size_ptr, size_t* gen1_size_ptr,
-                               size_t heap_size, size_t min_gen1_size);
+                         const size_t heap_size, const size_t min_gen1_size);
 };
 
 class MarkSweepPolicy : public TwoGenerationCollectorPolicy {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -127,7 +127,7 @@ public class ProcessAttachingConnector
         } else {
             if (lib.equals("dt_shmem")) {
                 try {
-                    Class c = Class.forName("com.sun.tools.jdi.SharedMemoryTransportService");
+                    Class<?> c = Class.forName("com.sun.tools.jdi.SharedMemoryTransportService");
                     ts = (TransportService)c.newInstance();
                 } catch (Exception x) { }
             }

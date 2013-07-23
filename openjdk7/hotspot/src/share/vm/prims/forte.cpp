@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,19 @@
 #include "runtime/vframe.hpp"
 #include "runtime/vframeArray.hpp"
 
+// call frame copied from old .h file and renamed
+typedef struct {
+    jint lineno;                      // line number in the source file
+    jmethodID method_id;              // method executed in this frame
+} ASGCT_CallFrame;
+
+// call trace copied from old .h file and renamed
+typedef struct {
+    JNIEnv *env_id;                   // Env where trace was recorded
+    jint num_frames;                  // number of frames in this trace
+    ASGCT_CallFrame *frames;          // frames
+} ASGCT_CallTrace;
+
 // These name match the names reported by the forte quality kit
 enum {
   ticks_no_Java_frame         =  0,
@@ -49,6 +62,8 @@ enum {
   ticks_deopt                 = -9,
   ticks_safepoint             = -10
 };
+
+#if INCLUDE_JVMTI
 
 //-------------------------------------------------------
 
@@ -68,7 +83,7 @@ class vframeStreamForte : public vframeStreamCommon {
 static bool is_decipherable_compiled_frame(JavaThread* thread, frame* fr, nmethod* nm);
 static bool is_decipherable_interpreted_frame(JavaThread* thread,
                                               frame* fr,
-                                              methodOop* method_p,
+                                              Method** method_p,
                                               int* bci_p);
 
 
@@ -178,12 +193,12 @@ static bool is_decipherable_compiled_frame(JavaThread* thread, frame* fr, nmetho
 
 static bool is_decipherable_interpreted_frame(JavaThread* thread,
                                               frame* fr,
-                                              methodOop* method_p,
+                                              Method** method_p,
                                               int* bci_p) {
   assert(fr->is_interpreted_frame(), "just checking");
 
   // top frame is an interpreted frame
-  // check if it is walkable (i.e. valid methodOop and valid bci)
+  // check if it is walkable (i.e. valid Method* and valid bci)
 
   // Because we may be racing a gc thread the method and/or bci
   // of a valid interpreter frame may look bad causing us to
@@ -199,14 +214,14 @@ static bool is_decipherable_interpreted_frame(JavaThread* thread,
   if (known_valid || fr->is_interpreted_frame_valid(thread)) {
 
     // The frame code should completely validate the frame so that
-    // references to methodOop and bci are completely safe to access
+    // references to Method* and bci are completely safe to access
     // If they aren't the frame code should be fixed not this
     // code. However since gc isn't locked out the values could be
     // stale. This is a race we can never completely win since we can't
     // lock out gc so do one last check after retrieving their values
     // from the frame for additional safety
 
-    methodOop method = fr->interpreter_frame_method();
+    Method* method = fr->interpreter_frame_method();
 
     // We've at least found a method.
     // NOTE: there is something to be said for the approach that
@@ -216,10 +231,7 @@ static bool is_decipherable_interpreted_frame(JavaThread* thread,
     // not yet valid.
 
     *method_p = method;
-
-    // See if gc may have invalidated method since we validated frame
-
-    if (!Universe::heap()->is_valid_method(method)) return false;
+    if (!method->is_valid_method()) return false;
 
     intptr_t bcx = fr->interpreter_frame_bcx();
 
@@ -250,13 +262,13 @@ static bool is_decipherable_interpreted_frame(JavaThread* thread,
 static bool find_initial_Java_frame(JavaThread* thread,
                                     frame* fr,
                                     frame* initial_frame_p,
-                                    methodOop* method_p,
+                                    Method** method_p,
                                     int* bci_p) {
 
   // It is possible that for a frame containing an nmethod
   // we can capture the method but no bci. If we get no
   // bci the frame isn't walkable but the method is usable.
-  // Therefore we init the returned methodOop to NULL so the
+  // Therefore we init the returned Method* to NULL so the
   // caller can make the distinction.
 
   *method_p = NULL;
@@ -363,20 +375,6 @@ static bool find_initial_Java_frame(JavaThread* thread,
 
 }
 
-
-// call frame copied from old .h file and renamed
-typedef struct {
-    jint lineno;                      // line number in the source file
-    jmethodID method_id;              // method executed in this frame
-} ASGCT_CallFrame;
-
-// call trace copied from old .h file and renamed
-typedef struct {
-    JNIEnv *env_id;                   // Env where trace was recorded
-    jint num_frames;                  // number of frames in this trace
-    ASGCT_CallFrame *frames;          // frames
-} ASGCT_CallTrace;
-
 static void forte_fill_call_trace_given_top(JavaThread* thd,
                                             ASGCT_CallTrace* trace,
                                             int depth,
@@ -384,7 +382,7 @@ static void forte_fill_call_trace_given_top(JavaThread* thd,
   NoHandleMark nhm;
 
   frame initial_Java_frame;
-  methodOop method;
+  Method* method;
   int bci;
   int count;
 
@@ -394,19 +392,11 @@ static void forte_fill_call_trace_given_top(JavaThread* thd,
   bool fully_decipherable = find_initial_Java_frame(thd, &top_frame, &initial_Java_frame, &method, &bci);
 
   // The frame might not be walkable but still recovered a method
-  // (e.g. an nmethod with no scope info for the pc
+  // (e.g. an nmethod with no scope info for the pc)
 
   if (method == NULL) return;
 
-  CollectedHeap* ch = Universe::heap();
-
-  // The method is not stored GC safe so see if GC became active
-  // after we entered AsyncGetCallTrace() and before we try to
-  // use the methodOop.
-  // Yes, there is still a window after this check and before
-  // we use methodOop below, but we can't lock out GC so that
-  // has to be an acceptable risk.
-  if (!ch->is_valid_method(method)) {
+  if (!method->is_valid_method()) {
     trace->num_frames = ticks_GC_active; // -2
     return;
   }
@@ -440,13 +430,7 @@ static void forte_fill_call_trace_given_top(JavaThread* thd,
     bci = st.bci();
     method = st.method();
 
-    // The method is not stored GC safe so see if GC became active
-    // after we entered AsyncGetCallTrace() and before we try to
-    // use the methodOop.
-    // Yes, there is still a window after this check and before
-    // we use methodOop below, but we can't lock out GC so that
-    // has to be an acceptable risk.
-    if (!ch->is_valid_method(method)) {
+    if (!method->is_valid_method()) {
       // we throw away everything we've gathered in this sample since
       // none of it is safe
       trace->num_frames = ticks_GC_active; // -2
@@ -635,7 +619,7 @@ void    collector_func_load(char* name,
                             void* null_argument_3);
 #pragma weak collector_func_load
 #define collector_func_load(x0,x1,x2,x3,x4,x5,x6) \
-        ( collector_func_load ? collector_func_load(x0,x1,x2,x3,x4,x5,x6),0 : 0 )
+        ( collector_func_load ? collector_func_load(x0,x1,x2,x3,x4,x5,x6),(void)0 : (void)0 )
 #endif // __APPLE__
 #endif // !_WINDOWS
 
@@ -651,3 +635,12 @@ void Forte::register_stub(const char* name, address start, address end) {
     pointer_delta(end, start, sizeof(jbyte)), 0, NULL);
 #endif // !_WINDOWS && !IA64
 }
+
+#else // INCLUDE_JVMTI
+extern "C" {
+  JNIEXPORT
+  void AsyncGetCallTrace(ASGCT_CallTrace *trace, jint depth, void* ucontext) {
+    trace->num_frames = ticks_no_class_load; // -1
+  }
+}
+#endif // INCLUDE_JVMTI

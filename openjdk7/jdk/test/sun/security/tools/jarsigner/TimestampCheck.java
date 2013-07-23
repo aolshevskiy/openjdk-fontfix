@@ -129,9 +129,6 @@ public class TimestampCheck {
 
             DerOutputStream statusInfo = new DerOutputStream();
             statusInfo.putInteger(0);
-            DerOutputStream statusStrings = new DerOutputStream();
-            statusStrings.putUTF8String("Status for " + path);
-            statusInfo.write(DerValue.tag_Sequence, statusStrings);
 
             DerOutputStream token = new DerOutputStream();
             AlgorithmId[] algorithms = {aid};
@@ -263,6 +260,8 @@ public class TimestampCheck {
                 jarsigner(cmd, 7, false);   // tsbad2
                 jarsigner(cmd, 8, false);   // tsbad3
                 jarsigner(cmd, 9, false);   // no cert in timestamp
+                jarsigner(cmd + " -tsapolicyid 1.2.3.4", 0, true);
+                jarsigner(cmd + " -tsapolicyid 1.2.3.5", 0, false);
             } else {                        // Run as a standalone server
                 System.err.println("Press Enter to quit server");
                 System.in.read();

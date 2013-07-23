@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,7 +46,7 @@ void GraphKit::make_dtrace_method_entry_exit(ciMethod* method, bool is_entry) {
   Node* thread = _gvn.transform( new (C) ThreadLocalNode() );
 
   // Get method
-  const TypeInstPtr* method_type = TypeInstPtr::make(TypePtr::Constant, method->klass(), true, method, 0);
+  const TypePtr* method_type = TypeMetadataPtr::make(method);
   Node *method_node = _gvn.transform( ConNode::make(C, method_type) );
 
   kill_dead_locals();
@@ -200,7 +200,7 @@ void Parse::array_store_check() {
   // Come here for polymorphic array klasses
 
   // Extract the array element class
-  int element_klass_offset = in_bytes(objArrayKlass::element_klass_offset());
+  int element_klass_offset = in_bytes(ObjArrayKlass::element_klass_offset());
   Node *p2 = basic_plus_adr(array_klass, array_klass, element_klass_offset);
   Node *a_e_klass = _gvn.transform( LoadKlassNode::make(_gvn, immutable_memory(), p2, tak) );
 
@@ -220,7 +220,7 @@ void Parse::emit_guard_for_new(ciInstanceKlass* klass) {
   _gvn.set_type(merge, Type::CONTROL);
   Node* kls = makecon(TypeKlassPtr::make(klass));
 
-  Node* init_thread_offset = _gvn.MakeConX(in_bytes(instanceKlass::init_thread_offset()));
+  Node* init_thread_offset = _gvn.MakeConX(in_bytes(InstanceKlass::init_thread_offset()));
   Node* adr_node = basic_plus_adr(kls, kls, init_thread_offset);
   Node* init_thread = make_load(NULL, adr_node, TypeRawPtr::BOTTOM, T_ADDRESS);
   Node *tst   = Bool( CmpP( init_thread, cur_thread), BoolTest::eq);
@@ -228,12 +228,12 @@ void Parse::emit_guard_for_new(ciInstanceKlass* klass) {
   set_control(IfTrue(iff));
   merge->set_req(1, IfFalse(iff));
 
-  Node* init_state_offset = _gvn.MakeConX(in_bytes(instanceKlass::init_state_offset()));
+  Node* init_state_offset = _gvn.MakeConX(in_bytes(InstanceKlass::init_state_offset()));
   adr_node = basic_plus_adr(kls, kls, init_state_offset);
-  // Use T_BOOLEAN for instanceKlass::_init_state so the compiler
+  // Use T_BOOLEAN for InstanceKlass::_init_state so the compiler
   // can generate code to load it as unsigned byte.
   Node* init_state = make_load(NULL, adr_node, TypeInt::UBYTE, T_BOOLEAN);
-  Node* being_init = _gvn.intcon(instanceKlass::being_initialized);
+  Node* being_init = _gvn.intcon(InstanceKlass::being_initialized);
   tst   = Bool( CmpI( init_state, being_init), BoolTest::eq);
   iff = create_and_map_if(control(), tst, PROB_ALWAYS, COUNT_UNKNOWN);
   set_control(IfTrue(iff));
@@ -283,6 +283,11 @@ void Parse::do_new() {
       (klass == C->env()->StringBuilder_klass() ||
        klass == C->env()->StringBuffer_klass())) {
     C->set_has_stringbuilder(true);
+  }
+
+  // Keep track of boxed values for EliminateAutoBox optimizations.
+  if (C->eliminate_boxing() && klass->is_box_klass()) {
+    C->set_has_boxed_value(true);
   }
 }
 
@@ -336,26 +341,28 @@ void Parse::test_counter_against_threshold(Node* cnt, int limit) {
 void Parse::increment_and_test_invocation_counter(int limit) {
   if (!count_invocations()) return;
 
-  // Get the methodOop node.
-  const TypePtr* adr_type = TypeOopPtr::make_from_constant(method());
-  Node *methodOop_node = makecon(adr_type);
+  // Get the Method* node.
+  ciMethod* m = method();
+  address counters_adr = m->ensure_method_counters();
 
-  // Load the interpreter_invocation_counter from the methodOop.
-  int offset = methodOopDesc::interpreter_invocation_counter_offset_in_bytes();
-  Node* adr_node = basic_plus_adr(methodOop_node, methodOop_node, offset);
-  Node* cnt = make_load(NULL, adr_node, TypeInt::INT, T_INT, adr_type);
+  Node* ctrl = control();
+  const TypePtr* adr_type = TypeRawPtr::make(counters_adr);
+  Node *counters_node = makecon(adr_type);
+  Node* adr_iic_node = basic_plus_adr(counters_node, counters_node,
+    MethodCounters::interpreter_invocation_counter_offset_in_bytes());
+  Node* cnt = make_load(ctrl, adr_iic_node, TypeInt::INT, T_INT, adr_type);
 
   test_counter_against_threshold(cnt, limit);
 
   // Add one to the counter and store
   Node* incr = _gvn.transform(new (C) AddINode(cnt, _gvn.intcon(1)));
-  store_to_memory( NULL, adr_node, incr, T_INT, adr_type );
+  store_to_memory( ctrl, adr_iic_node, incr, T_INT, adr_type );
 }
 
 //----------------------------method_data_addressing---------------------------
 Node* Parse::method_data_addressing(ciMethodData* md, ciProfileData* data, ByteSize counter_offset, Node* idx, uint stride) {
-  // Get offset within methodDataOop of the data array
-  ByteSize data_offset = methodDataOopDesc::data_offset();
+  // Get offset within MethodData* of the data array
+  ByteSize data_offset = MethodData::data_offset();
 
   // Get cell offset of the ProfileData within data array
   int cell_offset = md->dp_to_di(data->dp());
@@ -363,7 +370,7 @@ Node* Parse::method_data_addressing(ciMethodData* md, ciProfileData* data, ByteS
   // Add in counter_offset, the # of bytes into the ProfileData of counter or flag
   int offset = in_bytes(data_offset) + cell_offset + in_bytes(counter_offset);
 
-  const TypePtr* adr_type = TypeOopPtr::make_from_constant(md);
+  const TypePtr* adr_type = TypeMetadataPtr::make(md);
   Node* mdo = makecon(adr_type);
   Node* ptr = basic_plus_adr(mdo, mdo, offset);
 

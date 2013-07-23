@@ -137,7 +137,9 @@ class WindowsAsynchronousSocketChannelImpl
 
     // invoked by WindowsAsynchronousServerSocketChannelImpl when new connection
     // accept
-    void setConnected(SocketAddress localAddress, SocketAddress remoteAddress) {
+    void setConnected(InetSocketAddress localAddress,
+                      InetSocketAddress remoteAddress)
+    {
         synchronized (stateLock) {
             state = ST_CONNECTED;
             this.localAddress = localAddress;
@@ -351,7 +353,7 @@ class WindowsAsynchronousSocketChannelImpl
         // setup task
         PendingFuture<Void,A> result =
             new PendingFuture<Void,A>(this, handler, attachment);
-        ConnectTask task = new ConnectTask<A>(isa, result);
+        ConnectTask<A> task = new ConnectTask<A>(isa, result);
         result.setContext(task);
 
         // initiate I/O
@@ -615,7 +617,8 @@ class WindowsAsynchronousSocketChannelImpl
             bufs = new ByteBuffer[1];
             bufs[0] = dst;
         }
-        final ReadTask readTask = new ReadTask<V,A>(bufs, isScatteringRead, result);
+        final ReadTask<V,A> readTask =
+                new ReadTask<V,A>(bufs, isScatteringRead, result);
         result.setContext(readTask);
 
         // schedule timeout
@@ -872,7 +875,8 @@ class WindowsAsynchronousSocketChannelImpl
             bufs = new ByteBuffer[1];
             bufs[0] = src;
         }
-        final WriteTask writeTask = new WriteTask<V,A>(bufs, gatheringWrite, result);
+        final WriteTask<V,A> writeTask =
+                new WriteTask<V,A>(bufs, gatheringWrite, result);
         result.setContext(writeTask);
 
         // schedule timeout

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,20 @@
  * @test
  * @bug     6306137
  * @summary JSR 199: encoding option doesn't affect standard file manager
- * @author  Peter von der Ahé
- * @ignore
- *    Need to make the contentCache in JavacFileManager be aware of changes to the encoding.
- *    Need to propogate -source (and -encoding?) down to the JavacFileManager
+ * @compile -encoding utf-8 T6306137.java
+ * @run main T6306137
+ * @author  Peter von der Ah\u00e9
  */
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import javax.tools.*;
+import static java.nio.file.StandardOpenOption.*;
 
 public class T6306137 {
     boolean error;
@@ -41,8 +46,9 @@ public class T6306137 {
     final JavaCompiler compiler;
     Iterable<? extends JavaFileObject> files;
     DiagnosticListener<JavaFileObject> dl;
+    final File testFile = new File("Utf8.java");
 
-    T6306137() {
+    T6306137() throws IOException {
         dl = new DiagnosticListener<JavaFileObject>() {
                 public void report(Diagnostic<? extends JavaFileObject> message) {
                     if (message.getKind() == Diagnostic.Kind.ERROR)
@@ -57,11 +63,17 @@ public class T6306137 {
         };
         compiler = ToolProvider.getSystemJavaCompiler();
         fm = compiler.getStandardFileManager(dl, null, null);
-        String srcdir = System.getProperty("test.src");
         files =
-            fm.getJavaFileObjectsFromFiles(Arrays.asList(new File(srcdir, "T6306137.java")));
+            fm.getJavaFileObjectsFromFiles(Arrays.asList(testFile));
+        createTestFile();
     }
-
+    final void createTestFile() throws IOException {
+        List<String> scratch = new ArrayList<>();
+        scratch.add("// @author Peter von der Ah" + (char)0xe9);
+        scratch.add("class Utf8{}");
+        Files.write(testFile.toPath(), scratch, Charset.forName("UTF-8"),
+                CREATE, TRUNCATE_EXISTING);
+    }
     void test(String encoding, boolean good) {
         error = false;
         Iterable<String> args = Arrays.asList("-source", "6", "-encoding", encoding, "-d", ".");
@@ -75,7 +87,7 @@ public class T6306137 {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         T6306137 self = new T6306137();
         self.test("utf-8", true);
         self.test("ascii", false);

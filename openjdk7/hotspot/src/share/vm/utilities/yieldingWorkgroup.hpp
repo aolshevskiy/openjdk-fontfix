@@ -25,9 +25,10 @@
 #ifndef SHARE_VM_UTILITIES_YIELDINGWORKGROUP_HPP
 #define SHARE_VM_UTILITIES_YIELDINGWORKGROUP_HPP
 
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "utilities/workgroup.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 
 // Forward declarations
@@ -106,7 +107,7 @@ protected:
     _status(INACTIVE),
     _gang(NULL) { }
 
-  virtual ~YieldingFlexibleGangTask() { }
+  ~YieldingFlexibleGangTask() { }
 
   friend class YieldingFlexibleWorkGang;
   friend class YieldingFlexibleGangWorker;

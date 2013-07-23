@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,6 +44,7 @@
 #include "runtime/mutexLocker.hpp"
 #include "runtime/os.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/thread.inline.hpp"
 #include "services/attachListener.hpp"
 #include "services/memTracker.hpp"
 #include "services/threadService.hpp"
@@ -51,19 +52,15 @@
 #include "utilities/events.hpp"
 #ifdef TARGET_OS_FAMILY_linux
 # include "os_linux.inline.hpp"
-# include "thread_linux.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_solaris
 # include "os_solaris.inline.hpp"
-# include "thread_solaris.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "os_windows.inline.hpp"
-# include "thread_windows.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_bsd
 # include "os_bsd.inline.hpp"
-# include "thread_bsd.inline.hpp"
 #endif
 
 # include <signal.h>
@@ -82,6 +79,8 @@ julong os::alloc_bytes = 0;         // # of bytes allocated
 julong os::num_frees = 0;           // # of calls to free
 julong os::free_bytes = 0;          // # of bytes freed
 #endif
+
+static juint cur_malloc_words = 0;  // current size for MallocMaxTestWords
 
 void os_init_globals() {
   // Called from init_globals().
@@ -201,14 +200,21 @@ OSReturn os::set_priority(Thread* thread, ThreadPriority p) {
   }
 }
 
-
+// The mapping from OS priority back to Java priority may be inexact because
+// Java priorities can map M:1 with native priorities. If you want the definite
+// Java priority then use JavaThread::java_priority()
 OSReturn os::get_priority(const Thread* const thread, ThreadPriority& priority) {
   int p;
   int os_prio;
   OSReturn ret = get_native_priority(thread, &os_prio);
   if (ret != OS_OK) return ret;
 
-  for (p = MaxPriority; p > MinPriority && java_to_os_priority[p] > os_prio; p--) ;
+  if (java_to_os_priority[MaxPriority] > java_to_os_priority[MinPriority]) {
+    for (p = MaxPriority; p > MinPriority && java_to_os_priority[p] > os_prio; p--) ;
+  } else {
+    // niceness values are in reverse order
+    for (p = MaxPriority; p > MinPriority && java_to_os_priority[p] < os_prio; p--) ;
+  }
   priority = (ThreadPriority)p;
   return OS_OK;
 }
@@ -259,8 +265,7 @@ static void signal_thread_entry(JavaThread* thread, TRAPS) {
         VMThread::execute(&op1);
         Universe::print_heap_at_SIGBREAK();
         if (PrintClassHistogram) {
-          VM_GC_HeapInspection op1(gclog_or_tty, true /* force full GC before heap inspection */,
-                                   true /* need_prologue */);
+          VM_GC_HeapInspection op1(gclog_or_tty, true /* force full GC before heap inspection */);
           VMThread::execute(&op1);
         }
         if (JvmtiExport::should_post_data_dump()) {
@@ -271,7 +276,7 @@ static void signal_thread_entry(JavaThread* thread, TRAPS) {
       default: {
         // Dispatch the signal to java
         HandleMark hm(THREAD);
-        klassOop k = SystemDictionary::resolve_or_null(vmSymbols::sun_misc_Signal(), THREAD);
+        Klass* k = SystemDictionary::resolve_or_null(vmSymbols::sun_misc_Signal(), THREAD);
         KlassHandle klass (THREAD, k);
         if (klass.not_null()) {
           JavaValue result(T_VOID);
@@ -294,7 +299,7 @@ static void signal_thread_entry(JavaThread* thread, TRAPS) {
             char klass_name[256];
             char tmp_sig_name[16];
             const char* sig_name = "UNKNOWN";
-            instanceKlass::cast(PENDING_EXCEPTION->klass())->
+            InstanceKlass::cast(PENDING_EXCEPTION->klass())->
               name()->as_klass_external_name(klass_name, 256);
             if (os::exception_name(sig, tmp_sig_name, 16) != NULL)
               sig_name = tmp_sig_name;
@@ -314,7 +319,7 @@ void os::signal_init() {
   if (!ReduceSignalUsage) {
     // Setup JavaThread for processing signals
     EXCEPTION_MARK;
-    klassOop k = SystemDictionary::resolve_or_fail(vmSymbols::java_lang_Thread(), true, CHECK);
+    Klass* k = SystemDictionary::resolve_or_fail(vmSymbols::java_lang_Thread(), true, CHECK);
     instanceKlassHandle klass (THREAD, k);
     instanceHandle thread_oop = klass->allocate_instance_handle(CHECK);
 
@@ -390,12 +395,16 @@ void* os::native_java_library() {
     // Try to load verify dll first. In 1.3 java dll depends on it and is not
     // always able to find it when the loading executable is outside the JDK.
     // In order to keep working with 1.2 we ignore any loading errors.
-    dll_build_name(buffer, sizeof(buffer), Arguments::get_dll_dir(), "verify");
-    dll_load(buffer, ebuf, sizeof(ebuf));
+    if (dll_build_name(buffer, sizeof(buffer), Arguments::get_dll_dir(),
+                       "verify")) {
+      dll_load(buffer, ebuf, sizeof(ebuf));
+    }
 
     // Load java dll
-    dll_build_name(buffer, sizeof(buffer), Arguments::get_dll_dir(), "java");
-    _native_java_library = dll_load(buffer, ebuf, sizeof(ebuf));
+    if (dll_build_name(buffer, sizeof(buffer), Arguments::get_dll_dir(),
+                       "java")) {
+      _native_java_library = dll_load(buffer, ebuf, sizeof(ebuf));
+    }
     if (_native_java_library == NULL) {
       vm_exit_during_initialization("Unable to load native library", ebuf);
     }
@@ -403,8 +412,10 @@ void* os::native_java_library() {
 #if defined(__OpenBSD__)
     // Work-around OpenBSD's lack of $ORIGIN support by pre-loading libnet.so
     // ignore errors
-    dll_build_name(buffer, sizeof(buffer), Arguments::get_dll_dir(), "net");
-    dll_load(buffer, ebuf, sizeof(ebuf));
+    if (dll_build_name(buffer, sizeof(buffer), Arguments::get_dll_dir(),
+                       "net")) {
+      dll_load(buffer, ebuf, sizeof(ebuf));
+    }
 #endif
   }
   static jboolean onLoaded = JNI_FALSE;
@@ -560,6 +571,26 @@ void verify_block(void* memblock) {
 }
 #endif
 
+//
+// This function supports testing of the malloc out of memory
+// condition without really running the system out of memory.
+//
+static u_char* testMalloc(size_t alloc_size) {
+  assert(MallocMaxTestWords > 0, "sanity check");
+
+  if ((cur_malloc_words + (alloc_size / BytesPerWord)) > MallocMaxTestWords) {
+    return NULL;
+  }
+
+  u_char* ptr = (u_char*)::malloc(alloc_size);
+
+  if (ptr != NULL) {
+    Atomic::add(((jint) (alloc_size / BytesPerWord)),
+                (volatile jint *) &cur_malloc_words);
+  }
+  return ptr;
+}
+
 void* os::malloc(size_t size, MEMFLAGS memflags, address caller) {
   NOT_PRODUCT(inc_stat_counter(&num_mallocs, 1));
   NOT_PRODUCT(inc_stat_counter(&alloc_bytes, size));
@@ -570,8 +601,21 @@ void* os::malloc(size_t size, MEMFLAGS memflags, address caller) {
     size = 1;
   }
 
+  const size_t alloc_size = size + space_before + space_after;
+
+  if (size > alloc_size) { // Check for rollover.
+    return NULL;
+  }
+
   NOT_PRODUCT(if (MallocVerifyInterval > 0) check_heap());
-  u_char* ptr = (u_char*)::malloc(size + space_before + space_after);
+
+  u_char* ptr;
+
+  if (MallocMaxTestWords > 0) {
+    ptr = testMalloc(alloc_size);
+  } else {
+    ptr = (u_char*)::malloc(alloc_size);
+  }
 
 #ifdef ASSERT
   if (ptr == NULL) return NULL;
@@ -603,10 +647,13 @@ void* os::realloc(void *memblock, size_t size, MEMFLAGS memflags, address caller
 #ifndef ASSERT
   NOT_PRODUCT(inc_stat_counter(&num_mallocs, 1));
   NOT_PRODUCT(inc_stat_counter(&alloc_bytes, size));
+  MemTracker::Tracker tkr = MemTracker::get_realloc_tracker();
   void* ptr = ::realloc(memblock, size);
   if (ptr != NULL) {
-    MemTracker::record_realloc((address)memblock, (address)ptr, size, memflags,
+    tkr.record((address)memblock, (address)ptr, size, memflags,
      caller == 0 ? CALLER_PC : caller);
+  } else {
+    tkr.discard();
   }
   return ptr;
 #else
@@ -896,17 +943,6 @@ void os::print_location(outputStream* st, intptr_t x, bool verbose) {
         st->print_cr(INTPTR_FORMAT " is pointing into object: " INTPTR_FORMAT, addr, p);
       }
       oop(p)->print_on(st);
-      if (p != (HeapWord*)x && oop(p)->is_constMethod() &&
-          constMethodOop(p)->contains(addr)) {
-        Thread *thread = Thread::current();
-        HandleMark hm(thread);
-        methodHandle mh (thread, constMethodOop(p)->method());
-        if (!mh->is_native()) {
-          st->print_cr("bci_from(%p) = %d; print_codes():",
-                        addr, mh->bci_from(address(x)));
-          mh->print_codes_on(st);
-        }
-      }
       return;
     }
   } else {
@@ -961,6 +997,17 @@ void os::print_location(outputStream* st, intptr_t x, bool verbose) {
     }
 
   }
+
+#ifndef PRODUCT
+  // Check if in metaspace.
+  if (ClassLoaderDataGraph::contains((address)addr)) {
+    // Use addr->print() from the debugger instead (not here)
+    st->print_cr(INTPTR_FORMAT
+                 " is pointing into metadata", addr);
+    return;
+  }
+#endif
+
   // Try an OS specific find
   if (os::find(addr, st)) {
     return;
@@ -973,15 +1020,28 @@ void os::print_location(outputStream* st, intptr_t x, bool verbose) {
 // if C stack is walkable beyond current frame. The check for fp() is not
 // necessary on Sparc, but it's harmless.
 bool os::is_first_C_frame(frame* fr) {
-#ifdef IA64
-  // In order to walk native frames on Itanium, we need to access the unwind
-  // table, which is inside ELF. We don't want to parse ELF after fatal error,
-  // so return true for IA64. If we need to support C stack walking on IA64,
-  // this function needs to be moved to CPU specific files, as fp() on IA64
-  // is register stack, which grows towards higher memory address.
+#if defined(IA64) && !defined(_WIN32)
+  // On IA64 we have to check if the callers bsp is still valid
+  // (i.e. within the register stack bounds).
+  // Notice: this only works for threads created by the VM and only if
+  // we walk the current stack!!! If we want to be able to walk
+  // arbitrary other threads, we'll have to somehow store the thread
+  // object in the frame.
+  Thread *thread = Thread::current();
+  if ((address)fr->fp() <=
+      thread->register_stack_base() HPUX_ONLY(+ 0x0) LINUX_ONLY(+ 0x50)) {
+    // This check is a little hacky, because on Linux the first C
+    // frame's ('start_thread') register stack frame starts at
+    // "register_stack_base + 0x48" while on HPUX, the first C frame's
+    // ('__pthread_bound_body') register stack frame seems to really
+    // start at "register_stack_base".
+    return true;
+  } else {
+    return false;
+  }
+#elif defined(IA64) && defined(_WIN32)
   return true;
-#endif
-
+#else
   // Load up sp, fp, sender sp and sender fp, check for reasonable values.
   // Check usp first, because if that's bad the other accessors may fault
   // on some architectures.  Ditto ufp second, etc.
@@ -1011,6 +1071,7 @@ bool os::is_first_C_frame(frame* fr) {
   if (old_fp - ufp > 64 * K) return true;
 
   return false;
+#endif
 }
 
 #ifdef ASSERT
@@ -1149,7 +1210,7 @@ char** os::split_path(const char* path, int* n) {
   if (inpath == NULL) {
     return NULL;
   }
-  strncpy(inpath, path, strlen(path));
+  strcpy(inpath, path);
   int count = 1;
   char* p = strchr(inpath, psepchar);
   // Get a count of elements to allocate memory
@@ -1398,15 +1459,27 @@ bool os::create_stack_guard_pages(char* addr, size_t bytes) {
 char* os::reserve_memory(size_t bytes, char* addr, size_t alignment_hint) {
   char* result = pd_reserve_memory(bytes, addr, alignment_hint);
   if (result != NULL) {
-    MemTracker::record_virtual_memory_reserve((address)result, bytes, CALLER_PC);
+    MemTracker::record_virtual_memory_reserve((address)result, bytes, mtNone, CALLER_PC);
   }
 
   return result;
 }
+
+char* os::reserve_memory(size_t bytes, char* addr, size_t alignment_hint,
+   MEMFLAGS flags) {
+  char* result = pd_reserve_memory(bytes, addr, alignment_hint);
+  if (result != NULL) {
+    MemTracker::record_virtual_memory_reserve((address)result, bytes, mtNone, CALLER_PC);
+    MemTracker::record_virtual_memory_type((address)result, flags);
+  }
+
+  return result;
+}
+
 char* os::attempt_reserve_memory_at(size_t bytes, char* addr) {
   char* result = pd_attempt_reserve_memory_at(bytes, addr);
   if (result != NULL) {
-    MemTracker::record_virtual_memory_reserve((address)result, bytes, CALLER_PC);
+    MemTracker::record_virtual_memory_reserve((address)result, bytes, mtNone, CALLER_PC);
   }
   return result;
 }
@@ -1433,18 +1506,36 @@ bool os::commit_memory(char* addr, size_t size, size_t alignment_hint,
   return res;
 }
 
+void os::commit_memory_or_exit(char* addr, size_t bytes, bool executable,
+                               const char* mesg) {
+  pd_commit_memory_or_exit(addr, bytes, executable, mesg);
+  MemTracker::record_virtual_memory_commit((address)addr, bytes, CALLER_PC);
+}
+
+void os::commit_memory_or_exit(char* addr, size_t size, size_t alignment_hint,
+                               bool executable, const char* mesg) {
+  os::pd_commit_memory_or_exit(addr, size, alignment_hint, executable, mesg);
+  MemTracker::record_virtual_memory_commit((address)addr, size, CALLER_PC);
+}
+
 bool os::uncommit_memory(char* addr, size_t bytes) {
+  MemTracker::Tracker tkr = MemTracker::get_virtual_memory_uncommit_tracker();
   bool res = pd_uncommit_memory(addr, bytes);
   if (res) {
-    MemTracker::record_virtual_memory_uncommit((address)addr, bytes);
+    tkr.record((address)addr, bytes);
+  } else {
+    tkr.discard();
   }
   return res;
 }
 
 bool os::release_memory(char* addr, size_t bytes) {
+  MemTracker::Tracker tkr = MemTracker::get_virtual_memory_release_tracker();
   bool res = pd_release_memory(addr, bytes);
   if (res) {
-    MemTracker::record_virtual_memory_release((address)addr, bytes);
+    tkr.record((address)addr, bytes);
+  } else {
+    tkr.discard();
   }
   return res;
 }
@@ -1455,8 +1546,7 @@ char* os::map_memory(int fd, const char* file_name, size_t file_offset,
                            bool allow_exec) {
   char* result = pd_map_memory(fd, file_name, file_offset, addr, bytes, read_only, allow_exec);
   if (result != NULL) {
-    MemTracker::record_virtual_memory_reserve((address)result, bytes, CALLER_PC);
-    MemTracker::record_virtual_memory_commit((address)result, bytes, CALLER_PC);
+    MemTracker::record_virtual_memory_reserve_and_commit((address)result, bytes, mtNone, CALLER_PC);
   }
   return result;
 }
@@ -1469,10 +1559,12 @@ char* os::remap_memory(int fd, const char* file_name, size_t file_offset,
 }
 
 bool os::unmap_memory(char *addr, size_t bytes) {
+  MemTracker::Tracker tkr = MemTracker::get_virtual_memory_release_tracker();
   bool result = pd_unmap_memory(addr, bytes);
   if (result) {
-    MemTracker::record_virtual_memory_uncommit((address)addr, bytes);
-    MemTracker::record_virtual_memory_release((address)addr, bytes);
+    tkr.record((address)addr, bytes);
+  } else {
+    tkr.discard();
   }
   return result;
 }
@@ -1485,3 +1577,19 @@ void os::realign_memory(char *addr, size_t bytes, size_t alignment_hint) {
   pd_realign_memory(addr, bytes, alignment_hint);
 }
 
+#ifndef TARGET_OS_FAMILY_windows
+/* try to switch state from state "from" to state "to"
+ * returns the state set after the method is complete
+ */
+os::SuspendResume::State os::SuspendResume::switch_state(os::SuspendResume::State from,
+                                                         os::SuspendResume::State to)
+{
+  os::SuspendResume::State result =
+    (os::SuspendResume::State) Atomic::cmpxchg((jint) to, (jint *) &_state, (jint) from);
+  if (result == from) {
+    // success
+    return to;
+  }
+  return result;
+}
+#endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,31 +32,27 @@ import com.sun.xml.internal.ws.api.ha.StickyFeature;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.pipe.*;
 import com.sun.xml.internal.ws.api.pipe.helper.AbstractTubeImpl;
+import com.sun.xml.internal.ws.client.ClientTransportException;
 import com.sun.xml.internal.ws.developer.HttpConfigFeature;
+import com.sun.xml.internal.ws.resources.ClientMessages;
 import com.sun.xml.internal.ws.transport.Headers;
 import com.sun.xml.internal.ws.util.ByteArrayBuffer;
-import com.sun.xml.internal.ws.client.ClientTransportException;
-import com.sun.xml.internal.ws.resources.ClientMessages;
 import com.sun.xml.internal.ws.util.RuntimeVersion;
 import com.sun.xml.internal.ws.util.StreamUtils;
 
 import javax.xml.bind.DatatypeConverter;
-import javax.xml.bind.JAXBContext;
-import javax.xml.bind.JAXBException;
 import javax.xml.ws.BindingProvider;
 import javax.xml.ws.WebServiceException;
 import javax.xml.ws.WebServiceFeature;
-import javax.xml.ws.soap.SOAPBinding;
 import javax.xml.ws.handler.MessageContext;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import javax.xml.ws.soap.SOAPBinding;
+import java.io.*;
 import java.net.CookieHandler;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
 import java.net.HttpURLConnection;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * {@link Tube} that sends a request to a remote HTTP server.
@@ -68,19 +64,27 @@ import java.net.HttpURLConnection;
  */
 public class HttpTransportPipe extends AbstractTubeImpl {
 
+    private static final List<String> USER_AGENT = Collections.singletonList(RuntimeVersion.VERSION.toString());
+    private static final Logger LOGGER = Logger.getLogger(HttpTransportPipe.class.getName());
+
+    /**
+     * Dumps what goes across HTTP transport.
+     */
+    public static boolean dump;
+
     private final Codec codec;
     private final WSBinding binding;
-    private static final List<String> USER_AGENT = Collections.singletonList(RuntimeVersion.VERSION.toString());
     private final CookieHandler cookieJar;      // shared object among the tubes
     private final boolean sticky;
 
-    // Need to use JAXB first to register DatatypeConverter
     static {
+        boolean b;
         try {
-            JAXBContext.newInstance().createUnmarshaller();
-        } catch(JAXBException je) {
-            // Nothing much can be done. Intentionally left empty
+            b = Boolean.getBoolean(HttpTransportPipe.class.getName()+".dump");
+        } catch( Throwable t ) {
+            b = false;
         }
+        dump = b;
     }
 
     public HttpTransportPipe(Codec codec, WSBinding binding) {
@@ -114,16 +118,23 @@ public class HttpTransportPipe extends AbstractTubeImpl {
         cloner.add(that,this);
     }
 
+    @Override
     public NextAction processException(@NotNull Throwable t) {
-        throw new IllegalStateException("HttpTransportPipe's processException shouldn't be called.");
+        return doThrow(t);
     }
 
+    @Override
     public NextAction processRequest(@NotNull Packet request) {
         return doReturnWith(process(request));
     }
 
+    @Override
     public NextAction processResponse(@NotNull Packet response) {
-        throw new IllegalStateException("HttpTransportPipe's processResponse shouldn't be called.");
+        return doReturnWith(response);
+    }
+
+    protected HttpClientTransport getTransport(Packet request, Map<String, List<String>> reqHeaders) {
+        return new HttpClientTransport(request, reqHeaders);
     }
 
     @Override
@@ -150,7 +161,7 @@ public class HttpTransportPipe extends AbstractTubeImpl {
             addBasicAuth(request, reqHeaders);
             addCookies(request, reqHeaders);
 
-            con = new HttpClientTransport(request,reqHeaders);
+            con = getTransport(request, reqHeaders);
             request.addSatellite(new HttpResponseProperties(con));
 
             ContentType ct = codec.getStaticContentType(request);
@@ -168,8 +179,9 @@ public class HttpTransportPipe extends AbstractTubeImpl {
                     writeSOAPAction(reqHeaders, ct.getSOAPActionHeader());
                 }
 
-                if(dump)
+                if (dump || LOGGER.isLoggable(Level.FINER)) {
                     dump(buf, "HTTP request", reqHeaders);
+                }
 
                 buf.writeTo(con.getOutput());
             } else {
@@ -182,7 +194,7 @@ public class HttpTransportPipe extends AbstractTubeImpl {
                     writeSOAPAction(reqHeaders, ct.getSOAPActionHeader());
                 }
 
-                if(dump) {
+                if(dump || LOGGER.isLoggable(Level.FINER)) {
                     ByteArrayBuffer buf = new ByteArrayBuffer();
                     codec.encode(request, buf);
                     dump(buf, "HTTP request - "+request.endpointAddress, reqHeaders);
@@ -213,7 +225,7 @@ public class HttpTransportPipe extends AbstractTubeImpl {
         recordCookies(request, con);
 
         InputStream responseStream = con.getInput();
-        if (dump) {
+        if (dump || LOGGER.isLoggable(Level.FINER)) {
             ByteArrayBuffer buf = new ByteArrayBuffer();
             if (responseStream != null) {
                 buf.write(responseStream);
@@ -305,26 +317,50 @@ public class HttpTransportPipe extends AbstractTubeImpl {
 
     private void addCookies(Packet context, Map<String, List<String>> reqHeaders) throws IOException {
         Boolean shouldMaintainSessionProperty =
-            (Boolean) context.invocationProperties.get(BindingProvider.SESSION_MAINTAIN_PROPERTY);
+                (Boolean) context.invocationProperties.get(BindingProvider.SESSION_MAINTAIN_PROPERTY);
         if (shouldMaintainSessionProperty != null && !shouldMaintainSessionProperty) {
             return;         // explicitly turned off
         }
         if (sticky || (shouldMaintainSessionProperty != null && shouldMaintainSessionProperty)) {
-            Map<String, List<String>> cookies = cookieJar.get(context.endpointAddress.getURI(),reqHeaders);
-            List<String> cookieList = cookies.get("Cookie");
-            if (cookieList != null && !cookieList.isEmpty()) {
-                reqHeaders.put("Cookie", cookieList);
-            }
-            cookieList = cookies.get("Cookie2");
-            if (cookieList != null && !cookieList.isEmpty()) {
-                reqHeaders.put("Cookie2", cookieList);
-            }
+            Map<String, List<String>> rememberedCookies = cookieJar.get(context.endpointAddress.getURI(), reqHeaders);
+            processCookieHeaders(reqHeaders, rememberedCookies, "Cookie");
+            processCookieHeaders(reqHeaders, rememberedCookies, "Cookie2");
+        }
+    }
+
+    private void processCookieHeaders(Map<String, List<String>> requestHeaders, Map<String, List<String>> rememberedCookies, String cookieHeader) {
+        List<String> jarCookies = rememberedCookies.get(cookieHeader);
+        if (jarCookies != null && !jarCookies.isEmpty()) {
+            List<String> resultCookies = mergeUserCookies(jarCookies, requestHeaders.get(cookieHeader));
+            requestHeaders.put(cookieHeader, resultCookies);
+        }
+    }
+
+    private List<String> mergeUserCookies(List<String> rememberedCookies, List<String> userCookies) {
+
+        // nothing to merge
+        if (userCookies == null || userCookies.isEmpty()) {
+            return rememberedCookies;
+        }
+
+        Map<String, String> map = new HashMap<String, String>();
+        cookieListToMap(rememberedCookies, map);
+        cookieListToMap(userCookies, map);
+
+        return new ArrayList<String>(map.values());
+    }
+
+    private void cookieListToMap(List<String> cookieList, Map<String, String> targetMap) {
+        for(String cookie : cookieList) {
+            int index = cookie.indexOf("=");
+            String cookieName = cookie.substring(0, index);
+            targetMap.put(cookieName, cookie);
         }
     }
 
     private void recordCookies(Packet context, HttpClientTransport con) throws IOException {
         Boolean shouldMaintainSessionProperty =
-            (Boolean) context.invocationProperties.get(BindingProvider.SESSION_MAINTAIN_PROPERTY);
+                (Boolean) context.invocationProperties.get(BindingProvider.SESSION_MAINTAIN_PROPERTY);
         if (shouldMaintainSessionProperty != null && !shouldMaintainSessionProperty) {
             return;         // explicitly turned off
         }
@@ -338,7 +374,7 @@ public class HttpTransportPipe extends AbstractTubeImpl {
         if (user != null) {
             String pw = (String) context.invocationProperties.get(BindingProvider.PASSWORD_PROPERTY);
             if (pw != null) {
-                StringBuffer buf = new StringBuffer(user);
+                StringBuilder buf = new StringBuilder(user);
                 buf.append(":");
                 buf.append(pw);
                 String creds = DatatypeConverter.printBase64Binary(buf.toString().getBytes());
@@ -353,44 +389,53 @@ public class HttpTransportPipe extends AbstractTubeImpl {
      */
     private void writeSOAPAction(Map<String, List<String>> reqHeaders, String soapAction) {
         //dont write SOAPAction HTTP header for SOAP 1.2 messages.
-        if(SOAPVersion.SOAP_12.equals(binding.getSOAPVersion()))
+        if(SOAPVersion.SOAP_12.equals(binding.getSOAPVersion())) {
             return;
-        if (soapAction != null)
+        }
+        if (soapAction != null) {
             reqHeaders.put("SOAPAction", Collections.singletonList(soapAction));
-        else
+        } else {
             reqHeaders.put("SOAPAction", Collections.singletonList("\"\""));
+        }
     }
 
+    @Override
     public void preDestroy() {
         // nothing to do. Intentionally left empty.
     }
 
+    @Override
     public HttpTransportPipe copy(TubeCloner cloner) {
         return new HttpTransportPipe(this,cloner);
     }
 
+
     private void dump(ByteArrayBuffer buf, String caption, Map<String, List<String>> headers) throws IOException {
-        System.out.println("---["+caption +"]---");
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PrintWriter pw = new PrintWriter(baos, true);
+        pw.println("---["+caption +"]---");
         for (Entry<String,List<String>> header : headers.entrySet()) {
-            System.out.println(header.getKey()+": "+header.getValue());
+            if(header.getValue().isEmpty()) {
+                // I don't think this is legal, but let's just dump it,
+                // as the point of the dump is to uncover problems.
+                pw.println(header.getValue());
+            } else {
+                for (String value : header.getValue()) {
+                    pw.println(header.getKey()+": "+value);
+                }
+            }
         }
 
-        buf.writeTo(System.out);
-        System.out.println("--------------------");
-    }
+        buf.writeTo(baos);
+        pw.println("--------------------");
 
-    /**
-     * Dumps what goes across HTTP transport.
-     */
-    public static boolean dump;
-
-    static {
-        boolean b;
-        try {
-            b = Boolean.getBoolean(HttpTransportPipe.class.getName()+".dump");
-        } catch( Throwable t ) {
-            b = false;
+        String msg = baos.toString();
+        if (dump) {
+            System.out.println(msg);
         }
-        dump = b;
+        if (LOGGER.isLoggable(Level.FINER)) {
+            LOGGER.log(Level.FINER, msg);
+        }
     }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,7 +21,19 @@
  * questions.
  */
 
-import com.sun.source.util.TaskEvent;
+/*
+ * @test
+ * @bug 6970584 8006694
+ * @summary assorted position errors in compiler syntax trees
+ *  temporarily workaround combo tests are causing time out in several platforms
+ * @library ../lib
+ * @build JavacTestingAbstractThreadedTest
+ * @run main/othervm CheckAttributedTree -q -r -et ERRONEOUS .
+ */
+
+// use /othervm to avoid jtreg timeout issues (CODETOOLS-7900047)
+// see JDK-8006746
+
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -34,6 +46,20 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import javax.lang.model.element.Element;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -49,41 +75,25 @@ import javax.swing.event.CaretListener;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultHighlighter;
 import javax.swing.text.Highlighter;
-import java.io.File;
-import java.io.IOException;
-import java.io.PrintStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticListener;
 import javax.tools.JavaFileObject;
-import javax.tools.StandardJavaFileManager;
 
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.util.TaskEvent;
 import com.sun.source.util.JavacTask;
 import com.sun.source.util.TaskListener;
-import com.sun.tools.javac.api.JavacTool;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Type;
+import com.sun.tools.javac.tree.EndPosTable;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 import com.sun.tools.javac.tree.JCTree.JCImport;
 import com.sun.tools.javac.tree.TreeInfo;
 import com.sun.tools.javac.tree.TreeScanner;
 import com.sun.tools.javac.util.Pair;
 
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
-import javax.lang.model.element.Element;
+import static com.sun.tools.javac.tree.JCTree.Tag.*;
 
 /**
  * Utility and test program to check validity of tree positions for tree nodes.
@@ -97,13 +107,7 @@ import javax.lang.model.element.Element;
  * covering any new language features that may be tested in this test suite.
  */
 
-/*
- * @test
- * @bug 6970584
- * @summary assorted position errors in compiler syntax trees
- * @run main CheckAttributedTree -q -r -et ERRONEOUS .
- */
-public class CheckAttributedTree {
+public class CheckAttributedTree extends JavacTestingAbstractThreadedTest {
     /**
      * Main entry point.
      * If test.src is set, program runs in jtreg mode, and will throw an Error
@@ -112,9 +116,10 @@ public class CheckAttributedTree {
      * args is the value of ${test.src}. In jtreg mode, the -r option can be
      * given to change the default base directory to the root test directory.
      */
-    public static void main(String... args) {
+    public static void main(String... args) throws Exception {
         String testSrc = System.getProperty("test.src");
         File baseDir = (testSrc == null) ? null : new File(testSrc);
+        throwAssertionOnError = false;
         boolean ok = new CheckAttributedTree().run(baseDir, args);
         if (!ok) {
             if (testSrc != null)  // jtreg mode
@@ -132,7 +137,7 @@ public class CheckAttributedTree {
      * @param args command line args
      * @return true if successful or in gui mode
      */
-    boolean run(File baseDir, String... args) {
+    boolean run(File baseDir, String... args) throws Exception {
         if (args.length == 0) {
             usage(System.out);
             return true;
@@ -147,8 +152,10 @@ public class CheckAttributedTree {
                 gui = true;
             else if (arg.equals("-q"))
                 quiet = true;
-            else if (arg.equals("-v"))
+            else if (arg.equals("-v")) {
                 verbose = true;
+                printAll = true;
+            }
             else if (arg.equals("-t") && i + 1 < args.length)
                 tags.add(args[++i]);
             else if (arg.equals("-ef") && i + 1 < args.length)
@@ -181,12 +188,11 @@ public class CheckAttributedTree {
                 error("File not found: " + file);
         }
 
-        if (fileCount != 1)
-            System.err.println(fileCount + " files read");
-        if (errors > 0)
-            System.err.println(errors + " errors");
+        if (fileCount.get() != 1)
+            errWriter.println(fileCount + " files read");
+        checkAfterExec(false);
 
-        return (gui || errors == 0);
+        return (gui || errCount.get() == 0);
     }
 
     /**
@@ -217,7 +223,7 @@ public class CheckAttributedTree {
      * for java files.
      * @param file the file or directory to test
      */
-    void test(File file) {
+    void test(final File file) {
         if (excludeFiles.contains(file)) {
             if (!quiet)
                 error("File " + file + " excluded");
@@ -232,20 +238,24 @@ public class CheckAttributedTree {
         }
 
         if (file.isFile() && file.getName().endsWith(".java")) {
-            try {
-                if (verbose)
-                    System.err.println(file);
-                fileCount++;
-                NPETester p = new NPETester();
-                p.test(read(file));
-            } catch (AttributionException e) {
-                if (!quiet) {
-                    error("Error attributing " + file + "\n" + e.getMessage());
+            pool.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (verbose)
+                            errWriter.println(file);
+                        fileCount.incrementAndGet();
+                        NPETester p = new NPETester();
+                        p.test(read(file));
+                    } catch (AttributionException e) {
+                        if (!quiet) {
+                            error("Error attributing " + file + "\n" + e.getMessage());
+                        }
+                    } catch (IOException e) {
+                        error("Error reading " + file + ": " + e);
+                    }
                 }
-            } catch (IOException e) {
-                error("Error reading " + file + ": " + e);
-            }
-            return;
+            });
         }
 
         if (!quiet)
@@ -256,8 +266,6 @@ public class CheckAttributedTree {
     StringWriter sw = new StringWriter();
     PrintWriter pw = new PrintWriter(sw);
     Reporter r = new Reporter(pw);
-    JavacTool tool = JavacTool.create();
-    StandardJavaFileManager fm = tool.getStandardFileManager(r, null, null);
 
     /**
      * Read a file.
@@ -267,11 +275,10 @@ public class CheckAttributedTree {
      * @throws TreePosTest.ParseException if any errors occur while parsing the file
      */
     List<Pair<JCCompilationUnit, JCTree>> read(File file) throws IOException, AttributionException {
-        JavacTool tool = JavacTool.create();
         r.errors = 0;
-        Iterable<? extends JavaFileObject> files = fm.getJavaFileObjects(file);
+        Iterable<? extends JavaFileObject> files = fm.get().getJavaFileObjects(file);
         String[] opts = { "-XDshouldStopPolicy=ATTR", "-XDverboseCompilePolicy" };
-        JavacTask task = tool.getTask(pw, fm, r, Arrays.asList(opts), null, files);
+        JavacTask task = (JavacTask)comp.getTask(pw, fm.get(), r, Arrays.asList(opts), null, files);
         final List<Element> analyzedElems = new ArrayList<>();
         task.setTaskListener(new TaskListener() {
             public void started(TaskEvent e) {
@@ -289,7 +296,7 @@ public class CheckAttributedTree {
             for (CompilationUnitTree t : trees) {
                JCCompilationUnit cu = (JCCompilationUnit)t;
                for (JCTree def : cu.defs) {
-                   if (def.getTag() == JCTree.CLASSDEF &&
+                   if (def.hasTag(CLASSDEF) &&
                            analyzedElems.contains(((JCTree.JCClassDecl)def).sym)) {
                        //System.out.println("Adding pair...");
                        res.add(new Pair<>(cu, def));
@@ -310,13 +317,9 @@ public class CheckAttributedTree {
      */
     void error(String msg) {
         System.err.println(msg);
-        errors++;
+        errCount.incrementAndGet();
     }
 
-    /** Number of files that have been analyzed. */
-    int fileCount;
-    /** Number of errors reported. */
-    int errors;
     /** Flag: don't report irrelevant files. */
     boolean quiet;
     /** Flag: show errors in GUI viewer. */
@@ -359,11 +362,18 @@ public class CheckAttributedTree {
             }
 
             Info self = new Info(tree, endPosTable);
-            check(!mandatoryType(tree) ||
-                    (tree.type != null &&
-                    checkFields(tree)),
-                    "'null' found in tree ",
-                    self);
+            if (mandatoryType(tree)) {
+                check(tree.type != null,
+                        "'null' field 'type' found in tree ", self);
+                if (tree.type==null)
+                    new Throwable().printStackTrace();
+            }
+
+            Field errField = checkFields(tree);
+            if (errField!=null) {
+                check(false,
+                        "'null' field '" + errField.getName() + "' found in tree ", self);
+            }
 
             Info prevEncl = encl;
             encl = self;
@@ -373,12 +383,12 @@ public class CheckAttributedTree {
 
         private boolean mandatoryType(JCTree that) {
             return that instanceof JCTree.JCExpression ||
-                    that.getTag() == JCTree.VARDEF ||
-                    that.getTag() == JCTree.METHODDEF ||
-                    that.getTag() == JCTree.CLASSDEF;
+                    that.hasTag(VARDEF) ||
+                    that.hasTag(METHODDEF) ||
+                    that.hasTag(CLASSDEF);
         }
 
-        private final List<String> excludedFields = Arrays.asList("varargsElement");
+        private final List<String> excludedFields = Arrays.asList("varargsElement", "targetType");
 
         void check(boolean ok, String label, Info self) {
             if (!ok) {
@@ -387,11 +397,12 @@ public class CheckAttributedTree {
                         viewer = new Viewer();
                     viewer.addEntry(sourcefile, label, encl, self);
                 }
-                error(label + self.toString() + " encl: " + encl.toString() + " in file: " + sourcefile + "  " + self.tree);
+                error(label + self.toString() + " encl: " + encl.toString() +
+                        " in file: " + sourcefile + "  " + self.tree);
             }
         }
 
-        boolean checkFields(JCTree t) {
+        Field checkFields(JCTree t) {
             List<Field> fieldsToCheck = treeUtil.getFieldsOfType(t,
                     excludedFields,
                     Symbol.class,
@@ -399,7 +410,7 @@ public class CheckAttributedTree {
             for (Field f : fieldsToCheck) {
                 try {
                     if (f.get(t) == null) {
-                        return false;
+                        return f;
                     }
                 }
                 catch (IllegalAccessException e) {
@@ -407,7 +418,7 @@ public class CheckAttributedTree {
                     //swallow it
                 }
             }
-            return true;
+            return null;
         }
 
         @Override
@@ -419,7 +430,7 @@ public class CheckAttributedTree {
         }
 
         JavaFileObject sourcefile;
-        Map<JCTree, Integer> endPosTable;
+        EndPosTable endPosTable;
         Info encl;
     }
 
@@ -429,13 +440,13 @@ public class CheckAttributedTree {
     private class Info {
         Info() {
             tree = null;
-            tag = JCTree.ERRONEOUS;
+            tag = ERRONEOUS;
             start = 0;
             pos = 0;
             end = Integer.MAX_VALUE;
         }
 
-        Info(JCTree tree, Map<JCTree, Integer> endPosTable) {
+        Info(JCTree tree, EndPosTable endPosTable) {
             this.tree = tree;
             tag = tree.getTag();
             start = TreeInfo.getStartPos(tree);
@@ -449,7 +460,7 @@ public class CheckAttributedTree {
         }
 
         final JCTree tree;
-        final int tag;
+        final JCTree.Tag tag;
         final int start;
         final int pos;
         final int end;
@@ -457,27 +468,10 @@ public class CheckAttributedTree {
 
     /**
      * Names for tree tags.
-     * javac does not provide an API to convert tag values to strings, so this class uses
-     * reflection to determine names of public static final int values in JCTree.
      */
     private static class TreeUtil {
-        String nameFromTag(int tag) {
-            if (names == null) {
-                names = new HashMap<Integer, String>();
-                Class c = JCTree.class;
-                for (Field f : c.getDeclaredFields()) {
-                    if (f.getType().equals(int.class)) {
-                        int mods = f.getModifiers();
-                        if (Modifier.isPublic(mods) && Modifier.isStatic(mods) && Modifier.isFinal(mods)) {
-                            try {
-                                names.put(f.getInt(null), f.getName());
-                            } catch (IllegalAccessException e) {
-                            }
-                        }
-                    }
-                }
-            }
-            String name = names.get(tag);
+        String nameFromTag(JCTree.Tag tag) {
+            String name = tag.name();
             return (name == null) ? "??" : name;
         }
 
@@ -496,8 +490,6 @@ public class CheckAttributedTree {
             }
             return buf;
         }
-
-        private Map<Integer, String> names;
     }
 
     /**
@@ -524,7 +516,7 @@ public class CheckAttributedTree {
         }
 
         public void report(Diagnostic<? extends JavaFileObject> diagnostic) {
-            out.println(diagnostic);
+            //out.println(diagnostic);
             switch (diagnostic.getKind()) {
                 case ERROR:
                     errors++;
@@ -775,4 +767,8 @@ public class CheckAttributedTree {
             final Info self;
         }
     }
+
+    /** Number of files that have been analyzed. */
+    static AtomicInteger fileCount = new AtomicInteger();
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,12 @@
 #ifndef SHARE_VM_OOPS_INSTANCEMIRRORKLASS_HPP
 #define SHARE_VM_OOPS_INSTANCEMIRRORKLASS_HPP
 
+#include "classfile/systemDictionary.hpp"
 #include "oops/instanceKlass.hpp"
+#include "runtime/handles.hpp"
+#include "utilities/macros.hpp"
 
-// An instanceMirrorKlass is a specialized instanceKlass for
+// An InstanceMirrorKlass is a specialized InstanceKlass for
 // java.lang.Class instances.  These instances are special because
 // they contain the static fields of the class in addition to the
 // normal fields of Class.  This means they are variable sized
@@ -35,20 +38,26 @@
 // iteration of their oops.
 
 
-class instanceMirrorKlass: public instanceKlass {
+class InstanceMirrorKlass: public InstanceKlass {
   friend class VMStructs;
+  friend class InstanceKlass;
 
  private:
   static int _offset_of_static_fields;
 
+  // Constructor
+  InstanceMirrorKlass(int vtable_len, int itable_len, int static_field_size, int nonstatic_oop_map_size, ReferenceType rt, AccessFlags access_flags,  bool is_anonymous)
+    : InstanceKlass(vtable_len, itable_len, static_field_size, nonstatic_oop_map_size, rt, access_flags, is_anonymous) {}
+
  public:
+  InstanceMirrorKlass() { assert(DumpSharedSpaces || UseSharedSpaces, "only for CDS"); }
   // Type testing
   bool oop_is_instanceMirror() const             { return true; }
 
-  // Casting from klassOop
-  static instanceMirrorKlass* cast(klassOop k) {
-    assert(k->klass_part()->oop_is_instanceMirror(), "cast to instanceMirrorKlass");
-    return (instanceMirrorKlass*) k->klass_part();
+  // Casting from Klass*
+  static InstanceMirrorKlass* cast(Klass* k) {
+    assert(k->oop_is_instanceMirror(), "cast to InstanceMirrorKlass");
+    return (InstanceMirrorKlass*) k;
   }
 
   // Returns the size of the instance including the extra static fields.
@@ -63,7 +72,7 @@ class instanceMirrorKlass: public instanceKlass {
   static void init_offset_of_static_fields() {
     // Cache the offset of the static fields in the Class instance
     assert(_offset_of_static_fields == 0, "once");
-    _offset_of_static_fields = instanceMirrorKlass::cast(SystemDictionary::Class_klass())->size_helper() << LogHeapWordSize;
+    _offset_of_static_fields = InstanceMirrorKlass::cast(SystemDictionary::Class_klass())->size_helper() << LogHeapWordSize;
   }
 
   static int offset_of_static_fields() {
@@ -76,7 +85,6 @@ class instanceMirrorKlass: public instanceKlass {
   int instance_size(KlassHandle k);
 
   // allocation
-  DEFINE_ALLOCATE_PERMANENT(instanceMirrorKlass);
   instanceOop allocate_instance(KlassHandle k, TRAPS);
 
   // Garbage collection
@@ -86,10 +94,10 @@ class instanceMirrorKlass: public instanceKlass {
   // Parallel Scavenge and Parallel Old
   PARALLEL_GC_DECLS
 
-  int oop_oop_iterate(oop obj, OopClosure* blk) {
+  int oop_oop_iterate(oop obj, ExtendedOopClosure* blk) {
     return oop_oop_iterate_v(obj, blk);
   }
-  int oop_oop_iterate_m(oop obj, OopClosure* blk, MemRegion mr) {
+  int oop_oop_iterate_m(oop obj, ExtendedOopClosure* blk, MemRegion mr) {
     return oop_oop_iterate_v_m(obj, blk, mr);
   }
 
@@ -100,13 +108,13 @@ class instanceMirrorKlass: public instanceKlass {
   ALL_OOP_OOP_ITERATE_CLOSURES_1(InstanceMirrorKlass_OOP_OOP_ITERATE_DECL)
   ALL_OOP_OOP_ITERATE_CLOSURES_2(InstanceMirrorKlass_OOP_OOP_ITERATE_DECL)
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #define InstanceMirrorKlass_OOP_OOP_ITERATE_BACKWARDS_DECL(OopClosureType, nv_suffix) \
   int oop_oop_iterate_backwards##nv_suffix(oop obj, OopClosureType* blk);
 
   ALL_OOP_OOP_ITERATE_CLOSURES_1(InstanceMirrorKlass_OOP_OOP_ITERATE_BACKWARDS_DECL)
   ALL_OOP_OOP_ITERATE_CLOSURES_2(InstanceMirrorKlass_OOP_OOP_ITERATE_BACKWARDS_DECL)
-#endif // !SERIALGC
+#endif // INCLUDE_ALL_GCS
 };
 
 #endif // SHARE_VM_OOPS_INSTANCEMIRRORKLASS_HPP
