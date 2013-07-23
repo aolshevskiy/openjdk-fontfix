@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,7 @@ import com.sun.tools.internal.ws.processor.model.java.JavaMethod;
 import com.sun.tools.internal.ws.wsdl.document.soap.SOAPStyle;
 import com.sun.tools.internal.ws.wsdl.document.soap.SOAPUse;
 import com.sun.tools.internal.ws.wsdl.framework.Entity;
-import com.sun.xml.internal.bind.api.JAXBRIContext;
+import com.sun.xml.internal.ws.spi.db.BindingHelper;
 
 import javax.xml.namespace.QName;
 import java.util.HashSet;
@@ -227,7 +227,7 @@ public class Operation extends ModelObject {
             return customizedName;
         }
 
-        return JAXBRIContext.mangleNameToVariableName(_name.getLocalPart());
+        return BindingHelper.mangleNameToVariableName(_name.getLocalPart());
     }
 
     public com.sun.tools.internal.ws.wsdl.document.Operation getWSDLPortTypeOperation(){

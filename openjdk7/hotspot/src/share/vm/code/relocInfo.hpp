@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,8 @@
 #include "memory/allocation.hpp"
 #include "utilities/top.hpp"
 
+class NativeMovConstReg;
+
 // Types in this file:
 //    relocInfo
 //      One element of an array of halfwords encoding compressed relocations.
@@ -35,8 +37,11 @@
 //    Relocation
 //      A flyweight object representing a single relocation.
 //      It is fully unpacked from the compressed relocation array.
+//    metadata_Relocation, ... (subclasses of Relocation)
+//      The location of some type-specific operations (metadata_addr, ...).
+//      Also, the source of relocation specs (metadata_Relocation::spec, ...).
 //    oop_Relocation, ... (subclasses of Relocation)
-//      The location of some type-specific operations (oop_addr, ...).
+//      oops in the code stream (strings, class loaders)
 //      Also, the source of relocation specs (oop_Relocation::spec, ...).
 //    RelocationHolder
 //      A ValueObj type which acts as a union holding a Relocation object.
@@ -44,9 +49,6 @@
 //    RelocIterator
 //      A StackObj which iterates over the relocations associated with
 //      a range of code addresses.  Can be used to operate a copy of code.
-//    PatchingRelocIterator
-//      Specialized subtype of RelocIterator which removes breakpoints
-//      temporarily during iteration, then restores them.
 //    BoundRelocation
 //      An _internal_ type shared by packers and unpackers of relocations.
 //      It pastes together a RelocationHolder with some pointers into
@@ -118,7 +120,7 @@
 //   (This means that any relocInfo can be disabled by setting
 //   its type to none.  See relocInfo::remove.)
 //
-// relocInfo::oop_type -- a reference to an oop
+// relocInfo::oop_type, relocInfo::metadata_type -- a reference to an oop or meta data
 //   Value:  an oop, or else the address (handle) of an oop
 //   Instruction types: memory (load), set (load address)
 //   Data:  []       an oop stored in 4 bytes of instruction
@@ -199,15 +201,6 @@
 //   immediate field must not straddle a unit of memory coherence.
 //   //%note reloc_3
 //
-// relocInfo::breakpoint_type -- a conditional breakpoint in the code
-//   Value:  none
-//   Instruction types: any whatsoever
-//   Data:  [b [T]t  i...]
-//   The b is a bit-packed word representing the breakpoint's attributes.
-//   The t is a target address which the breakpoint calls (when it is enabled).
-//   The i... is a place to store one or two instruction words overwritten
-//   by a trap, so that the breakpoint may be subsequently removed.
-//
 // relocInfo::static_stub_type -- an extra stub for each static_call_type
 //   Value:  none
 //   Instruction types: a virtual call:  { set_oop; jump; }
@@ -266,8 +259,8 @@ class relocInfo VALUE_OBJ_CLASS_SPEC {
     section_word_type       =  9, // internal, but a cross-section reference
     poll_type               = 10, // polling instruction for safepoints
     poll_return_type        = 11, // polling instruction for safepoints at return
-    breakpoint_type         = 12, // an initialization barrier or safepoint
-    yet_unused_type         = 13, // Still unused
+    metadata_type           = 12, // metadata that used to be oops
+    yet_unused_type_1       = 13, // Still unused
     yet_unused_type_2       = 14, // Still unused
     data_prefix_tag         = 15, // tag for a prefix (carries data arguments)
     type_mask               = 15  // A mask which selects only the above values
@@ -297,6 +290,7 @@ class relocInfo VALUE_OBJ_CLASS_SPEC {
 
   #define APPLY_TO_RELOCATIONS(visitor) \
     visitor(oop) \
+    visitor(metadata) \
     visitor(virtual_call) \
     visitor(opt_virtual_call) \
     visitor(static_call) \
@@ -306,7 +300,6 @@ class relocInfo VALUE_OBJ_CLASS_SPEC {
     visitor(internal_word) \
     visitor(poll) \
     visitor(poll_return) \
-    visitor(breakpoint) \
     visitor(section_word) \
 
 
@@ -448,7 +441,7 @@ class relocInfo VALUE_OBJ_CLASS_SPEC {
  public:
   enum {
     // Conservatively large estimate of maximum length (in shorts)
-    // of any relocation record (probably breakpoints are largest).
+    // of any relocation record.
     // Extended format is length prefix, data words, and tag/offset suffix.
     length_limit       = 1 + 1 + (3*BytesPerWord/BytesPerShort) + 1,
     have_format        = format_width > 0
@@ -565,8 +558,6 @@ class RelocIterator : public StackObj {
 
   void initialize(nmethod* nm, address begin, address limit);
 
-  friend class PatchingRelocIterator;
-  // make an uninitialized one, for PatchingRelocIterator:
   RelocIterator() { initialize_misc(); }
 
  public:
@@ -773,9 +764,6 @@ class Relocation VALUE_OBJ_CLASS_SPEC {
   void       pd_verify_data_value    (address x, intptr_t off) { pd_set_data_value(x, off, true); }
   address    pd_call_destination     (address orig_addr = NULL);
   void       pd_set_call_destination (address x);
-  void       pd_swap_in_breakpoint   (address x, short* instrs, int instrlen);
-  void       pd_swap_out_breakpoint  (address x, short* instrs, int instrlen);
-  static int pd_breakpoint_size      ();
 
   // this extracts the address of an address in the code stream instead of the reloc data
   address* pd_address_in_code       ();
@@ -972,35 +960,94 @@ class oop_Relocation : public DataRelocation {
   // Note:  oop_value transparently converts Universe::non_oop_word to NULL.
 };
 
+
+// copy of oop_Relocation for now but may delete stuff in both/either
+class metadata_Relocation : public DataRelocation {
+  relocInfo::relocType type() { return relocInfo::metadata_type; }
+
+ public:
+  // encode in one of these formats:  [] [n] [n l] [Nn l] [Nn Ll]
+  // an metadata in the CodeBlob's metadata pool
+  static RelocationHolder spec(int metadata_index, int offset = 0) {
+    assert(metadata_index > 0, "must be a pool-resident metadata");
+    RelocationHolder rh = newHolder();
+    new(rh) metadata_Relocation(metadata_index, offset);
+    return rh;
+  }
+  // an metadata in the instruction stream
+  static RelocationHolder spec_for_immediate() {
+    const int metadata_index = 0;
+    const int offset    = 0;    // if you want an offset, use the metadata pool
+    RelocationHolder rh = newHolder();
+    new(rh) metadata_Relocation(metadata_index, offset);
+    return rh;
+  }
+
+ private:
+  jint _metadata_index;            // if > 0, index into nmethod::metadata_at
+  jint _offset;                     // byte offset to apply to the metadata itself
+
+  metadata_Relocation(int metadata_index, int offset) {
+    _metadata_index = metadata_index; _offset = offset;
+  }
+
+  friend class RelocIterator;
+  metadata_Relocation() { }
+
+  // Fixes a Metadata pointer in the code. Most platforms embeds the
+  // Metadata pointer in the code at compile time so this is empty
+  // for them.
+  void pd_fix_value(address x);
+
+ public:
+  int metadata_index() { return _metadata_index; }
+  int offset()    { return _offset; }
+
+  // data is packed in "2_ints" format:  [i o] or [Ii Oo]
+  void pack_data_to(CodeSection* dest);
+  void unpack_data();
+
+  void fix_metadata_relocation();        // reasserts metadata value
+
+  void verify_metadata_relocation();
+
+  address value()  { return (address) *metadata_addr(); }
+
+  bool metadata_is_immediate()  { return metadata_index() == 0; }
+
+  Metadata**   metadata_addr();                  // addr or &pool[jint_data]
+  Metadata*    metadata_value();                 // *metadata_addr
+  // Note:  metadata_value transparently converts Universe::non_metadata_word to NULL.
+};
+
+
 class virtual_call_Relocation : public CallRelocation {
   relocInfo::relocType type() { return relocInfo::virtual_call_type; }
 
  public:
-  // "first_oop" points to the first associated set-oop.
+  // "cached_value" points to the first associated set-oop.
   // The oop_limit helps find the last associated set-oop.
   // (See comments at the top of this file.)
-  static RelocationHolder spec(address first_oop, address oop_limit = NULL) {
+  static RelocationHolder spec(address cached_value) {
     RelocationHolder rh = newHolder();
-    new(rh) virtual_call_Relocation(first_oop, oop_limit);
+    new(rh) virtual_call_Relocation(cached_value);
     return rh;
   }
 
-  virtual_call_Relocation(address first_oop, address oop_limit) {
-    _first_oop = first_oop; _oop_limit = oop_limit;
-    assert(first_oop != NULL, "first oop address must be specified");
+  virtual_call_Relocation(address cached_value) {
+    _cached_value = cached_value;
+    assert(cached_value != NULL, "first oop address must be specified");
   }
 
  private:
-  address _first_oop;               // location of first set-oop instruction
-  address _oop_limit;               // search limit for set-oop instructions
+  address _cached_value;               // location of set-value instruction
 
   friend class RelocIterator;
   virtual_call_Relocation() { }
 
 
  public:
-  address first_oop();
-  address oop_limit();
+  address cached_value();
 
   // data is packed as scaled offsets in "2_ints" format:  [f l] or [Ff Ll]
   // oop_limit is set to 0 if the limit falls somewhere within the call.
@@ -1010,15 +1057,6 @@ class virtual_call_Relocation : public CallRelocation {
   void unpack_data();
 
   void clear_inline_cache();
-
-  // Figure out where an ic_call is hiding, given a set-oop or call.
-  // Either ic_call or first_oop must be non-null; the other is deduced.
-  // Code if non-NULL must be the nmethod, else it is deduced.
-  // The address of the patchable oop is also deduced.
-  // The returned iterator will enumerate over the oops and the ic_call,
-  // as well as any other relocations that happen to be in that span of code.
-  // Recognize relevant set_oops with:  oop_reloc()->oop_addr() == oop_addr.
-  static RelocIterator parse_ic(nmethod* &nm, address &ic_call, address &first_oop, oop* &oop_addr, bool *is_optimized);
 };
 
 
@@ -1246,87 +1284,6 @@ class poll_return_Relocation : public Relocation {
   void     fix_relocation_after_move(const CodeBuffer* src, CodeBuffer* dest);
 };
 
-
-class breakpoint_Relocation : public Relocation {
-  relocInfo::relocType type() { return relocInfo::breakpoint_type; }
-
-  enum {
-    // attributes which affect the interpretation of the data:
-    removable_attr = 0x0010,   // buffer [i...] allows for undoing the trap
-    internal_attr  = 0x0020,   // the target is an internal addr (local stub)
-    settable_attr  = 0x0040,   // the target is settable
-
-    // states which can change over time:
-    enabled_state  = 0x0100,   // breakpoint must be active in running code
-    active_state   = 0x0200,   // breakpoint instruction actually in code
-
-    kind_mask      = 0x000F,   // mask for extracting kind
-    high_bit       = 0x4000    // extra bit which is always set
-  };
-
- public:
-  enum {
-    // kinds:
-    initialization = 1,
-    safepoint      = 2
-  };
-
-  // If target is NULL, 32 bits are reserved for a later set_target().
-  static RelocationHolder spec(int kind, address target = NULL, bool internal_target = false) {
-    RelocationHolder rh = newHolder();
-    new(rh) breakpoint_Relocation(kind, target, internal_target);
-    return rh;
-  }
-
- private:
-  // We require every bits value to NOT to fit into relocInfo::datalen_width,
-  // because we are going to actually store state in the reloc, and so
-  // cannot allow it to be compressed (and hence copied by the iterator).
-
-  short   _bits;                  // bit-encoded kind, attrs, & state
-  address _target;
-
-  breakpoint_Relocation(int kind, address target, bool internal_target);
-
-  friend class RelocIterator;
-  breakpoint_Relocation() { }
-
-  short    bits()       const { return _bits; }
-  short&   live_bits()  const { return data()[0]; }
-  short*   instrs()     const { return data() + datalen() - instrlen(); }
-  int      instrlen()   const { return removable() ? pd_breakpoint_size() : 0; }
-
-  void set_bits(short x) {
-    assert(live_bits() == _bits, "must be the only mutator of reloc info");
-    live_bits() = _bits = x;
-  }
-
- public:
-  address  target()     const;
-  void set_target(address x);
-
-  int  kind()           const { return  bits() & kind_mask; }
-  bool enabled()        const { return (bits() &  enabled_state) != 0; }
-  bool active()         const { return (bits() &   active_state) != 0; }
-  bool internal()       const { return (bits() &  internal_attr) != 0; }
-  bool removable()      const { return (bits() & removable_attr) != 0; }
-  bool settable()       const { return (bits() &  settable_attr) != 0; }
-
-  void set_enabled(bool b);     // to activate, you must also say set_active
-  void set_active(bool b);      // actually inserts bpt (must be enabled 1st)
-
-  // data is packed as 16 bits, followed by the target (1 or 2 words), followed
-  // if necessary by empty storage for saving away original instruction bytes.
-  void pack_data_to(CodeSection* dest);
-  void unpack_data();
-
-  // during certain operations, breakpoints must be out of the way:
-  void fix_relocation_after_move(const CodeBuffer* src, CodeBuffer* dest) {
-    assert(!active(), "cannot perform relocation on enabled breakpoints");
-  }
-};
-
-
 // We know all the xxx_Relocation classes, so now we can define these:
 #define EACH_CASE(name)                                         \
 inline name##_Relocation* RelocIterator::name##_reloc() {       \
@@ -1344,26 +1301,5 @@ APPLY_TO_RELOCATIONS(EACH_CASE);
 inline RelocIterator::RelocIterator(nmethod* nm, address begin, address limit) {
   initialize(nm, begin, limit);
 }
-
-// if you are going to patch code, you should use this subclass of
-// RelocIterator
-class PatchingRelocIterator : public RelocIterator {
- private:
-  RelocIterator _init_state;
-
-  void prepass();               // deactivates all breakpoints
-  void postpass();              // reactivates all enabled breakpoints
-
-  // do not copy these puppies; it would have unpredictable side effects
-  // these are private and have no bodies defined because they should not be called
-  PatchingRelocIterator(const RelocIterator&);
-  void        operator=(const RelocIterator&);
-
- public:
-  PatchingRelocIterator(nmethod* nm, address begin = NULL, address limit = NULL)
-    : RelocIterator(nm, begin, limit)                { prepass();  }
-
-  ~PatchingRelocIterator()                           { postpass(); }
-};
 
 #endif // SHARE_VM_CODE_RELOCINFO_HPP

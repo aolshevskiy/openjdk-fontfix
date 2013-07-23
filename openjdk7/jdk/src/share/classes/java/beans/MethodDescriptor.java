@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,7 +42,7 @@ public class MethodDescriptor extends FeatureDescriptor {
 
     private String[] paramNames;
 
-    private List params;
+    private List<WeakReference<Class<?>>> params;
 
     private ParameterDescriptor parameterDescriptors[];
 
@@ -70,7 +70,9 @@ public class MethodDescriptor extends FeatureDescriptor {
                 ParameterDescriptor parameterDescriptors[]) {
         setName(method.getName());
         setMethod(method);
-        this.parameterDescriptors = parameterDescriptors;
+        this.parameterDescriptors = (parameterDescriptors != null)
+                ? parameterDescriptors.clone()
+                : null;
     }
 
     /**
@@ -81,10 +83,10 @@ public class MethodDescriptor extends FeatureDescriptor {
     public synchronized Method getMethod() {
         Method method = getMethod0();
         if (method == null) {
-            Class cls = getClass0();
+            Class<?> cls = getClass0();
             String name = getName();
             if ((cls != null) && (name != null)) {
-                Class[] params = getParams();
+                Class<?>[] params = getParams();
                 if (params == null) {
                     for (int i = 0; i < 3; i++) {
                         // Find methods for up to 2 params. We are guessing here.
@@ -121,15 +123,15 @@ public class MethodDescriptor extends FeatureDescriptor {
                 : null;
     }
 
-    private synchronized void setParams(Class[] param) {
+    private synchronized void setParams(Class<?>[] param) {
         if (param == null) {
             return;
         }
         paramNames = new String[param.length];
-        params = new ArrayList(param.length);
+        params = new ArrayList<>(param.length);
         for (int i = 0; i < param.length; i++) {
             paramNames[i] = param[i].getName();
-            params.add(new WeakReference(param[i]));
+            params.add(new WeakReference<Class<?>>(param[i]));
         }
     }
 
@@ -138,12 +140,12 @@ public class MethodDescriptor extends FeatureDescriptor {
         return paramNames;
     }
 
-    private synchronized Class[] getParams() {
-        Class[] clss = new Class[params.size()];
+    private synchronized Class<?>[] getParams() {
+        Class<?>[] clss = new Class<?>[params.size()];
 
         for (int i = 0; i < params.size(); i++) {
-            Reference ref = (Reference)params.get(i);
-            Class cls = (Class)ref.get();
+            Reference<? extends Class<?>> ref = (Reference<? extends Class<?>>)params.get(i);
+            Class<?> cls = ref.get();
             if (cls == null) {
                 return null;
             } else {
@@ -161,7 +163,9 @@ public class MethodDescriptor extends FeatureDescriptor {
      *          a null array if the parameter names aren't known.
      */
     public ParameterDescriptor[] getParameterDescriptors() {
-        return parameterDescriptors;
+        return (this.parameterDescriptors != null)
+                ? this.parameterDescriptors.clone()
+                : null;
     }
 
     /*

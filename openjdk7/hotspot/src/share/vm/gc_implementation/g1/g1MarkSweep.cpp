@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,7 +43,6 @@
 #include "oops/instanceRefKlass.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/jvmtiExport.hpp"
-#include "runtime/aprofiler.hpp"
 #include "runtime/biasedLocking.hpp"
 #include "runtime/fprofiler.hpp"
 #include "runtime/synchronizer.hpp"
@@ -72,14 +71,10 @@ void G1MarkSweep::invoke_at_safepoint(ReferenceProcessor* rp,
   GenMarkSweep::_ref_processor = rp;
   rp->setup_policy(clear_all_softrefs);
 
-  // When collecting the permanent generation methodOops may be moving,
+  // When collecting the permanent generation Method*s may be moving,
   // so we either have to flush all bcp data or convert it into bci.
   CodeCache::gc_prologue();
   Threads::gc_prologue();
-
-  // Increment the invocation count for the permanent generation, since it is
-  // implicitly collected whenever we do a full mark sweep collection.
-  sh->perm_gen()->stat_record()->invocations++;
 
   bool marked_for_unloading = false;
 
@@ -103,10 +98,6 @@ void G1MarkSweep::invoke_at_safepoint(ReferenceProcessor* rp,
   GenMarkSweep::restore_marks();
   BiasedLocking::restore_marks();
   GenMarkSweep::deallocate_stacks();
-
-  // We must invalidate the perm-gen rs, so that it gets rebuilt.
-  GenRemSet* rs = sh->rem_set();
-  rs->invalidate(sh->perm_gen()->used_region(), true /*whole_heap*/);
 
   // "free at last gc" is calculated from these.
   // CHF: cheating for now!!!
@@ -136,12 +127,15 @@ void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
 
   SharedHeap* sh = SharedHeap::heap();
 
-  sh->process_strong_roots(true,  // activeate StrongRootsScope
-                           true,  // Collecting permanent generation.
+  // Need cleared claim bits for the strong roots processing
+  ClassLoaderDataGraph::clear_claimed_marks();
+
+  sh->process_strong_roots(true,  // activate StrongRootsScope
+                           false, // not scavenging.
                            SharedHeap::SO_SystemClasses,
                            &GenMarkSweep::follow_root_closure,
                            &GenMarkSweep::follow_code_root_closure,
-                           &GenMarkSweep::follow_root_closure);
+                           &GenMarkSweep::follow_klass_closure);
 
   // Process reference objects found during marking
   ReferenceProcessor* rp = GenMarkSweep::ref_processor();
@@ -156,39 +150,28 @@ void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
                                       gc_timer());
   gc_tracer()->report_gc_reference_stats(stats);
 
-  // Follow system dictionary roots and unload classes
+
+  // This is the point where the entire marking should have completed.
+  assert(GenMarkSweep::_marking_stack.is_empty(), "Marking should have completed");
+
+  // Unload classes and purge the SystemDictionary.
   bool purged_class = SystemDictionary::do_unloading(&GenMarkSweep::is_alive);
-  assert(GenMarkSweep::_marking_stack.is_empty(),
-         "stack should be empty by now");
 
-  // Follow code cache roots (has to be done after system dictionary,
-  // assumes all live klasses are marked)
-  CodeCache::do_unloading(&GenMarkSweep::is_alive,
-                                   &GenMarkSweep::keep_alive,
-                                   purged_class);
-  GenMarkSweep::follow_stack();
+  // Unload nmethods.
+  CodeCache::do_unloading(&GenMarkSweep::is_alive, purged_class);
 
-  // Update subklass/sibling/implementor links of live klasses
-  GenMarkSweep::follow_weak_klass_links();
-  assert(GenMarkSweep::_marking_stack.is_empty(),
-         "stack should be empty by now");
+  // Prune dead klasses from subklass/sibling/implementor lists.
+  Klass::clean_weak_klass_links(&GenMarkSweep::is_alive);
 
-  // Visit memoized MDO's and clear any unmarked weak refs
-  GenMarkSweep::follow_mdo_weak_refs();
-  assert(GenMarkSweep::_marking_stack.is_empty(), "just drained");
-
-  // Visit interned string tables and delete unmarked oops
+  // Delete entries for dead interned strings.
   StringTable::unlink(&GenMarkSweep::is_alive);
+
   // Clean up unreferenced symbols in symbol table.
   SymbolTable::unlink();
-
-  assert(GenMarkSweep::_marking_stack.is_empty(),
-         "stack should be empty by now");
 
   if (VerifyDuringGC) {
     HandleMark hm;  // handle scope
     COMPILER2_PRESENT(DerivedPointerTableDeactivate dpt_deact);
-    gclog_or_tty->print(" VerifyDuringGC:(full)[Verifying ");
     Universe::heap()->prepare_for_verify();
     // Note: we can verify only the heap here. When an object is
     // marked, the previous value of the mark word (including
@@ -200,11 +183,13 @@ void G1MarkSweep::mark_sweep_phase1(bool& marked_for_unloading,
     // fail. At the end of the GC, the orginal mark word values
     // (including hash values) are restored to the appropriate
     // objects.
-    Universe::heap()->verify(/* silent      */ false,
-                             /* option      */ VerifyOption_G1UseMarkWord);
-
-    G1CollectedHeap* g1h = G1CollectedHeap::heap();
-    gclog_or_tty->print_cr("]");
+    if (!VerifySilently) {
+      gclog_or_tty->print(" VerifyDuringGC:(full)[Verifying ");
+    }
+    Universe::heap()->verify(VerifySilently, VerifyOption_G1UseMarkWord);
+    if (!VerifySilently) {
+      gclog_or_tty->print_cr("]");
+    }
   }
 
   gc_tracer()->report_object_count_after_gc(&GenMarkSweep::is_alive);
@@ -274,19 +259,11 @@ public:
 void G1MarkSweep::mark_sweep_phase2() {
   // Now all live objects are marked, compute the new object addresses.
 
-  // It is imperative that we traverse perm_gen LAST. If dead space is
-  // allowed a range of dead object may get overwritten by a dead int
-  // array. If perm_gen is not traversed last a klassOop may get
-  // overwritten. This is fine since it is dead, but if the class has dead
-  // instances we have to skip them, and in order to find their size we
-  // need the klassOop!
-  //
   // It is not required that we traverse spaces in the same order in
   // phase2, phase3 and phase4, but the ValidateMarkSweep live oops
   // tracking expects us to do so. See comment under phase4.
 
   G1CollectedHeap* g1h = G1CollectedHeap::heap();
-  Generation* pg = g1h->perm_gen();
 
   GCTraceTime tm("phase 2", G1Log::fine() && Verbose, true, gc_timer());
   GenMarkSweep::trace("2");
@@ -301,9 +278,6 @@ void G1MarkSweep::mark_sweep_phase2() {
   G1PrepareCompactClosure blk(sp);
   g1h->heap_region_iterate(&blk);
   blk.update_sets();
-
-  CompactPoint perm_cp(pg, NULL, NULL);
-  pg->prepare_for_compaction(&perm_cp);
 }
 
 class G1AdjustPointersClosure: public HeapRegionClosure {
@@ -313,10 +287,8 @@ class G1AdjustPointersClosure: public HeapRegionClosure {
       if (r->startsHumongous()) {
         // We must adjust the pointers on the single H object.
         oop obj = oop(r->bottom());
-        debug_only(GenMarkSweep::track_interior_pointers(obj));
         // point all the oops to the new location
         obj->adjust_pointers();
-        debug_only(GenMarkSweep::check_interior_pointers());
       }
     } else {
       // This really ought to be "as_CompactibleSpace"...
@@ -328,7 +300,6 @@ class G1AdjustPointersClosure: public HeapRegionClosure {
 
 void G1MarkSweep::mark_sweep_phase3() {
   G1CollectedHeap* g1h = G1CollectedHeap::heap();
-  Generation* pg = g1h->perm_gen();
 
   // Adjust the pointers to reflect the new locations
   GCTraceTime tm("phase 3", G1Log::fine() && Verbose, true, gc_timer());
@@ -336,26 +307,27 @@ void G1MarkSweep::mark_sweep_phase3() {
 
   SharedHeap* sh = SharedHeap::heap();
 
+  // Need cleared claim bits for the strong roots processing
+  ClassLoaderDataGraph::clear_claimed_marks();
+
   sh->process_strong_roots(true,  // activate StrongRootsScope
-                           true,  // Collecting permanent generation.
+                           false, // not scavenging.
                            SharedHeap::SO_AllClasses,
-                           &GenMarkSweep::adjust_root_pointer_closure,
+                           &GenMarkSweep::adjust_pointer_closure,
                            NULL,  // do not touch code cache here
-                           &GenMarkSweep::adjust_pointer_closure);
+                           &GenMarkSweep::adjust_klass_closure);
 
   assert(GenMarkSweep::ref_processor() == g1h->ref_processor_stw(), "Sanity");
-  g1h->ref_processor_stw()->weak_oops_do(&GenMarkSweep::adjust_root_pointer_closure);
+  g1h->ref_processor_stw()->weak_oops_do(&GenMarkSweep::adjust_pointer_closure);
 
   // Now adjust pointers in remaining weak roots.  (All of which should
   // have been cleared if they pointed to non-surviving objects.)
-  g1h->g1_process_weak_roots(&GenMarkSweep::adjust_root_pointer_closure,
-                             &GenMarkSweep::adjust_pointer_closure);
+  g1h->g1_process_weak_roots(&GenMarkSweep::adjust_pointer_closure);
 
   GenMarkSweep::adjust_marks();
 
   G1AdjustPointersClosure blk;
   g1h->heap_region_iterate(&blk);
-  pg->adjust_pointers();
 }
 
 class G1SpaceCompactClosure: public HeapRegionClosure {
@@ -383,22 +355,14 @@ public:
 void G1MarkSweep::mark_sweep_phase4() {
   // All pointers are now adjusted, move objects accordingly
 
-  // It is imperative that we traverse perm_gen first in phase4. All
-  // classes must be allocated earlier than their instances, and traversing
-  // perm_gen first makes sure that all klassOops have moved to their new
-  // location before any instance does a dispatch through it's klass!
-
   // The ValidateMarkSweep live oops tracking expects us to traverse spaces
   // in the same order in phase2, phase3 and phase4. We don't quite do that
-  // here (perm_gen first rather than last), so we tell the validate code
+  // here (code and comment not fixed for perm removal), so we tell the validate code
   // to use a higher index (saved from phase2) when verifying perm_gen.
   G1CollectedHeap* g1h = G1CollectedHeap::heap();
-  Generation* pg = g1h->perm_gen();
 
   GCTraceTime tm("phase 4", G1Log::fine() && Verbose, true, gc_timer());
   GenMarkSweep::trace("4");
-
-  pg->compact();
 
   G1SpaceCompactClosure blk;
   g1h->heap_region_iterate(&blk);

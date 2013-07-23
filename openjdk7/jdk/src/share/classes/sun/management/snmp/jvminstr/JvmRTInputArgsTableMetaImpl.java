@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -70,6 +70,7 @@ import sun.management.snmp.util.JvmContextFactory;
  */
 public class JvmRTInputArgsTableMetaImpl extends JvmRTInputArgsTableMeta {
 
+    static final long serialVersionUID = -2083438094888099238L;
     private SnmpTableCache cache;
 
      /**
@@ -77,6 +78,8 @@ public class JvmRTInputArgsTableMetaImpl extends JvmRTInputArgsTableMeta {
      * JvmRTInputArgsTable.
      **/
     private static class JvmRTInputArgsTableCache extends SnmpTableCache {
+
+        static final long serialVersionUID = 1693751105464785192L;
         private JvmRTInputArgsTableMetaImpl meta;
 
         JvmRTInputArgsTableCache(JvmRTInputArgsTableMetaImpl meta,
@@ -89,7 +92,7 @@ public class JvmRTInputArgsTableMetaImpl extends JvmRTInputArgsTableMeta {
          * Call <code>getTableDatas(JvmContextFactory.getUserData())</code>.
          **/
         public SnmpTableHandler getTableHandler() {
-            final Map userData = JvmContextFactory.getUserData();
+            final Map<Object,Object> userData = JvmContextFactory.getUserData();
             return getTableDatas(userData);
         }
 

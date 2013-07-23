@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -134,6 +134,8 @@ ALL_SETTINGS+=$(call addOptionalSetting,USE_HOTSPOT_INTERPRETER_MODE)
 ALL_SETTINGS+=$(call addOptionalSetting,PEDANTIC)
 ALL_SETTINGS+=$(call addOptionalSetting,DEV_ONLY)
 ALL_SETTINGS+=$(call addOptionalSetting,NO_DOCS)
+ALL_SETTINGS+=$(call addOptionalSetting,NO_DEMOS)
+ALL_SETTINGS+=$(call addOptionalSetting,NO_SAMPLES)
 ALL_SETTINGS+=$(call addOptionalSetting,NO_IMAGES)
 ALL_SETTINGS+=$(call addOptionalSetting,TOOLS_ONLY)
 ALL_SETTINGS+=$(call addOptionalSetting,INSANE)
@@ -180,8 +182,13 @@ ifeq ($(PLATFORM),windows)
     ALL_SETTINGS+=$(call addRequiredVersionSetting,CYGWIN_VER)
     ALL_SETTINGS+=$(call addRequiredSetting,CYGPATH_CMD)
   else
-    ALL_SETTINGS+=$(call addRequiredVersionSetting,MKS_VER)
-    ALL_SETTINGS+=$(call addOptionalSetting,DOSNAME_CMD)
+    ifdef USING_MSYS
+      ALL_SETTINGS+=$(call addRequiredSetting,USING_MSYS)
+      ALL_SETTINGS+=$(call addRequiredSetting,DOSPATH_CMD)
+    else
+      ALL_SETTINGS+=$(call addRequiredVersionSetting,MKS_VER)
+      ALL_SETTINGS+=$(call addOptionalSetting,DOSNAME_CMD)
+    endif
   endif
 endif
 ifeq ($(PLATFORM),linux)
@@ -263,4 +270,3 @@ ifdef OPENJDK
   ALL_SETTINGS+=$(call addAltSetting,PREVIOUS_JRE_FILE)
   ALL_SETTINGS+=$(call addAltSetting,PREVIOUS_RELEASE_IMAGE)
 endif
-

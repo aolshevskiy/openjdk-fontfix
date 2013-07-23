@@ -36,8 +36,8 @@ public class SchemaGeneratorFacade {
 
     public static void main(String[] args) throws Throwable {
         try {
-            ClassLoader cl = SchemaGeneratorFacade.class.getClassLoader();
-            if(cl==null)    cl = ClassLoader.getSystemClassLoader();
+            ClassLoader cl = SecureLoader.getClassClassLoader(SchemaGeneratorFacade.class);
+            if(cl==null)    cl = SecureLoader.getSystemClassLoader();
 
             Class driver = cl.loadClass("com.sun.tools.internal.jxc.SchemaGenerator");
             Method mainMethod = driver.getDeclaredMethod("main", new Class[]{String[].class});
@@ -50,7 +50,7 @@ public class SchemaGeneratorFacade {
                     throw e.getTargetException();
             }
         } catch (UnsupportedClassVersionError e) {
-            System.err.println("schemagen requires JDK 5.0 or later. Please download it from http://java.sun.com/j2se/1.5/");
+            System.err.println("schemagen requires JDK 6.0 or later. Please download it from http://www.oracle.com/technetwork/java/javase/downloads");
         }
     }
 }

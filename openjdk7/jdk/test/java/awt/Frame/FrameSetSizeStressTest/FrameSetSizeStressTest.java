@@ -43,5 +43,6 @@ public final class FrameSetSizeStressTest {
             frame.setSize(200, 200);
             frame.setSize(300, 300);
         }
+        frame.dispose();
     }
 }

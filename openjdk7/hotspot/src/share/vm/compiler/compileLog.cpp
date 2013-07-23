@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 #include "ci/ciMethod.hpp"
 #include "compiler/compileLog.hpp"
 #include "memory/allocation.inline.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "runtime/mutexLocker.hpp"
 #include "runtime/os.hpp"
 
@@ -34,17 +34,18 @@ CompileLog* CompileLog::_first = NULL;
 
 // ------------------------------------------------------------------
 // CompileLog::CompileLog
-CompileLog::CompileLog(const char* file, FILE* fp, intx thread_id)
+CompileLog::CompileLog(const char* file_name, FILE* fp, intx thread_id)
   : _context(_context_buffer, sizeof(_context_buffer))
 {
-  initialize(new(ResourceObj::C_HEAP, mtCompiler) fileStream(fp));
-  _file = file;
+  initialize(new(ResourceObj::C_HEAP, mtCompiler) fileStream(fp, true));
   _file_end = 0;
   _thread_id = thread_id;
 
   _identities_limit = 0;
   _identities_capacity = 400;
   _identities = NEW_C_HEAP_ARRAY(char, _identities_capacity, mtCompiler);
+  _file = NEW_C_HEAP_ARRAY(char, strlen(file_name)+1, mtCompiler);
+   strcpy((char*)_file, file_name);
 
   // link into the global list
   { MutexLocker locker(CompileTaskAlloc_lock);
@@ -57,30 +58,9 @@ CompileLog::~CompileLog() {
   delete _out;
   _out = NULL;
   FREE_C_HEAP_ARRAY(char, _identities, mtCompiler);
+  FREE_C_HEAP_ARRAY(char, _file, mtCompiler);
 }
 
-
-// Advance kind up to a null or space, return this tail.
-// Make sure kind is null-terminated, not space-terminated.
-// Use the buffer if necessary.
-static const char* split_attrs(const char* &kind, char* buffer) {
-  const char* attrs = strchr(kind, ' ');
-  // Tease apart the first word from the rest:
-  if (attrs == NULL) {
-    return "";  // no attrs, no split
-  } else if (kind == buffer) {
-    ((char*) attrs)[-1] = 0;
-    return attrs;
-  } else {
-    // park it in the buffer, so we can put a null on the end
-    assert(!(kind >= buffer && kind < buffer+100), "not obviously in buffer");
-    int klen = attrs - kind;
-    strncpy(buffer, kind, klen);
-    buffer[klen] = 0;
-    kind = buffer;  // return by reference
-    return attrs;
-  }
-}
 
 // see_tag, pop_tag:  Override the default do-nothing methods on xmlStream.
 // These methods provide a hook for managing the the extra context markup.
@@ -99,7 +79,7 @@ void CompileLog::pop_tag(const char* tag) {
 
 // ------------------------------------------------------------------
 // CompileLog::identify
-int CompileLog::identify(ciObject* obj) {
+int CompileLog::identify(ciBaseObject* obj) {
   if (obj == NULL)  return 0;
   int id = obj->ident();
   if (id < 0)  return id;
@@ -121,57 +101,62 @@ int CompileLog::identify(ciObject* obj) {
   _identities[id] = 1;  // mark
 
   // Now, print the object's identity once, in detail.
-  if (obj->is_klass()) {
-    ciKlass* klass = obj->as_klass();
-    begin_elem("klass id='%d'", id);
-    name(klass->name());
-    if (!klass->is_loaded()) {
-      print(" unloaded='1'");
-    } else {
-      print(" flags='%d'", klass->modifier_flags());
-    }
-    end_elem();
-  } else if (obj->is_method()) {
-    ciMethod* method = obj->as_method();
-    ciSignature* sig = method->signature();
-    // Pre-identify items that we will need!
-    identify(sig->return_type());
-    for (int i = 0; i < sig->count(); i++) {
-      identify(sig->type_at(i));
-    }
-    begin_elem("method id='%d' holder='%d'",
-               id, identify(method->holder()));
-    name(method->name());
-    print(" return='%d'", identify(sig->return_type()));
-    if (sig->count() > 0) {
-      print(" arguments='");
-      for (int i = 0; i < sig->count(); i++) {
-        print((i == 0) ? "%d" : " %d", identify(sig->type_at(i)));
+  if (obj->is_metadata()) {
+    ciMetadata* mobj = obj->as_metadata();
+    if (mobj->is_klass()) {
+      ciKlass* klass = mobj->as_klass();
+      begin_elem("klass id='%d'", id);
+      name(klass->name());
+      if (!klass->is_loaded()) {
+        print(" unloaded='1'");
+      } else {
+        print(" flags='%d'", klass->modifier_flags());
       }
-      print("'");
-    }
-    if (!method->is_loaded()) {
-      print(" unloaded='1'");
+      end_elem();
+    } else if (mobj->is_method()) {
+      ciMethod* method = mobj->as_method();
+      ciSignature* sig = method->signature();
+      // Pre-identify items that we will need!
+      identify(sig->return_type());
+      for (int i = 0; i < sig->count(); i++) {
+        identify(sig->type_at(i));
+      }
+      begin_elem("method id='%d' holder='%d'",
+          id, identify(method->holder()));
+      name(method->name());
+      print(" return='%d'", identify(sig->return_type()));
+      if (sig->count() > 0) {
+        print(" arguments='");
+        for (int i = 0; i < sig->count(); i++) {
+          print((i == 0) ? "%d" : " %d", identify(sig->type_at(i)));
+        }
+        print("'");
+      }
+      if (!method->is_loaded()) {
+        print(" unloaded='1'");
+      } else {
+        print(" flags='%d'", (jchar) method->flags().as_int());
+        // output a few metrics
+        print(" bytes='%d'", method->code_size());
+        method->log_nmethod_identity(this);
+        //print(" count='%d'", method->invocation_count());
+        //int bec = method->backedge_count();
+        //if (bec != 0)  print(" backedge_count='%d'", bec);
+        print(" iicount='%d'", method->interpreter_invocation_count());
+      }
+      end_elem();
+    } else if (mobj->is_type()) {
+      BasicType type = mobj->as_type()->basic_type();
+      elem("type id='%d' name='%s'", id, type2name(type));
     } else {
-      print(" flags='%d'", (jchar) method->flags().as_int());
-      // output a few metrics
-      print(" bytes='%d'", method->code_size());
-      method->log_nmethod_identity(this);
-      //print(" count='%d'", method->invocation_count());
-      //int bec = method->backedge_count();
-      //if (bec != 0)  print(" backedge_count='%d'", bec);
-      print(" iicount='%d'", method->interpreter_invocation_count());
+      // Should not happen.
+      elem("unknown id='%d'", id);
+      ShouldNotReachHere();
     }
-    end_elem();
   } else if (obj->is_symbol()) {
     begin_elem("symbol id='%d'", id);
     name(obj->as_symbol());
     end_elem();
-  } else if (obj->is_null_object()) {
-    elem("null_object id='%d'", id);
-  } else if (obj->is_type()) {
-    BasicType type = obj->as_type()->basic_type();
-    elem("type id='%d' name='%s'", id, type2name(type));
   } else {
     // Should not happen.
     elem("unknown id='%d'", id);
@@ -205,7 +190,8 @@ void CompileLog::finish_log_on_error(outputStream* file, char* buf, int buflen) 
   if (called_exit)  return;
   called_exit = true;
 
-  for (CompileLog* log = _first; log != NULL; log = log->_next) {
+  CompileLog* log = _first;
+  while (log != NULL) {
     log->flush();
     const char* partial_file = log->file();
     int partial_fd = open(partial_file, O_RDONLY);
@@ -284,7 +270,11 @@ void CompileLog::finish_log_on_error(outputStream* file, char* buf, int buflen) 
       close(partial_fd);
       unlink(partial_file);
     }
+    CompileLog* next_log = log->_next;
+    delete log;
+    log = next_log;
   }
+  _first = NULL;
 }
 
 // ------------------------------------------------------------------

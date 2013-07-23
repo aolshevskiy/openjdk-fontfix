@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,6 +51,7 @@ import java.security.Principal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 
 /**
@@ -92,11 +93,27 @@ final class ServerConnectionImpl extends WSHTTPConnection implements WebServiceC
             String name = entry.getKey();
             List<String> values = entry.getValue();
             // ignore headers that interfere with our correct operations
-            if (!name.equalsIgnoreCase("Content-Length") && !name.equalsIgnoreCase("Content-Type")) {
+            if (!"Content-Length".equalsIgnoreCase(name) && !"Content-Type".equalsIgnoreCase(name)) {
                 r.put(name,new ArrayList<String>(values));
             }
         }
     }
+
+    @Override
+        public void setResponseHeader(String key, List<String> value) {
+                httpExchange.getResponseHeaders().put(key, value);
+        }
+
+        @Override
+        public Set<String> getRequestHeaderNames() {
+        return httpExchange.getRequestHeaders().keySet();
+        }
+
+        @Override
+        public List<String> getRequestHeaderValues(String headerName) {
+                return httpExchange.getRequestHeaders().get(headerName);
+        }
+
     @Override
     @Property({MessageContext.HTTP_RESPONSE_HEADERS,Packet.OUTBOUND_TRANSPORT_HEADERS})
     public Map<String,List<String>> getResponseHeaders() {
@@ -210,7 +227,7 @@ final class ServerConnectionImpl extends WSHTTPConnection implements WebServiceC
     public @NotNull String getEPRAddress(Packet request, WSEndpoint endpoint) {
         //return WSHttpHandler.getRequestAddress(httpExchange);
 
-        PortAddressResolver resolver = adapter.owner.createPortAddressResolver(getBaseAddress());
+        PortAddressResolver resolver = adapter.owner.createPortAddressResolver(getBaseAddress(), endpoint.getImplementationClass());
         String address = resolver.getAddressFor(endpoint.getServiceName(), endpoint.getPortName().getLocalPart());
         if(address==null)
             throw new WebServiceException(WsservletMessages.SERVLET_NO_ADDRESS_AVAILABLE(endpoint.getPortName()));
@@ -299,6 +316,26 @@ final class ServerConnectionImpl extends WSHTTPConnection implements WebServiceC
     public void setContentLengthResponseHeader(int value) {
         httpExchange.getResponseHeaders().set("Content-Length", ""+value);
     }
+
+        @Override
+        public String getRequestURI() {
+                return httpExchange.getRequestURI().toString();
+        }
+
+        @Override
+        public String getRequestScheme() {
+                return (httpExchange instanceof HttpsExchange) ? "https" : "http";
+        }
+
+        @Override
+        public String getServerName() {
+                return httpExchange.getLocalAddress().getHostName();
+        }
+
+        @Override
+        public int getServerPort() {
+                return httpExchange.getLocalAddress().getPort();
+        }
 
     protected PropertyMap getPropertyMap() {
         return model;

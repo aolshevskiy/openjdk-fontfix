@@ -28,6 +28,7 @@
 #include "memory/allocation.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/ostream.hpp"
+#include "utilities/macros.hpp"
 
 // The AttachListener thread services a queue of operations that are enqueued
 // by client tools. Each operation is identified by a name and has up to 3
@@ -49,18 +50,21 @@ struct AttachOperationFunctionInfo {
 
 class AttachListener: AllStatic {
  public:
-  static void init();
-  static void abort();
+  static void init()  NOT_SERVICES_RETURN;
+  static void abort() NOT_SERVICES_RETURN;
 
   // invoke to perform clean-up tasks when all clients detach
-  static void detachall();
+  static void detachall() NOT_SERVICES_RETURN;
 
   // indicates if the Attach Listener needs to be created at startup
-  static bool init_at_startup();
+  static bool init_at_startup() NOT_SERVICES_RETURN_(false);
 
   // indicates if we have a trigger to start the Attach Listener
-  static bool is_init_trigger();
+  static bool is_init_trigger() NOT_SERVICES_RETURN_(false);
 
+#if !INCLUDE_SERVICES
+  static bool is_attach_supported()             { return false; }
+#else
  private:
   static volatile bool _initialized;
 
@@ -88,8 +92,10 @@ class AttachListener: AllStatic {
 
   // dequeue the next operation
   static AttachOperation* dequeue();
+#endif // !INCLUDE_SERVICES
 };
 
+#if INCLUDE_SERVICES
 class AttachOperation: public CHeapObj<mtInternal> {
  public:
   enum {
@@ -143,5 +149,6 @@ class AttachOperation: public CHeapObj<mtInternal> {
   // complete operation by sending result code and any result data to the client
   virtual void complete(jint result, bufferedStream* result_stream) = 0;
 };
+#endif // INCLUDE_SERVICES
 
 #endif // SHARE_VM_SERVICES_ATTACHLISTENER_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 #include "precompiled.hpp"
 #include "compiler/compileLog.hpp"
 #include "interpreter/linkResolver.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "opto/addnode.hpp"
 #include "opto/idealGraphPrinter.hpp"
 #include "opto/locknode.hpp"
@@ -390,6 +390,7 @@ Parse::Parse(JVMState* caller, ciMethod* parse_method, float expected_uses)
   _expected_uses = expected_uses;
   _depth = 1 + (caller->has_method() ? caller->depth() : 0);
   _wrote_final = false;
+  _alloc_with_final = NULL;
   _entry_bci = InvocationEntryBci;
   _tf = NULL;
   _block = NULL;
@@ -493,7 +494,7 @@ Parse::Parse(JVMState* caller, ciMethod* parse_method, float expected_uses)
       if (PrintOpto && (Verbose || WizardMode)) {
         tty->print_cr("OSR @%d type flow bailout: %s", _entry_bci, _flow->failure_reason());
         if (Verbose) {
-          method()->print_oop();
+          method()->print();
           method()->print_codes();
           _flow->print();
         }
@@ -723,6 +724,8 @@ void Parse::build_exits() {
   // Note:  iophi and memphi are not transformed until do_exits.
   Node* iophi  = new (C) PhiNode(region, Type::ABIO);
   Node* memphi = new (C) PhiNode(region, Type::MEMORY, TypePtr::BOTTOM);
+  gvn().set_type_bottom(iophi);
+  gvn().set_type_bottom(memphi);
   _exits.set_i_o(iophi);
   _exits.set_all_memory(memphi);
 
@@ -738,6 +741,7 @@ void Parse::build_exits() {
     }
     int         ret_size = type2size[ret_type->basic_type()];
     Node*       ret_phi  = new (C) PhiNode(region, ret_type);
+    gvn().set_type_bottom(ret_phi);
     _exits.ensure_stack(ret_size);
     assert((int)(tf()->range()->cnt() - TypeFunc::Parms) == ret_size, "good tf range");
     assert(method()->return_type()->size() == ret_size, "tf agrees w/ method");
@@ -917,7 +921,7 @@ void Parse::do_exits() {
     // such unusual early publications.  But no barrier is needed on
     // exceptional returns, since they cannot publish normally.
     //
-    _exits.insert_mem_bar(Op_MemBarRelease);
+    _exits.insert_mem_bar(Op_MemBarRelease, alloc_with_final());
 #ifndef PRODUCT
     if (PrintOpto && (Verbose || WizardMode)) {
       method()->print_name();

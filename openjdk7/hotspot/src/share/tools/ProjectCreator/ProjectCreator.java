@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,7 @@ public class ProjectCreator {
             + "into .dsp file, substituting for path given in "
             + "-sourceBase. Example: HotSpotWorkSpace>");
       System.err.println("  -dllLoc <path to directory in which to put "
-            + "jvm.dll and jvm_g.dll; no trailing slash>");
+            + "jvm.dll; no trailing slash>");
       System.err.println("  If any of the above are specified, "
             + "they must all be.");
       System.err.println("  Additional, optional arguments, which can be "

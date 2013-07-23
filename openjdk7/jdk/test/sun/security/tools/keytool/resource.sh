@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 6239297 7083664
+# @bug 6239297
 # @summary keytool usage is broken after changing Resources.java
 # @author Max Wang
 #

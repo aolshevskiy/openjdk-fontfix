@@ -21,15 +21,13 @@
  * questions.
  */
 
-//
-// SunJSSE does not support dynamic system properties, no way to re-use
-// system properties in samevm/agentvm mode.
-//
-
 /* @test
  * @bug 4696506 4942650
  * @summary Unit test for java.net.CookieHandler
  * @run main/othervm CookieHandlerTest
+ *
+ *     SunJSSE does not support dynamic system properties, no way to re-use
+ *     system properties in samevm/agentvm mode.
  * @author Yingxian Wang
  */
 

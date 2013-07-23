@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 6522933 7083664
+# @bug 6522933
 # @summary jarsigner fails in a directory with a path contianing a % sign
 # @author Wang Weijun
 #

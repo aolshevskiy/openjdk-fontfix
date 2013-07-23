@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,7 +42,8 @@ class CompileTask : public CHeapObj<mtCompiler> {
  private:
   Monitor*     _lock;
   uint         _compile_id;
-  jobject      _method;
+  Method*      _method;
+  jobject      _method_holder;
   int          _osr_bci;
   bool         _is_complete;
   bool         _is_success;
@@ -54,7 +55,8 @@ class CompileTask : public CHeapObj<mtCompiler> {
 
   // Fields used for logging why the compilation was initiated:
   jlong        _time_queued;  // in units of os::elapsed_counter()
-  jobject      _hot_method;   // which method actually triggered this task
+  Method*      _hot_method;   // which method actually triggered this task
+  jobject      _hot_method_holder;
   int          _hot_count;    // information about its invocation counter
   const char*  _comment;      // more info about the task
 
@@ -70,7 +72,7 @@ class CompileTask : public CHeapObj<mtCompiler> {
   void free();
 
   int          compile_id() const                { return _compile_id; }
-  jobject      method_handle() const             { return _method; }
+  Method*      method() const                    { return _method; }
   int          osr_bci() const                   { return _osr_bci; }
   bool         is_complete() const               { return _is_complete; }
   bool         is_blocking() const               { return _is_blocking; }
@@ -98,7 +100,7 @@ class CompileTask : public CHeapObj<mtCompiler> {
   void         set_prev(CompileTask* prev)       { _prev = prev; }
 
 private:
-  static void  print_compilation_impl(outputStream* st, methodOop method, int compile_id, int comp_level,
+  static void  print_compilation_impl(outputStream* st, Method* method, int compile_id, int comp_level,
                                       bool is_osr_method = false, int osr_bci = -1, bool is_blocking = false,
                                       const char* msg = NULL, bool short_form = false);
 
@@ -114,6 +116,9 @@ public:
   static void  print_inlining(ciMethod* method, int inline_level, int bci, const char* msg = NULL) {
     print_inlining(tty, method, inline_level, bci, msg);
   }
+
+  // Redefine Classes support
+  void mark_on_stack();
 
   static void  print_inline_indent(int inline_level, outputStream* st = tty);
 
@@ -205,6 +210,9 @@ class CompileQueue : public CHeapObj<mtCompiler> {
 
   bool         is_empty() const                  { return _first == NULL; }
   int          size()     const                  { return _size;          }
+
+  // Redefine Classes support
+  void mark_on_stack();
 
   void         print();
 };
@@ -400,6 +408,9 @@ class CompileBroker: AllStatic {
     return _perf_total_compilation != NULL ? _perf_total_compilation->get_value() : 0;
   }
 
+  // Redefine Classes support
+  static void mark_on_stack();
+
   // Print a detailed accounting of compilation time
   static void print_times();
 
@@ -407,6 +418,9 @@ class CompileBroker: AllStatic {
   static void print_last_compile();
 
   static void print_compiler_threads_on(outputStream* st);
+
+  // compiler name for debugging
+  static const char* compiler_name(int comp_level);
 
   static int get_total_compile_count() {          return _total_compile_count; }
   static int get_total_bailout_count() {          return _total_bailout_count; }

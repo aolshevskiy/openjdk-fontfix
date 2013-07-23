@@ -34,27 +34,24 @@
 #include "runtime/objectMonitor.inline.hpp"
 #include "runtime/osThread.hpp"
 #include "runtime/stubRoutines.hpp"
-#include "runtime/thread.hpp"
+#include "runtime/thread.inline.hpp"
 #include "services/threadService.hpp"
 #include "trace/tracing.hpp"
 #include "trace/traceMacros.hpp"
 #include "utilities/dtrace.hpp"
+#include "utilities/macros.hpp"
 #include "utilities/preserveException.hpp"
 #ifdef TARGET_OS_FAMILY_linux
 # include "os_linux.inline.hpp"
-# include "thread_linux.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_solaris
 # include "os_solaris.inline.hpp"
-# include "thread_solaris.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "os_windows.inline.hpp"
-# include "thread_windows.inline.hpp"
 #endif
 #ifdef TARGET_OS_FAMILY_bsd
 # include "os_bsd.inline.hpp"
-# include "thread_bsd.inline.hpp"
 #endif
 
 #if defined(__GNUC__) && !defined(IA64)
@@ -71,11 +68,11 @@
 // TODO-FIXME: probes should not fire when caller is _blocked.  assert() accordingly.
 
 
-#define DTRACE_MONITOR_PROBE_COMMON(klassOop, thread)                      \
+#define DTRACE_MONITOR_PROBE_COMMON(obj, thread)                           \
   char* bytes = NULL;                                                      \
   int len = 0;                                                             \
   jlong jtid = SharedRuntime::get_java_tid(thread);                        \
-  Symbol* klassname = ((oop)(klassOop))->klass()->klass_part()->name();    \
+  Symbol* klassname = ((oop)obj)->klass()->name();                         \
   if (klassname != NULL) {                                                 \
     bytes = (char*)klassname->bytes();                                     \
     len = klassname->utf8_length();                                        \
@@ -94,19 +91,19 @@ HS_DTRACE_PROBE_DECL4(hotspot, monitor__contended__entered,
 HS_DTRACE_PROBE_DECL4(hotspot, monitor__contended__exit,
   jlong, uintptr_t, char*, int);
 
-#define DTRACE_MONITOR_WAIT_PROBE(monitor, klassOop, thread, millis)       \
+#define DTRACE_MONITOR_WAIT_PROBE(monitor, obj, thread, millis)       \
   {                                                                        \
     if (DTraceMonitorProbes) {                                            \
-      DTRACE_MONITOR_PROBE_COMMON(klassOop, thread);                       \
+      DTRACE_MONITOR_PROBE_COMMON(obj, thread);                       \
       HS_DTRACE_PROBE5(hotspot, monitor__wait, jtid,                       \
                        (monitor), bytes, len, (millis));                   \
     }                                                                      \
   }
 
-#define DTRACE_MONITOR_PROBE(probe, monitor, klassOop, thread)             \
+#define DTRACE_MONITOR_PROBE(probe, monitor, obj, thread)             \
   {                                                                        \
     if (DTraceMonitorProbes) {                                            \
-      DTRACE_MONITOR_PROBE_COMMON(klassOop, thread);                       \
+      DTRACE_MONITOR_PROBE_COMMON(obj, thread);                       \
       HS_DTRACE_PROBE4(hotspot, monitor__##probe, jtid,                    \
                        (uintptr_t)(monitor), bytes, len);                  \
     }                                                                      \
@@ -114,10 +111,10 @@ HS_DTRACE_PROBE_DECL4(hotspot, monitor__contended__exit,
 
 #else /* USDT2 */
 
-#define DTRACE_MONITOR_WAIT_PROBE(monitor, klassOop, thread, millis)       \
+#define DTRACE_MONITOR_WAIT_PROBE(monitor, obj, thread, millis)            \
   {                                                                        \
     if (DTraceMonitorProbes) {                                            \
-      DTRACE_MONITOR_PROBE_COMMON(klassOop, thread);                       \
+      DTRACE_MONITOR_PROBE_COMMON(obj, thread);                            \
       HOTSPOT_MONITOR_WAIT(jtid,                                           \
                        (monitor), bytes, len, (millis));                   \
     }                                                                      \
@@ -129,10 +126,10 @@ HS_DTRACE_PROBE_DECL4(hotspot, monitor__contended__exit,
 #define HOTSPOT_MONITOR_notify HOTSPOT_MONITOR_NOTIFY
 #define HOTSPOT_MONITOR_notifyAll HOTSPOT_MONITOR_NOTIFYALL
 
-#define DTRACE_MONITOR_PROBE(probe, monitor, klassOop, thread)             \
+#define DTRACE_MONITOR_PROBE(probe, monitor, obj, thread)                  \
   {                                                                        \
     if (DTraceMonitorProbes) {                                            \
-      DTRACE_MONITOR_PROBE_COMMON(klassOop, thread);                       \
+      DTRACE_MONITOR_PROBE_COMMON(obj, thread);                            \
       HOTSPOT_MONITOR_##probe(jtid,                                               \
                        (uintptr_t)(monitor), bytes, len);                  \
     }                                                                      \
@@ -141,8 +138,8 @@ HS_DTRACE_PROBE_DECL4(hotspot, monitor__contended__exit,
 #endif /* USDT2 */
 #else //  ndef DTRACE_ENABLED
 
-#define DTRACE_MONITOR_WAIT_PROBE(klassOop, thread, millis, mon)    {;}
-#define DTRACE_MONITOR_PROBE(probe, klassOop, thread, mon)          {;}
+#define DTRACE_MONITOR_WAIT_PROBE(obj, thread, millis, mon)    {;}
+#define DTRACE_MONITOR_PROBE(probe, obj, thread, mon)          {;}
 
 #endif // ndef DTRACE_ENABLED
 
@@ -2457,7 +2454,7 @@ void ObjectMonitor::DeferredInitialize () {
   size_t sz = strlen (SyncKnobs) ;
   char * knobs = (char *) malloc (sz + 2) ;
   if (knobs == NULL) {
-     vm_exit_out_of_memory (sz + 2, "Parse SyncKnobs") ;
+     vm_exit_out_of_memory (sz + 2, OOM_MALLOC_ERROR, "Parse SyncKnobs") ;
      guarantee (0, "invariant") ;
   }
   strcpy (knobs, SyncKnobs) ;

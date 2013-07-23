@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,6 @@ import java.util.Arrays;
 import java.security.KeyRep;
 import java.security.GeneralSecurityException;
 import java.security.NoSuchAlgorithmException;
-import java.security.NoSuchProviderException;
 import java.security.spec.InvalidKeySpecException;
 import javax.crypto.Mac;
 import javax.crypto.SecretKey;
@@ -102,20 +101,15 @@ final class PBKDF2KeyImpl implements javax.crypto.interfaces.PBEKey {
         int keyLength = keySpec.getKeyLength();
         if (keyLength == 0) {
             throw new InvalidKeySpecException("Key length not found");
-        } else if (keyLength == 0) {
+        } else if (keyLength < 0) {
             throw new InvalidKeySpecException("Key length is negative");
         }
         try {
-            this.prf = Mac.getInstance(prfAlgo, "SunJCE");
+            this.prf = Mac.getInstance(prfAlgo, SunJCE.getInstance());
         } catch (NoSuchAlgorithmException nsae) {
             // not gonna happen; re-throw just in case
             InvalidKeySpecException ike = new InvalidKeySpecException();
             ike.initCause(nsae);
-            throw ike;
-        } catch (NoSuchProviderException nspe) {
-            // Again, not gonna happen; re-throw just in case
-            InvalidKeySpecException ike = new InvalidKeySpecException();
-            ike.initCause(nspe);
             throw ike;
         }
         this.key = deriveKey(prf, passwdBytes, salt, iterCount, keyLength);
@@ -133,6 +127,7 @@ final class PBKDF2KeyImpl implements javax.crypto.interfaces.PBEKey {
             byte[] ti = new byte[hlen];
             // SecretKeySpec cannot be used, since password can be empty here.
             SecretKey macKey = new SecretKey() {
+                private static final long serialVersionUID = 7874493593505141603L;
                 @Override
                 public String getAlgorithm() {
                     return prf.getAlgorithm();
@@ -194,7 +189,7 @@ final class PBKDF2KeyImpl implements javax.crypto.interfaces.PBEKey {
     }
 
     public byte[] getEncoded() {
-        return (byte[]) key.clone();
+        return key.clone();
     }
 
     public String getAlgorithm() {
@@ -206,7 +201,7 @@ final class PBKDF2KeyImpl implements javax.crypto.interfaces.PBEKey {
     }
 
     public char[] getPassword() {
-        return (char[]) passwd.clone();
+        return passwd.clone();
     }
 
     public byte[] getSalt() {
@@ -268,7 +263,7 @@ final class PBKDF2KeyImpl implements javax.crypto.interfaces.PBEKey {
     protected void finalize() throws Throwable {
         try {
             if (this.passwd != null) {
-                java.util.Arrays.fill(this.passwd, (char) '0');
+                java.util.Arrays.fill(this.passwd, '0');
                 this.passwd = null;
             }
             if (this.key != null) {

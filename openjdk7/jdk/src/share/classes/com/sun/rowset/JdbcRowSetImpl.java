@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ import javax.naming.*;
 import java.io.*;
 import java.math.*;
 import java.util.*;
-import java.beans.*;
 
 import javax.sql.rowset.*;
 
@@ -83,12 +82,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      */
     private ResultSetMetaData resMD;
 
-    /**
-     * The property that helps to fire the property changed event when certain
-     * properties are changed in the <code>JdbcRowSet</code> object. This property
-     * is being added to satisfy Rave requirements.
-     */
-    private PropertyChangeSupport propertyChangeSupport;
 
     /**
      * The Vector holding the Match Columns
@@ -145,7 +138,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
             throw new RuntimeException(ioe);
         }
 
-        propertyChangeSupport = new PropertyChangeSupport(this);
 
         initParams();
 
@@ -268,7 +260,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
             throw new RuntimeException(ioe);
         }
 
-        propertyChangeSupport = new PropertyChangeSupport(this);
 
         initParams();
         // set the defaults
@@ -343,7 +334,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
             throw new RuntimeException(ioe);
         }
 
-        propertyChangeSupport = new PropertyChangeSupport(this);
 
         initParams();
 
@@ -360,10 +350,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
         setMaxRows(0);
         setMaxFieldSize(0);
 
-        // to ensure connection to a db call connect now
-        // and associate a conn with "this" object
-        // in this case.
-        conn = connect();
         setParams();
 
         setReadOnly(true);
@@ -435,7 +421,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
             throw new RuntimeException(ioe);
         }
 
-        propertyChangeSupport = new PropertyChangeSupport(this);
 
         initParams();
 
@@ -620,12 +605,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
 
     }
 
-    // An alternate solution is required instead of having the
-    // connect method as protected.
-    // This is a work around to assist Rave Team
-    // :ah
-
-    protected Connection connect() throws SQLException {
+    private Connection connect() throws SQLException {
 
         // Get a JDBC connection.
 
@@ -695,6 +675,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
         return ps;
     }
 
+    @SuppressWarnings("deprecation")
     private void decodeParams(Object[] params, PreparedStatement ps)
     throws SQLException {
 
@@ -761,14 +742,17 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
                             ps.setUnicodeStream(i + 1,
                                                 (java.io.InputStream)param[0],
                                                 ((Integer)param[1]).intValue());
+                            break;
                         case JdbcRowSetImpl.BINARY_STREAM_PARAM:
                             ps.setBinaryStream(i + 1,
                                                (java.io.InputStream)param[0],
                                                ((Integer)param[1]).intValue());
+                            break;
                         case JdbcRowSetImpl.ASCII_STREAM_PARAM:
                             ps.setAsciiStream(i + 1,
                                               (java.io.InputStream)param[0],
                                               ((Integer)param[1]).intValue());
+                            break;
                         default:
                             throw new SQLException(resBundle.handleGetObject("jdbcrowsetimpl.paramtype").toString());
                         }
@@ -1032,6 +1016,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      *            prepared statement, and result set
      * @deprecated
      */
+    @Deprecated
     public BigDecimal getBigDecimal(int columnIndex, int scale) throws SQLException {
         checkState();
 
@@ -1170,6 +1155,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      * @deprecated use <code>getCharacterStream</code> in place of
      *              <code>getUnicodeStream</code>
      */
+    @Deprecated
     public java.io.InputStream getUnicodeStream(int columnIndex) throws SQLException {
         checkState();
 
@@ -1352,6 +1338,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      *            prepared statement, and result set
      * @deprecated
      */
+    @Deprecated
     public BigDecimal getBigDecimal(String columnName, int scale) throws SQLException {
         return getBigDecimal(findColumn(columnName), scale);
     }
@@ -1477,6 +1464,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      *            prepared statement, and result set
      * @deprecated
      */
+    @Deprecated
     public java.io.InputStream getUnicodeStream(String columnName) throws SQLException {
         return getUnicodeStream(findColumn(columnName));
     }
@@ -3822,7 +3810,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
         int [] i_temp = new int[iMatchColumns.size()];
         int i_val;
 
-        i_val = ((Integer)iMatchColumns.get(0)).intValue();
+        i_val = iMatchColumns.get(0);
 
         if( i_val == -1 ) {
            throw new SQLException(resBundle.handleGetObject("jdbcrowsetimpl.setmatchcols").toString());
@@ -3996,7 +3984,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
 
         if(!((strMatchColumns.get(0)).equals(columnName))) {
             throw new SQLException(resBundle.handleGetObject("jdbcrowsetimpl.unsetmatch").toString());
-        } else if( ((Integer)(iMatchColumns.get(0))).intValue() > 0) {
+        } else if(iMatchColumns.get(0) > 0) {
             throw new SQLException(resBundle.handleGetObject("jdbcrowsetimpl.usecolid").toString());
         } else {
             strMatchColumns.set(0, null);   // that is, we are unsetting it.
@@ -4052,9 +4040,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
       // Added as per Rave requirements
 
       if( conn.getHoldability() != HOLD_CURSORS_OVER_COMMIT) {
-         ResultSet oldVal = rs;
          rs = null;
-         // propertyChangeSupport.firePropertyChange("ResultSet",oldVal,rs);
       }
     }
 
@@ -4115,9 +4101,7 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
         // Makes the result ste handle null after rollback
         // Added as per Rave requirements
 
-        ResultSet oldVal = rs;
         rs = null;
-        // propertyChangeSupport.firePropertyChange("ResultSet", oldVal,rs);
     }
 
 
@@ -4243,12 +4227,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
        rs = resultSet;
     }
 
-
-    // Over riding the setCommand from BaseRowSet for
-    // firing the propertyChangeSupport Event for
-    // Rave requirements when this property's value
-    // changes.
-
     /**
      * Sets this <code>JdbcRowSet</code> object's <code>command</code> property to
      * the given <code>String</code> object and clears the parameters, if any,
@@ -4273,27 +4251,18 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      * @see #getCommand
      */
     public void setCommand(String command) throws SQLException {
-       String oldVal;
 
        if (getCommand() != null) {
           if(!getCommand().equals(command)) {
-             oldVal = getCommand();
              super.setCommand(command);
              ps = null;
              rs = null;
-             propertyChangeSupport.firePropertyChange("command", oldVal,command);
           }
        }
        else {
           super.setCommand(command);
-          propertyChangeSupport.firePropertyChange("command", null,command);
        }
     }
-
-    // Over riding the setDataSourceName from BaseRowSet for
-    // firing the propertyChangeSupport Event for
-    // Rave requirements when this property's values
-    // changes.
 
     /**
      * Sets the <code>dataSourceName</code> property for this <code>JdbcRowSet</code>
@@ -4325,28 +4294,20 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      * @see #getDataSourceName
      */
     public void setDataSourceName(String dsName) throws SQLException{
-       String oldVal;
 
        if(getDataSourceName() != null) {
           if(!getDataSourceName().equals(dsName)) {
-             oldVal = getDataSourceName();
              super.setDataSourceName(dsName);
              conn = null;
              ps = null;
              rs = null;
-             propertyChangeSupport.firePropertyChange("dataSourceName",oldVal,dsName);
           }
        }
        else {
           super.setDataSourceName(dsName);
-          propertyChangeSupport.firePropertyChange("dataSourceName",null,dsName);
        }
     }
 
-    // Over riding the setUrl from BaseRowSet for
-    // firing the propertyChangeSupport Event for
-    // Rave requirements when this property's values
-    // changes.
 
     /**
      * Sets the Url property for this <code>JdbcRowSet</code> object
@@ -4390,28 +4351,19 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      */
 
     public void setUrl(String url) throws SQLException {
-       String oldVal;
 
        if(getUrl() != null) {
           if(!getUrl().equals(url)) {
-             oldVal = getUrl();
              super.setUrl(url);
              conn = null;
              ps = null;
              rs = null;
-             propertyChangeSupport.firePropertyChange("url", oldVal, url);
           }
        }
        else {
           super.setUrl(url);
-          propertyChangeSupport.firePropertyChange("url", null, url);
        }
     }
-
-    // Over riding the setUsername from BaseRowSet for
-    // firing the propertyChangeSupport Event for
-    // Rave requirements when this property's values
-    // changes.
 
      /**
      * Sets the username property for this <code>JdbcRowSet</code> object
@@ -4434,28 +4386,19 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      * @see #getUsername
      */
     public void setUsername(String uname) {
-       String oldVal;
 
        if( getUsername() != null) {
           if(!getUsername().equals(uname)) {
-             oldVal = getUsername();
              super.setUsername(uname);
              conn = null;
              ps = null;
              rs = null;
-             propertyChangeSupport.firePropertyChange("username",oldVal,uname);
           }
        }
        else{
           super.setUsername(uname);
-          propertyChangeSupport.firePropertyChange("username",null,uname);
        }
     }
-
-    // Over riding the setPassword from BaseRowSet for
-    // firing the propertyChangeSupport Event for
-    // Rave requirements when this property's values
-    // changes.
 
      /**
      * Sets the password property for this <code>JdbcRowSet</code> object
@@ -4477,21 +4420,17 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
      *     that must be supplied to the database to create a connection
      */
     public void setPassword(String password) {
-       String oldVal;
 
        if ( getPassword() != null) {
           if(!getPassword().equals(password)) {
-             oldVal = getPassword();
              super.setPassword(password);
              conn = null;
              ps = null;
              rs = null;
-             propertyChangeSupport.firePropertyChange("password",oldVal,password);
           }
        }
        else{
           super.setPassword(password);
-          propertyChangeSupport.firePropertyChange("password",null,password);
        }
     }
 
@@ -4524,7 +4463,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
 
        if(oldVal != type) {
            super.setType(type);
-           propertyChangeSupport.firePropertyChange("type",oldVal,type);
        }
 
     }
@@ -4557,78 +4495,6 @@ public class JdbcRowSetImpl extends BaseRowSet implements JdbcRowSet, Joinable {
 
        if(oldVal != concur) {
            super.setConcurrency(concur);
-           propertyChangeSupport.firePropertyChange("concurrency",oldVal,concur);
-       }
-
-    }
-
-    /**
-     * Sets the transaction isolation property for this JDBC <code>RowSet</code> object to the given
-     * constant. The DBMS will use this transaction isolation level for
-     * transactions if it can.
-     * <p>
-     * For <code>RowSet</code> implementations such as
-     * the <code>CachedRowSet</code> that operate in a disconnected environment,
-     * the <code>SyncProvider</code> object being used
-     * offers complementary locking and data integrity options. The
-     * options described below are pertinent only to connected <code>RowSet</code>
-     * objects (<code>JdbcRowSet</code> objects).
-     *
-     * @param transIso one of the following constants, listed in ascending order:
-     *              <code>Connection.TRANSACTION_NONE</code>,
-     *              <code>Connection.TRANSACTION_READ_UNCOMMITTED</code>,
-     *              <code>Connection.TRANSACTION_READ_COMMITTED</code>,
-     *              <code>Connection.TRANSACTION_REPEATABLE_READ</code>, or
-     *              <code>Connection.TRANSACTION_SERIALIZABLE</code>
-     * @throws SQLException if the given parameter is not one of the Connection
-     *          constants
-     * @see javax.sql.rowset.spi.SyncFactory
-     * @see javax.sql.rowset.spi.SyncProvider
-     * @see #getTransactionIsolation
-     */
-    public void setTransactionIsolation(int transIso) throws SQLException {
-
-       int oldVal;
-
-       try {
-          oldVal = getTransactionIsolation();
-        }catch(NullPointerException ex) {
-           oldVal = 0;
-        }
-
-       if(oldVal != transIso) {
-           super.setTransactionIsolation(transIso);
-           propertyChangeSupport.firePropertyChange("transactionIsolation",oldVal,transIso);
-       }
-
-    }
-
-    /**
-     * Sets the maximum number of rows that this <code>RowSet</code> object may contain to
-     * the given number. If this limit is exceeded, the excess rows are
-     * silently dropped.
-     *
-     * @param mRows an <code>int</code> indicating the current maximum number
-     *     of rows; zero means that there is no limit
-     * @throws SQLException if an error occurs internally setting the
-     *     maximum limit on the number of rows that a JDBC <code>RowSet</code> object
-     *     can contain; or if <i>max</i> is less than <code>0</code>; or
-     *     if <i>max</i> is less than the <code>fetchSize</code> of the
-     *     <code>RowSet</code>
-     */
-    public void setMaxRows(int mRows) throws SQLException {
-
-       int oldVal;
-
-       try {
-          oldVal = getMaxRows();
-        }catch(NullPointerException ex) {
-           oldVal = 0;
-        }
-
-       if(oldVal != mRows) {
-           super.setMaxRows(mRows);
-           propertyChangeSupport.firePropertyChange("maxRows",oldVal,mRows);
        }
 
     }

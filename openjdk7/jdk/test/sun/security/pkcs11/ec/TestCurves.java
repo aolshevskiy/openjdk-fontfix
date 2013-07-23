@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,9 +38,6 @@ import java.security.spec.*;
 
 import javax.crypto.*;
 
-// XXX no public API to enumerate supported named curves
-import sun.security.ec.NamedCurve;
-
 public class TestCurves extends PKCS11Test {
 
     public static void main(String[] args) throws Exception {
@@ -57,8 +54,8 @@ public class TestCurves extends PKCS11Test {
         byte[] data = new byte[2048];
         random.nextBytes(data);
 
-        Collection<? extends ECParameterSpec> curves =
-            NamedCurve.knownECParameterSpecs();
+        Vector<ECParameterSpec> curves = getKnownCurves(p);
+
         for (ECParameterSpec params : curves) {
             System.out.println("Testing " + params + "...");
             KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC", p);
@@ -68,6 +65,7 @@ public class TestCurves extends PKCS11Test {
             kp2 = kpg.generateKeyPair();
 
             testSigning(p, "SHA1withECDSA", data, kp1, kp2);
+            testSigning(p, "SHA224withECDSA", data, kp1, kp2);
             testSigning(p, "SHA256withECDSA", data, kp1, kp2);
             testSigning(p, "SHA384withECDSA", data, kp1, kp2);
             testSigning(p, "SHA512withECDSA", data, kp1, kp2);
@@ -89,6 +87,66 @@ public class TestCurves extends PKCS11Test {
         }
 
         System.out.println("OK");
+    }
+
+    private static Vector<ECParameterSpec>
+            getKnownCurves(Provider p) throws Exception {
+
+        int index;
+        int begin;
+        int end;
+        String curve;
+        Vector<ECParameterSpec> results = new Vector<ECParameterSpec>();
+        String kcProp =
+            p.getProperty("AlgorithmParameters.EC SupportedCurves");
+
+        if (kcProp == null) {
+            throw new RuntimeException(
+            "\"AlgorithmParameters.EC SupportedCurves property\" not found");
+        }
+
+        index = 0;
+        for (;;) {
+            // Each set of curve names is enclosed with brackets.
+            begin = kcProp.indexOf('[', index);
+            end = kcProp.indexOf(']', index);
+            if (begin == -1 || end == -1) {
+                break;
+            }
+
+            /*
+             * Each name is separated by a comma.
+             * Just get the first name in the set.
+             */
+            index = end + 1;
+            begin++;
+            end = kcProp.indexOf(',', begin);
+            if (end == -1) {
+                // Only one name in the set.
+                end = index -1;
+            }
+
+            curve = kcProp.substring(begin, end);
+
+            results.add(getECParameterSpec(p, curve));
+        }
+
+        if (results.size() == 0) {
+            throw new RuntimeException("No supported EC curves found");
+        }
+
+        return results;
+    }
+
+    private static ECParameterSpec getECParameterSpec(Provider p, String name)
+            throws Exception {
+
+        AlgorithmParameters parameters =
+            AlgorithmParameters.getInstance("EC", p);
+
+        parameters.init(new ECGenParameterSpec(name));
+
+        return parameters.getParameterSpec(ECParameterSpec.class);
     }
 
     private static void testSigning(Provider p, String algorithm,
@@ -114,6 +172,4 @@ public class TestCurves extends PKCS11Test {
             throw new Exception("Signature should not verify");
         }
     }
-
-
 }

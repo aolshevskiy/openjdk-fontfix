@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -22,6 +22,21 @@
 # or visit www.oracle.com if you need additional information or have any
 # questions.
 #
+
+# If NEWBUILD is defined, use the new build-infra Makefiles and configure.
+#     See NewMakefile.gmk for more information.
+
+# If not specified, select what the default build is
+ifndef NEWBUILD
+  NEWBUILD=true
+endif
+
+ifeq ($(NEWBUILD),true)
+
+  # The new top level Makefile
+  include NewMakefile.gmk
+
+else # Original Makefile logic
 
 BUILD_PARENT_DIRECTORY=.
 
@@ -75,6 +90,7 @@ include ./make/corba-rules.gmk
 include ./make/jaxp-rules.gmk
 include ./make/jaxws-rules.gmk
 include ./make/jdk-rules.gmk
+include ./make/nashorn-rules.gmk
 include ./make/install-rules.gmk
 include ./make/sponsors-rules.gmk
 include ./make/deploy-rules.gmk
@@ -159,28 +175,26 @@ ifeq ($(BUILD_JDK), true)
   clobber:: jdk-clobber
 endif
 
+ifeq ($(BUILD_NASHORN), true)
+  generic_build_repo_series:: $(NASHORN)
+  clobber:: nashorn-clobber
+endif
+
 ifeq ($(BUILD_DEPLOY), true)
   generic_build_repo_series:: $(DEPLOY)
   clobber:: deploy-clobber
-endif
-
-ifeq ($(BUILD_INSTALL_BUNDLES), true)
-  generic_build_repo_series:: install-binaries-jdk-debug
-  clobber:: install-binaries-jdk-debug-clobber
 endif
 
 generic_build_repo_series::
 	@$(call StopTimer,$(if $(DEBUG_NAME),$(DEBUG_NAME)_build,all_product_build))
 
 # The debug build, fastdebug or debug. Needs special handling.
-#
-#  Note that debug builds do NOT do INSTALL steps aside from the
-#  install-binaries-jdk-debug or install-binaries-jdk-debug-clobber targets.
+#  Note that debug builds do NOT do INSTALL steps, but must be done
+#  after the product build and before the INSTALL step of the product build.
 #
 #   DEBUG_NAME is fastdebug or debug
 #   ALT_OUTPUTDIR is changed to have -debug or -fastdebug suffix
 #   The resulting image directory (j2sdk-image) is used by the install makefiles
-#     (only if debug files are present when install checks for them)
 #     to create a debug install bundle jdk-*-debug-** bundle (tar or zip) 
 #     which will install in the debug or fastdebug subdirectory of the
 #     normal product install area.
@@ -196,7 +210,7 @@ generic_build_repo_series::
 ABS_BOOTDIR_OUTPUTDIR=$(ABS_OUTPUTDIR)/bootjdk
 FRESH_BOOTDIR=$(ABS_BOOTDIR_OUTPUTDIR)/$(JDK_IMAGE_DIRNAME)
 FRESH_DEBUG_BOOTDIR=$(ABS_BOOTDIR_OUTPUTDIR)/$(REL_JDK_IMAGE_DIR)
-
+  
 create_fresh_product_bootdir: FRC
 	$(MAKE) ALT_OUTPUTDIR=$(ABS_BOOTDIR_OUTPUTDIR) \
 		GENERATE_DOCS=false \
@@ -225,7 +239,7 @@ endif
 
 
 ifeq ($(DO_BOOT_CYCLE),true)
-
+  
   # Create the bootdir to use in the build
   product_build:: create_fresh_product_bootdir
   debug_build:: create_fresh_debug_bootdir
@@ -263,8 +277,6 @@ generic_debug_build:
 		ALT_OUTPUTDIR=$(ABS_OUTPUTDIR)/$(REL_JDK_OUTPUTDIR) \
 	        DEBUG_NAME=$(DEBUG_NAME) \
 		GENERATE_DOCS=false \
-		BUILD_INSTALL_BUNDLES=true \
-		CREATE_DEBUGINFO_BUNDLES=false \
 	        $(BOOT_CYCLE_DEBUG_SETTINGS) \
 		generic_build_repo_series
 
@@ -330,6 +342,7 @@ deploy_fastdebug_only:
 	    BUILD_HOTSPOT=false \
 	    BUILD_JDK=false \
 	    BUILD_LANGTOOLS=false \
+	    BUILD_NASHORN=false \
 	    BUILD_CORBA=false \
 	    BUILD_JAXP=false \
 	    BUILD_JAXWS=false \
@@ -549,8 +562,8 @@ include ./make/jprt.gmk
 ################################################################
 
 .PHONY: all  test test_run test_start test_summary test_clean \
-        generic_build_repo_series \
-        what clobber insane \
+	generic_build_repo_series \
+	what clobber insane \
         dev dev-build dev-sanity dev-clobber \
         product_build \
         fastdebug_build \
@@ -565,3 +578,6 @@ include ./make/jprt.gmk
 
 # Force target
 FRC:
+
+endif # Original Makefile logic
+

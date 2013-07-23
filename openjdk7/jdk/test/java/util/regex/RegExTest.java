@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,8 @@
  * 4872664 4803179 4892980 4900747 4945394 4938995 4979006 4994840 4997476
  * 5013885 5003322 4988891 5098443 5110268 6173522 4829857 5027748 6376940
  * 6358731 6178785 6284152 6231989 6497148 6486934 6233084 6504326 6635133
- * 6350801 6676425 6878475 6919132 6931676 6948903 7014645 7039066
+ * 6350801 6676425 6878475 6919132 6931676 6948903 6990617 7014645 7039066
+ * 7067045 7014640 7189363 8007395 8013252 8013254 8012646
  */
 
 import java.util.regex.*;
@@ -40,6 +41,7 @@ import java.util.Random;
 import java.io.*;
 import java.util.*;
 import java.nio.CharBuffer;
+import java.util.function.Predicate;
 
 /**
  * This is a test class created to check the operation of
@@ -50,6 +52,7 @@ public class RegExTest {
     private static Random generator = new Random();
     private static boolean failure = false;
     private static int failCount = 0;
+    private static String firstFailure = null;
 
     /**
      * Main to interpret arguments and run several tests.
@@ -133,15 +136,24 @@ public class RegExTest {
         hitEndTest();
         toMatchResultTest();
         surrogatesInClassTest();
+        removeQEQuotingTest();
         namedGroupCaptureTest();
         nonBmpClassComplementTest();
         unicodePropertiesTest();
         unicodeHexNotationTest();
         unicodeClassesTest();
-        if (failure)
-            throw new RuntimeException("Failure in the RE handling.");
-        else
+        horizontalAndVerticalWSTest();
+        linebreakTest();
+        branchTest();
+        groupCurlyNotFoundSuppTest();
+        patternAsPredicate();
+        if (failure) {
+            throw new
+                RuntimeException("RegExTest failed, 1st failure: " +
+                                 firstFailure);
+        } else {
             System.err.println("OKAY: All tests passed.");
+        }
     }
 
     // Utility functions
@@ -215,8 +227,14 @@ public class RegExTest {
         String paddedName = paddedNameBuffer.toString();
         System.err.println(paddedName + ": " +
                            (failCount==0 ? "Passed":"Failed("+failCount+")"));
-        if (failCount > 0)
+        if (failCount > 0) {
             failure = true;
+
+            if (firstFailure == null) {
+                firstFailure = testName;
+            }
+        }
+
         failCount = 0;
     }
 
@@ -295,6 +313,22 @@ public class RegExTest {
         Matcher matcher = pattern.matcher("\ud834\udd22");
         if (!matcher.find())
             failCount++;
+
+        report("Surrogate pair in Unicode escape");
+    }
+
+    // This is for bug6990617
+    // Test if Pattern.RemoveQEQuoting works correctly if the octal unicode
+    // char encoding is only 2 or 3 digits instead of 4 and the first quoted
+    // char is an octal digit.
+    private static void removeQEQuotingTest() throws Exception {
+        Pattern pattern =
+            Pattern.compile("\\011\\Q1sometext\\E\\011\\Q2sometext\\E");
+        Matcher matcher = pattern.matcher("\t1sometext\t2sometext");
+        if (!matcher.find())
+            failCount++;
+
+        report("Remove Q/E Quoting");
     }
 
     // This is for bug 4988891
@@ -825,6 +859,22 @@ public class RegExTest {
         if (!result.equals(toSupplementaries("zzz\\t$\\$zzz")))
             failCount++;
 
+        // IAE should be thrown if backslash or '$' is the last character
+        // in replacement string
+        try {
+            "\uac00".replaceAll("\uac00", "$");
+            failCount++;
+        } catch (IllegalArgumentException iie) {
+        } catch (Exception e) {
+            failCount++;
+        }
+        try {
+            "\uac00".replaceAll("\uac00", "\\");
+            failCount++;
+        } catch (IllegalArgumentException iie) {
+        } catch (Exception e) {
+            failCount++;
+        }
         report("Literal replacement");
     }
 
@@ -3342,7 +3392,9 @@ public class RegExTest {
     private static void check(Pattern p, String s, String g, String expected) {
         Matcher m = p.matcher(s);
         m.find();
-        if (!m.group(g).equals(expected))
+        if (!m.group(g).equals(expected) ||
+            s.charAt(m.start(g)) != expected.charAt(0) ||
+            s.charAt(m.end(g) - 1) != expected.charAt(expected.length() - 1))
             failCount++;
     }
 
@@ -3372,19 +3424,42 @@ public class RegExTest {
         failCount++;
     }
 
-    private static void checkExpectedFail(Matcher m, String g) {
+    private static void checkExpectedIAE(Matcher m, String g) {
         m.find();
         try {
             m.group(g);
-        } catch (IllegalArgumentException iae) {
+        } catch (IllegalArgumentException x) {
             //iae.printStackTrace();
-            return;
-        } catch (NullPointerException npe) {
-            return;
+            try {
+                m.start(g);
+            } catch (IllegalArgumentException xx) {
+                try {
+                    m.start(g);
+                } catch (IllegalArgumentException xxx) {
+                    return;
+                }
+            }
         }
         failCount++;
     }
 
+    private static void checkExpectedNPE(Matcher m) {
+        m.find();
+        try {
+            m.group(null);
+        } catch (NullPointerException x) {
+            try {
+                m.start(null);
+            } catch (NullPointerException xx) {
+                try {
+                    m.end(null);
+                } catch (NullPointerException xxx) {
+                    return;
+                }
+            }
+        }
+        failCount++;
+    }
 
     private static void namedGroupCaptureTest() throws Exception {
         check(Pattern.compile("x+(?<gname>y+)z+"),
@@ -3511,10 +3586,9 @@ public class RegExTest {
         checkExpectedFail("(?<6groupnamestartswithdigit>abc)(def)");
         checkExpectedFail("(?<gname>abc)(def)\\k<gnameX>");
         checkExpectedFail("(?<gname>abc)(?<gname>def)\\k<gnameX>");
-        checkExpectedFail(Pattern.compile("(?<gname>abc)(def)").matcher("abcdef"),
-                          "gnameX");
-        checkExpectedFail(Pattern.compile("(?<gname>abc)(def)").matcher("abcdef"),
-                          null);
+        checkExpectedIAE(Pattern.compile("(?<gname>abc)(def)").matcher("abcdef"),
+                         "gnameX");
+        checkExpectedNPE(Pattern.compile("(?<gname>abc)(def)").matcher("abcdef"));
         report("NamedGroupCapture");
     }
 
@@ -3711,6 +3785,7 @@ public class RegExTest {
         Matcher spaceP  = Pattern.compile("\\p{IsWhiteSpace}").matcher("");
         Matcher definedP = Pattern.compile("\\p{IsAssigned}").matcher("");
         Matcher nonCCPP = Pattern.compile("\\p{IsNoncharacterCodePoint}").matcher("");
+        Matcher joinCrtl = Pattern.compile("\\p{IsJoinControl}").matcher("");
 
         // javaMethod
         Matcher lowerJ  = Pattern.compile("\\p{javaLowerCase}").matcher("");
@@ -3781,7 +3856,8 @@ public class RegExTest {
                 Character.isIdeographic(cp) != ideogP.reset(str).matches() ||
                 Character.isIdeographic(cp) != ideogJ.reset(str).matches() ||
                 (Character.UNASSIGNED == type) == definedP.reset(str).matches() ||
-                POSIX_Unicode.isNoncharacterCodePoint(cp) != nonCCPP.reset(str).matches())
+                POSIX_Unicode.isNoncharacterCodePoint(cp) != nonCCPP.reset(str).matches() ||
+                POSIX_Unicode.isJoinControl(cp) != joinCrtl.reset(str).matches())
                 failCount++;
         }
 
@@ -3798,5 +3874,144 @@ public class RegExTest {
         if (!bwbEU.reset("\u0724\u0739\u0724").matches())
             failCount++;
         report("unicodePredefinedClasses");
+    }
+
+    private static void horizontalAndVerticalWSTest() throws Exception {
+        String hws = new String (new char[] {
+                                     0x09, 0x20, 0xa0, 0x1680, 0x180e,
+                                     0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
+                                     0x2006, 0x2007, 0x2008, 0x2009, 0x200a,
+                                     0x202f, 0x205f, 0x3000 });
+        String vws = new String (new char[] {
+                                     0x0a, 0x0b, 0x0c, 0x0d, 0x85, 0x2028, 0x2029 });
+        if (!Pattern.compile("\\h+").matcher(hws).matches() ||
+            !Pattern.compile("[\\h]+").matcher(hws).matches())
+            failCount++;
+        if (Pattern.compile("\\H").matcher(hws).find() ||
+            Pattern.compile("[\\H]").matcher(hws).find())
+            failCount++;
+        if (!Pattern.compile("\\v+").matcher(vws).matches() ||
+            !Pattern.compile("[\\v]+").matcher(vws).matches())
+            failCount++;
+        if (Pattern.compile("\\V").matcher(vws).find() ||
+            Pattern.compile("[\\V]").matcher(vws).find())
+            failCount++;
+        String prefix = "abcd";
+        String suffix = "efgh";
+        String ng = "A";
+        for (int i = 0; i < hws.length(); i++) {
+            String c = String.valueOf(hws.charAt(i));
+            Matcher m = Pattern.compile("\\h").matcher(prefix + c + suffix);
+            if (!m.find() || !c.equals(m.group()))
+                failCount++;
+            m = Pattern.compile("[\\h]").matcher(prefix + c + suffix);
+            if (!m.find() || !c.equals(m.group()))
+                failCount++;
+
+            m = Pattern.compile("\\H").matcher(hws.substring(0, i) + ng + hws.substring(i));
+            if (!m.find() || !ng.equals(m.group()))
+                failCount++;
+            m = Pattern.compile("[\\H]").matcher(hws.substring(0, i) + ng + hws.substring(i));
+            if (!m.find() || !ng.equals(m.group()))
+                failCount++;
+        }
+        for (int i = 0; i < vws.length(); i++) {
+            String c = String.valueOf(vws.charAt(i));
+            Matcher m = Pattern.compile("\\v").matcher(prefix + c + suffix);
+            if (!m.find() || !c.equals(m.group()))
+                failCount++;
+            m = Pattern.compile("[\\v]").matcher(prefix + c + suffix);
+            if (!m.find() || !c.equals(m.group()))
+                failCount++;
+
+            m = Pattern.compile("\\V").matcher(vws.substring(0, i) + ng + vws.substring(i));
+            if (!m.find() || !ng.equals(m.group()))
+                failCount++;
+            m = Pattern.compile("[\\V]").matcher(vws.substring(0, i) + ng + vws.substring(i));
+            if (!m.find() || !ng.equals(m.group()))
+                failCount++;
+        }
+        // \v in range is interpreted as 0x0B. This is the undocumented behavior
+        if (!Pattern.compile("[\\v-\\v]").matcher(String.valueOf((char)0x0B)).matches())
+            failCount++;
+        report("horizontalAndVerticalWSTest");
+    }
+
+    private static void linebreakTest() throws Exception {
+        String linebreaks = new String (new char[] {
+            0x0A, 0x0B, 0x0C, 0x0D, 0x85, 0x2028, 0x2029 });
+        String crnl = "\r\n";
+        if (!Pattern.compile("\\R+").matcher(linebreaks).matches() ||
+            !Pattern.compile("\\R").matcher(crnl).matches() ||
+            Pattern.compile("\\R\\R").matcher(crnl).matches())
+            failCount++;
+        report("linebreakTest");
+    }
+
+    // #7189363
+    private static void branchTest() throws Exception {
+        if (!Pattern.compile("(a)?bc|d").matcher("d").find() ||     // greedy
+            !Pattern.compile("(a)+bc|d").matcher("d").find() ||
+            !Pattern.compile("(a)*bc|d").matcher("d").find() ||
+            !Pattern.compile("(a)??bc|d").matcher("d").find() ||    // reluctant
+            !Pattern.compile("(a)+?bc|d").matcher("d").find() ||
+            !Pattern.compile("(a)*?bc|d").matcher("d").find() ||
+            !Pattern.compile("(a)?+bc|d").matcher("d").find() ||    // possessive
+            !Pattern.compile("(a)++bc|d").matcher("d").find() ||
+            !Pattern.compile("(a)*+bc|d").matcher("d").find() ||
+            !Pattern.compile("(a)?bc|d").matcher("d").matches() ||  // greedy
+            !Pattern.compile("(a)+bc|d").matcher("d").matches() ||
+            !Pattern.compile("(a)*bc|d").matcher("d").matches() ||
+            !Pattern.compile("(a)??bc|d").matcher("d").matches() || // reluctant
+            !Pattern.compile("(a)+?bc|d").matcher("d").matches() ||
+            !Pattern.compile("(a)*?bc|d").matcher("d").matches() ||
+            !Pattern.compile("(a)?+bc|d").matcher("d").matches() || // possessive
+            !Pattern.compile("(a)++bc|d").matcher("d").matches() ||
+            !Pattern.compile("(a)*+bc|d").matcher("d").matches() ||
+            !Pattern.compile("(a)?bc|de").matcher("de").find() ||   // others
+            !Pattern.compile("(a)??bc|de").matcher("de").find() ||
+            !Pattern.compile("(a)?bc|de").matcher("de").matches() ||
+            !Pattern.compile("(a)??bc|de").matcher("de").matches())
+            failCount++;
+        report("branchTest");
+    }
+
+    // This test is for 8007395
+    private static void groupCurlyNotFoundSuppTest() throws Exception {
+        String input = "test this as \ud83d\ude0d";
+        for (String pStr : new String[] { "test(.)+(@[a-zA-Z.]+)",
+                                          "test(.)*(@[a-zA-Z.]+)",
+                                          "test([^B])+(@[a-zA-Z.]+)",
+                                          "test([^B])*(@[a-zA-Z.]+)",
+                                          "test(\\P{IsControl})+(@[a-zA-Z.]+)",
+                                          "test(\\P{IsControl})*(@[a-zA-Z.]+)",
+                                        }) {
+            Matcher m = Pattern.compile(pStr, Pattern.CASE_INSENSITIVE)
+                               .matcher(input);
+            try {
+                if (m.find()) {
+                    failCount++;
+                }
+            } catch (Exception x) {
+                failCount++;
+            }
+        }
+        report("GroupCurly NotFoundSupp");
+    }
+
+    // This test is for 8012646
+    private static void patternAsPredicate() throws Exception {
+        Predicate<String> p = Pattern.compile("[a-z]+").asPredicate();
+
+        if (p.test("")) {
+            failCount++;
+        }
+        if (!p.test("word")) {
+            failCount++;
+        }
+        if (p.test("1234")) {
+            failCount++;
+        }
+        report("Pattern.asPredicate");
     }
 }

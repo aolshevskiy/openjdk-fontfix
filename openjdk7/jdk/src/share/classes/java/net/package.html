@@ -1,5 +1,5 @@
 <!--
- Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 
  This code is free software; you can redistribute it and/or modify it
@@ -65,13 +65,14 @@ Provides the classes for implementing networking applications.
 <p>Sending and receiving with TCP sockets is done through InputStreams and OutputStreams which can be obtained via the {@link java.net.Socket#getInputStream} and {@link java.net.Socket#getOutputStream} methods.</p>
 <h2>Interfaces</h2>
 <p>The {@link java.net.NetworkInterface} class provides APIs to browse and query all the networking interfaces (e.g. ethernet connection or PPP endpoint) of the local machine. It is through that class that you can check if any of the local interfaces is configured to support IPv6.</p>
+<p>Note, all conforming implementations must support at least one {@code NetworkInterface} object, which must either be connected to a network, or be a "loopback" interface that can only communicate with entities on the same machine.</p>
 
 <h2>High level API</h2>
 <p>A number of classes in the java.net package do provide for a much higher level of abstraction and allow for easy access to resources on the network. The classes are:
 <ul>
       <li>{@link java.net.URI} is the class representing a Universal Resource Identifier, as specified in RFC 2396. As the name indicates, this is just an Identifier and doesn't provide directly the means to access the resource.</li>
       <li>{@link java.net.URL} is the class representing a Universal Resource Locator, which is both an older concept for URIs and a means to access the resources.</li>
-      <li>{@link java.net.URLConnection} is created from a URL and is the communication link used to access the resource pointed by the URL. This abstract class will delegate most of the work to the underlying protocol handlers like http or ftp.</li>
+      <li>{@link java.net.URLConnection} is created from a URL and is the communication link used to access the resource pointed by the URL. This abstract class will delegate most of the work to the underlying protocol handlers like http or https.</li>
       <li>{@link java.net.HttpURLConnection} is a subclass of URLConnection and provides some additional functionalities specific to the HTTP protocol.</li>
 </ul>
 <p>The recommended usage is to use {@link java.net.URI} to identify resources, then convert it into a {@link java.net.URL} when it is time to access the resource. From that URL, you can either get the {@link java.net.URLConnection} for fine control, or get directly the InputStream.<p>

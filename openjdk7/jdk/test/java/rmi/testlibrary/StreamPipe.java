@@ -74,7 +74,9 @@ public class StreamPipe extends Thread {
                     break;
                 out.write(buf, 0, nr);
             }
-
+        } catch (InterruptedIOException iioe) {
+            // Thread interrupted during IO operation. Terminate StreamPipe.
+            return;
         } catch (IOException e) {
             System.err.println("*** IOException in StreamPipe.run:");
             e.printStackTrace();

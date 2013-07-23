@@ -130,6 +130,8 @@ public class Krb5 {
     // number of retries before giving up
 
     public static final int KDC_RETRY_LIMIT = 3;
+    public static final int KDC_DEFAULT_UDP_PREF_LIMIT = 1465;
+    public static final int KDC_HARD_UDP_LIMIT = 32700;
 
     //OSI authentication mechanism OID
 
@@ -157,6 +159,9 @@ public class Krb5 {
     // new preauth types
     public static final int PA_ETYPE_INFO    = 11;
     public static final int PA_ETYPE_INFO2   = 19;
+
+    // S4U2user info
+    public static final int PA_FOR_USER      = 129;
 
     //-------------------------------+-------------
     //authorization data type        |ad-type value

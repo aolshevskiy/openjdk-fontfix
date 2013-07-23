@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -987,7 +987,7 @@ void Parse::do_ifnull(BoolTest::mask btest, Node *c) {
     uncommon_trap(Deoptimization::Reason_unreached,
                   Deoptimization::Action_reinterpret,
                   NULL, "cold");
-    if (EliminateAutoBox) {
+    if (C->eliminate_boxing()) {
       // Mark the successor blocks as parsed
       branch_block->next_path_num();
       next_block->next_path_num();
@@ -1012,7 +1012,7 @@ void Parse::do_ifnull(BoolTest::mask btest, Node *c) {
 
     if (stopped()) {            // Path is dead?
       explicit_null_checks_elided++;
-      if (EliminateAutoBox) {
+      if (C->eliminate_boxing()) {
         // Mark the successor block as parsed
         branch_block->next_path_num();
       }
@@ -1032,7 +1032,7 @@ void Parse::do_ifnull(BoolTest::mask btest, Node *c) {
 
   if (stopped()) {              // Path is dead?
     explicit_null_checks_elided++;
-    if (EliminateAutoBox) {
+    if (C->eliminate_boxing()) {
       // Mark the successor block as parsed
       next_block->next_path_num();
     }
@@ -1069,7 +1069,7 @@ void Parse::do_if(BoolTest::mask btest, Node* c) {
     uncommon_trap(Deoptimization::Reason_unreached,
                   Deoptimization::Action_reinterpret,
                   NULL, "cold");
-    if (EliminateAutoBox) {
+    if (C->eliminate_boxing()) {
       // Mark the successor blocks as parsed
       branch_block->next_path_num();
       next_block->next_path_num();
@@ -1135,7 +1135,7 @@ void Parse::do_if(BoolTest::mask btest, Node* c) {
     set_control(taken_branch);
 
     if (stopped()) {
-      if (EliminateAutoBox) {
+      if (C->eliminate_boxing()) {
         // Mark the successor block as parsed
         branch_block->next_path_num();
       }
@@ -1154,7 +1154,7 @@ void Parse::do_if(BoolTest::mask btest, Node* c) {
 
   // Branch not taken.
   if (stopped()) {
-    if (EliminateAutoBox) {
+    if (C->eliminate_boxing()) {
       // Mark the successor block as parsed
       next_block->next_path_num();
     }
@@ -1240,7 +1240,7 @@ void Parse::adjust_map_after_if(BoolTest::mask btest, Node* c, float prob,
 
 static Node* extract_obj_from_klass_load(PhaseGVN* gvn, Node* n) {
   Node* ldk;
-  if (n->is_DecodeN()) {
+  if (n->is_DecodeNKlass()) {
     if (n->in(1)->Opcode() != Op_LoadNKlass) {
       return NULL;
     } else {
@@ -1449,7 +1449,7 @@ void Parse::do_one_bytecode() {
                       NULL, tag.internal_name());
         break;
       }
-      assert(constant.basic_type() != T_OBJECT || !constant.as_object()->is_klass(),
+      assert(constant.basic_type() != T_OBJECT || constant.as_object()->is_instance(),
              "must be java_mirror of klass");
       bool pushed = push_constant(constant, true);
       guarantee(pushed, "must be possible to push this constant");

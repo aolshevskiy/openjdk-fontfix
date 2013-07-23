@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,9 +27,6 @@ package java.net;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.Hashtable;
 import java.util.StringTokenizer;
 import sun.security.util.SecurityConstants;
@@ -41,17 +38,21 @@ import sun.security.util.SecurityConstants;
  * directory, or it can be a reference to a more complicated object,
  * such as a query to a database or to a search engine. More
  * information on the types of URLs and their formats can be found at:
- * <blockquote>
- *     <a href="http://www.socs.uts.edu.au/MosaicDocs-old/url-primer.html">
- *    <i>http://www.socs.uts.edu.au/MosaicDocs-old/url-primer.html</i></a>
- * </blockquote>
+ * <a href=
+ * "http://web.archive.org/web/20051219043731/http://archive.ncsa.uiuc.edu/SDG/Software/Mosaic/Demo/url-primer.html">
+ * <i>Types of URL</i></a>
  * <p>
- * In general, a URL can be broken into several parts. The previous
- * example of a URL indicates that the protocol to use is
+ * In general, a URL can be broken into several parts. Consider the
+ * following example:
+ * <blockquote><pre>
+ *     http://www.example.com/docs/resource1.html
+ * </pre></blockquote>
+ * <p>
+ * The URL above indicates that the protocol to use is
  * <code>http</code> (HyperText Transfer Protocol) and that the
  * information resides on a host machine named
- * <code>www.socs.uts.edu.au</code>. The information on that host
- * machine is named <code>/MosaicDocs-old/url-primer.html</code>. The exact
+ * <code>www.example.com</code>. The information on that host
+ * machine is named <code>/docs/resource1.html</code>. The exact
  * meaning of this name on the host machine is both protocol
  * dependent and host dependent. The information normally resides in
  * a file, but it could be generated on the fly. This component of
@@ -64,7 +65,7 @@ import sun.security.util.SecurityConstants;
  * <code>http</code> is <code>80</code>. An alternative port could be
  * specified as:
  * <blockquote><pre>
- *     http://www.socs.uts.edu.au:80/MosaicDocs-old/url-primer.html
+ *     http://www.example.com:1080/docs/resource1.html
  * </pre></blockquote>
  * <p>
  * The syntax of <code>URL</code> is defined by  <a
@@ -277,7 +278,7 @@ public final class URL implements java.io.Serializable {
      * <p>Protocol handlers for the following protocols are guaranteed
      * to exist on the search path :-
      * <blockquote><pre>
-     *     http, https, ftp, file, and jar
+     *     http, https, file, and jar
      * </pre></blockquote>
      * Protocol handlers for additional protocols may also be
      * available.
@@ -660,8 +661,8 @@ public final class URL implements java.io.Serializable {
      * @param file the file on the host
      * @param ref the internal reference in the URL
      */
-    protected void set(String protocol, String host,
-                       int port, String file, String ref) {
+    void set(String protocol, String host, int port,
+             String file, String ref) {
         synchronized (this) {
             this.protocol = protocol;
             this.host = host;
@@ -697,9 +698,9 @@ public final class URL implements java.io.Serializable {
      * @param query the query part of this URL
      * @since 1.3
      */
-    protected void set(String protocol, String host, int port,
-                       String authority, String userInfo, String path,
-                       String query, String ref) {
+    void set(String protocol, String host, int port,
+             String authority, String userInfo, String path,
+             String query, String ref) {
         synchronized (this) {
             this.protocol = protocol;
             this.host = host;
@@ -1115,24 +1116,8 @@ public final class URL implements java.io.Serializable {
     /**
      * A table of protocol handlers.
      */
-    static Hashtable handlers = new Hashtable();
+    static Hashtable<String,URLStreamHandler> handlers = new Hashtable<>();
     private static Object streamHandlerLock = new Object();
-
-    // special case the gopher protocol, disabled by default
-    private static final String GOPHER = "gopher";
-    private static final String ENABLE_GOPHER_PROP = "jdk.net.registerGopherProtocol";
-    private static final boolean enableGopher = AccessController.doPrivileged(
-                new PrivilegedAction<Boolean>() {
-                    @Override
-                    public Boolean run() {
-                        String prop = System.getProperty(ENABLE_GOPHER_PROP);
-                        return prop == null ? false :
-                                   (prop.equalsIgnoreCase("false") ? false : true);
-                    }
-                });
-
-    // package name of the JDK implementation protocol handlers
-    private static final String JDK_PACKAGE_PREFIX =  "sun.net.www.protocol";
 
     /**
      * Returns the Stream Handler.
@@ -1140,7 +1125,7 @@ public final class URL implements java.io.Serializable {
      */
     static URLStreamHandler getURLStreamHandler(String protocol) {
 
-        URLStreamHandler handler = (URLStreamHandler)handlers.get(protocol);
+        URLStreamHandler handler = handlers.get(protocol);
         if (handler == null) {
 
             boolean checkedWithFactory = false;
@@ -1165,7 +1150,7 @@ public final class URL implements java.io.Serializable {
 
                 // REMIND: decide whether to allow the "null" class prefix
                 // or not.
-                packagePrefixList += JDK_PACKAGE_PREFIX;
+                packagePrefixList += "sun.net.www.protocol";
 
                 StringTokenizer packagePrefixIter =
                     new StringTokenizer(packagePrefixList, "|");
@@ -1175,18 +1160,10 @@ public final class URL implements java.io.Serializable {
 
                     String packagePrefix =
                       packagePrefixIter.nextToken().trim();
-
-                    // do not try to instantiate the JDK gopher handler
-                    // unless the system property had been explicitly set
-                    if (protocol.equalsIgnoreCase(GOPHER) &&
-                        packagePrefix.equals(JDK_PACKAGE_PREFIX) &&
-                        !enableGopher) {
-                            continue;
-                    }
                     try {
                         String clsName = packagePrefix + "." + protocol +
                           ".Handler";
-                        Class cls = null;
+                        Class<?> cls = null;
                         try {
                             cls = Class.forName(clsName);
                         } catch (ClassNotFoundException e) {
@@ -1211,7 +1188,7 @@ public final class URL implements java.io.Serializable {
 
                 // Check again with hashtable just in case another
                 // thread created a handler since we last checked
-                handler2 = (URLStreamHandler)handlers.get(protocol);
+                handler2 = handlers.get(protocol);
 
                 if (handler2 != null) {
                     return handler2;

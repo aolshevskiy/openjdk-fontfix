@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@
 #include "c1/c1_LIR.hpp"
 #include "c1/c1_Runtime1.hpp"
 #include "utilities/array.hpp"
+#include "utilities/macros.hpp"
 
 class CodeEmitInfo;
 class LIR_Assembler;
@@ -165,6 +166,22 @@ class RangeCheckStub: public CodeStub {
 #endif // PRODUCT
 };
 
+// stub used when predicate fails and deoptimization is needed
+class PredicateFailedStub: public CodeStub {
+ private:
+  CodeEmitInfo* _info;
+
+ public:
+  PredicateFailedStub(CodeEmitInfo* info);
+  virtual void emit_code(LIR_Assembler* e);
+  virtual CodeEmitInfo* info() const             { return _info; }
+  virtual void visit(LIR_OpVisitState* visitor) {
+    visitor->do_slow_case(_info);
+  }
+#ifndef PRODUCT
+  virtual void print_name(outputStream* out) const { out->print("PredicateFailedStub"); }
+#endif // PRODUCT
+};
 
 class DivByZeroStub: public CodeStub {
  private:
@@ -346,7 +363,8 @@ class PatchingStub: public CodeStub {
  public:
   enum PatchID {
     access_field_id,
-    load_klass_id
+    load_klass_id,
+    load_mirror_id
   };
   enum constants {
     patch_info_size = 3
@@ -360,7 +378,7 @@ class PatchingStub: public CodeStub {
   Label         _patch_site_continuation;
   Register      _obj;
   CodeEmitInfo* _info;
-  int           _oop_index;  // index of the patchable oop in nmethod oop table if needed
+  int           _index;  // index of the patchable oop or Klass* in nmethod oop or metadata table if needed
   static int    _patch_info_offset;
 
   void align_patch_site(MacroAssembler* masm);
@@ -368,10 +386,10 @@ class PatchingStub: public CodeStub {
  public:
   static int patch_info_offset() { return _patch_info_offset; }
 
-  PatchingStub(MacroAssembler* masm, PatchID id, int oop_index = -1):
+  PatchingStub(MacroAssembler* masm, PatchID id, int index = -1):
       _id(id)
     , _info(NULL)
-    , _oop_index(oop_index) {
+    , _index(index) {
     if (os::is_MP()) {
       // force alignment of patch sites on MP hardware so we
       // can guarantee atomic writes to the patch site.
@@ -399,8 +417,8 @@ class PatchingStub: public CodeStub {
       }
       NativeMovRegMem* n_move = nativeMovRegMem_at(pc_start());
       n_move->set_offset(field_offset);
-    } else if (_id == load_klass_id) {
-      assert(_obj != noreg, "must have register object for load_klass");
+    } else if (_id == load_klass_id || _id == load_mirror_id) {
+      assert(_obj != noreg, "must have register object for load_klass/load_mirror");
 #ifdef ASSERT
       // verify that we're pointing at a NativeMovConstReg
       nativeMovConstReg_at(pc_start());
@@ -514,7 +532,7 @@ class ArrayCopyStub: public CodeStub {
 };
 
 //////////////////////////////////////////////////////////////////////////////////////////
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 
 // Code stubs for Garbage-First barriers.
 class G1PreBarrierStub: public CodeStub {
@@ -607,7 +625,7 @@ class G1PostBarrierStub: public CodeStub {
 #endif // PRODUCT
 };
 
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 //////////////////////////////////////////////////////////////////////////////////////////
 
 #endif // SHARE_VM_C1_C1_CODESTUBS_HPP

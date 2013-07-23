@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,11 +49,9 @@ BasicType constantTag::basic_type() const {
     case JVM_CONSTANT_UnresolvedClass :
     case JVM_CONSTANT_UnresolvedClassInError :
     case JVM_CONSTANT_ClassIndex :
-    case JVM_CONSTANT_UnresolvedString :
     case JVM_CONSTANT_StringIndex :
     case JVM_CONSTANT_MethodHandle :
     case JVM_CONSTANT_MethodType :
-    case JVM_CONSTANT_Object :
       return T_OBJECT;
     default:
       ShouldNotReachHere();
@@ -89,12 +87,14 @@ const char* constantTag::internal_name() const {
       return "NameAndType";
     case JVM_CONSTANT_MethodHandle :
       return "MethodHandle";
+    case JVM_CONSTANT_MethodHandleInError :
+      return "MethodHandle Error";
     case JVM_CONSTANT_MethodType :
       return "MethodType";
+    case JVM_CONSTANT_MethodTypeInError :
+      return "MethodType Error";
     case JVM_CONSTANT_InvokeDynamic :
       return "InvokeDynamic";
-    case JVM_CONSTANT_Object :
-      return "Object";
     case JVM_CONSTANT_Utf8 :
       return "Utf8";
     case JVM_CONSTANT_UnresolvedClass :
@@ -103,8 +103,6 @@ const char* constantTag::internal_name() const {
       return "Unresolved Class Error";
     case JVM_CONSTANT_ClassIndex :
       return "Unresolved Class Index";
-    case JVM_CONSTANT_UnresolvedString :
-      return "Unresolved String";
     case JVM_CONSTANT_StringIndex :
       return "Unresolved String Index";
     default:

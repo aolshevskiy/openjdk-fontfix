@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,12 +28,14 @@ package com.sun.xml.internal.ws.message.jaxb;
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.XMLStreamException2;
 import com.sun.xml.internal.bind.api.Bridge;
-import com.sun.xml.internal.bind.api.JAXBRIContext;
 import com.sun.xml.internal.stream.buffer.XMLStreamBuffer;
 import com.sun.xml.internal.stream.buffer.XMLStreamBufferResult;
 import com.sun.xml.internal.ws.api.message.Header;
+import com.sun.xml.internal.ws.encoding.SOAPBindingCodec;
 import com.sun.xml.internal.ws.message.AbstractHeaderImpl;
 import com.sun.xml.internal.ws.message.RootElementSniffer;
+import com.sun.xml.internal.ws.spi.db.BindingContext;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
 import com.sun.xml.internal.ws.streaming.XMLStreamWriterUtil;
 import org.xml.sax.Attributes;
 import org.xml.sax.ContentHandler;
@@ -66,7 +68,7 @@ public final class JAXBHeader extends AbstractHeaderImpl {
      */
     private final Object jaxbObject;
 
-    private final Bridge bridge;
+    private final XMLBridge bridge;
 
     // information about this header. lazily obtained.
     private String nsUri;
@@ -79,9 +81,10 @@ public final class JAXBHeader extends AbstractHeaderImpl {
      */
     private XMLStreamBuffer infoset;
 
-    public JAXBHeader(JAXBRIContext context, Object jaxbObject) {
+    public JAXBHeader(BindingContext context, Object jaxbObject) {
         this.jaxbObject = jaxbObject;
-        this.bridge = new MarshallerBridge(context);
+//        this.bridge = new MarshallerBridge(context);
+        this.bridge = context.createFragmentBridge();
 
         if (jaxbObject instanceof JAXBElement) {
             JAXBElement e = (JAXBElement) jaxbObject;
@@ -90,11 +93,11 @@ public final class JAXBHeader extends AbstractHeaderImpl {
         }
     }
 
-    public JAXBHeader(Bridge bridge, Object jaxbObject) {
+    public JAXBHeader(XMLBridge bridge, Object jaxbObject) {
         this.jaxbObject = jaxbObject;
         this.bridge = bridge;
 
-        QName tagName = bridge.getTypeReference().tagName;
+        QName tagName = bridge.getTypeInfo().tagName;
         this.nsUri = tagName.getNamespaceURI();
         this.localName = tagName.getLocalPart();
     }
@@ -105,7 +108,7 @@ public final class JAXBHeader extends AbstractHeaderImpl {
     private void parse() {
         RootElementSniffer sniffer = new RootElementSniffer();
         try {
-            bridge.marshal(jaxbObject,sniffer);
+            bridge.marshal(jaxbObject,sniffer,null);
         } catch (JAXBException e) {
             // if it's due to us aborting the processing after the first element,
             // we can safely ignore this exception.
@@ -163,19 +166,26 @@ public final class JAXBHeader extends AbstractHeaderImpl {
             throw new JAXBException(e);
         }
     }
-
+    /** @deprecated */
     public <T> T readAsJAXB(Bridge<T> bridge) throws JAXBException {
         return bridge.unmarshal(new JAXBBridgeSource(this.bridge,jaxbObject));
     }
 
+        public <T> T readAsJAXB(XMLBridge<T> bond) throws JAXBException {
+        return bond.unmarshal(new JAXBBridgeSource(this.bridge,jaxbObject),null);
+        }
+
     public void writeTo(XMLStreamWriter sw) throws XMLStreamException {
         try {
+            // Get the encoding of the writer
+            String encoding = XMLStreamWriterUtil.getEncoding(sw);
+
             // Get output stream and use JAXB UTF-8 writer
-            OutputStream os = XMLStreamWriterUtil.getOutputStream(sw);
-            if (os != null) {
-                bridge.marshal(jaxbObject, os, sw.getNamespaceContext());
+            OutputStream os = bridge.supportOutputStream() ? XMLStreamWriterUtil.getOutputStream(sw) : null;
+            if (os != null && encoding != null && encoding.equalsIgnoreCase(SOAPBindingCodec.UTF8_ENCODING)) {
+                bridge.marshal(jaxbObject, os, sw.getNamespaceContext(), null);
             } else {
-                bridge.marshal(jaxbObject,sw);
+                bridge.marshal(jaxbObject,sw, null);
             }
         } catch (JAXBException e) {
             throw new XMLStreamException2(e);
@@ -195,7 +205,7 @@ public final class JAXBHeader extends AbstractHeaderImpl {
 
     public void writeTo(ContentHandler contentHandler, ErrorHandler errorHandler) throws SAXException {
         try {
-            bridge.marshal(jaxbObject,contentHandler);
+            bridge.marshal(jaxbObject,contentHandler,null);
         } catch (JAXBException e) {
             SAXParseException x = new SAXParseException(e.getMessage(),null,null,-1,-1,e);
             errorHandler.fatalError(x);

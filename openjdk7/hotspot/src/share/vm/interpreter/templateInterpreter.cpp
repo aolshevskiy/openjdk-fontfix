@@ -373,6 +373,12 @@ void TemplateInterpreterGenerator::generate_all() {
   method_entry(java_lang_math_pow  )
   method_entry(java_lang_ref_reference_get)
 
+  if (UseCRC32Intrinsics) {
+    method_entry(java_util_zip_CRC32_update)
+    method_entry(java_util_zip_CRC32_updateBytes)
+    method_entry(java_util_zip_CRC32_updateByteBuffer)
+  }
+
   initialize_method_handle_entries();
 
   // all native method kinds (must be one contiguous block)
@@ -506,7 +512,7 @@ void TemplateInterpreterGenerator::generate_and_dispatch(Template* t, TosState t
     assert(step > 0, "just checkin'");
     // setup stuff for dispatching next bytecode
     if (ProfileInterpreter && VerifyDataPointer
-        && methodDataOopDesc::bytecode_has_profile(t->bytecode())) {
+        && MethodData::bytecode_has_profile(t->bytecode())) {
       __ verify_method_data_pointer();
     }
     __ dispatch_prolog(tos_out, step);
@@ -584,7 +590,7 @@ void TemplateInterpreter::ignore_safepoints() {
 // Deoptimization support
 
 // If deoptimization happens, this function returns the point of next bytecode to continue execution
-address TemplateInterpreter::deopt_continue_after_entry(methodOop method, address bcp, int callee_parameters, bool is_top_frame) {
+address TemplateInterpreter::deopt_continue_after_entry(Method* method, address bcp, int callee_parameters, bool is_top_frame) {
   return AbstractInterpreter::deopt_continue_after_entry(method, bcp, callee_parameters, is_top_frame);
 }
 
@@ -592,7 +598,7 @@ address TemplateInterpreter::deopt_continue_after_entry(methodOop method, addres
 // the bytecode.
 // Note: Bytecodes::_athrow (C1 only) and Bytecodes::_return are the special cases
 //       that do not return "Interpreter::deopt_entry(vtos, 0)"
-address TemplateInterpreter::deopt_reexecute_entry(methodOop method, address bcp) {
+address TemplateInterpreter::deopt_reexecute_entry(Method* method, address bcp) {
   assert(method->contains(bcp), "just checkin'");
   Bytecodes::Code code   = Bytecodes::java_code_at(method, bcp);
   if (code == Bytecodes::_return) {

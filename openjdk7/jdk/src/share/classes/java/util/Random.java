@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,10 @@
 package java.util;
 import java.io.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.DoubleStream;
+import java.util.stream.IntStream;
+import java.util.stream.LongStream;
+
 import sun.misc.Unsafe;
 
 /**
@@ -368,7 +372,7 @@ class Random implements java.io.Serializable {
      * range {@code 0.0f} (inclusive) to {@code 1.0f} (exclusive), is
      * pseudorandomly generated and returned. All 2<font
      * size="-1"><sup>24</sup></font> possible {@code float} values
-     * of the form <i>m&nbsp;x&nbsp</i>2<font
+     * of the form <i>m&nbsp;x&nbsp;</i>2<font
      * size="-1"><sup>-24</sup></font>, where <i>m</i> is a positive
      * integer less than 2<font size="-1"><sup>24</sup> </font>, are
      * produced with (approximately) equal probability.
@@ -510,6 +514,59 @@ class Random implements java.io.Serializable {
             haveNextNextGaussian = true;
             return v1 * multiplier;
         }
+    }
+
+    /**
+     * Returns a stream of pseudorandom, uniformly distributed
+     * {@code integer} values from this random number generator's
+     * sequence. Values are obtained as needed by calling
+     * {@link #nextInt()}.
+     *
+     * @return an infinite stream of {@code integer} values
+     * @since 1.8
+     */
+    public IntStream ints() {
+        return IntStream.generate(this::nextInt);
+    }
+
+    /**
+     * Returns a stream of pseudorandom, uniformly distributed
+     * {@code long} values from this random number generator's
+     * sequence. Values are obtained as needed by calling
+     * {@link #nextLong()}.
+     *
+     * @return an infinite stream of {@code long} values
+     * @since 1.8
+     */
+    public LongStream longs() {
+        return LongStream.generate(this::nextLong);
+    }
+
+    /**
+     * Returns a stream of pseudorandom, uniformly distributed
+     * {@code double} values between {@code 0.0} and {@code 1.0}
+     * from this random number generator's sequence. Values are
+     * obtained as needed by calling {@link #nextDouble()}.
+     *
+     * @return an infinite stream of {@code double} values
+     * @since 1.8
+     */
+    public DoubleStream doubles() {
+        return DoubleStream.generate(this::nextDouble);
+    }
+
+    /**
+     * Returns a stream of pseudorandom, Gaussian ("normally")
+     * distributed {@code double} values with mean {@code 0.0}
+     * and standard deviation {@code 1.0} from this random number
+     * generator's sequence. Values are obtained as needed by
+     * calling {@link #nextGaussian()}.
+     *
+     * @return an infinite stream of {@code double} values
+     * @since 1.8
+     */
+    public DoubleStream gaussians() {
+        return DoubleStream.generate(this::nextGaussian);
     }
 
     /**

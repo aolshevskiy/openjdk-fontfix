@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -180,11 +180,12 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
                 if (cert.equals(oldEntry)) {
                     return;
                 }
-                List<X509Certificate> list = new ArrayList<X509Certificate>(2);
+                List<X509Certificate> list = new ArrayList<>(2);
                 list.add(cert);
                 list.add((X509Certificate)oldEntry);
                 certSubjects.put(subject, list);
             } else {
+                @SuppressWarnings("unchecked") // See certSubjects javadoc.
                 List<X509Certificate> list = (List<X509Certificate>)oldEntry;
                 if (list.contains(cert) == false) {
                     list.add(cert);
@@ -205,11 +206,13 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
                 if (crl.equals(oldEntry)) {
                     return;
                 }
-                List<X509CRL> list = new ArrayList<X509CRL>(2);
+                List<X509CRL> list = new ArrayList<>(2);
                 list.add(crl);
                 list.add((X509CRL)oldEntry);
                 crlIssuers.put(issuer, list);
             } else {
+                // See crlIssuers javadoc.
+                @SuppressWarnings("unchecked")
                 List<X509CRL> list = (List<X509CRL>)oldEntry;
                 if (list.contains(crl) == false) {
                     list.add(crl);
@@ -231,19 +234,20 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
      *         match the specified selector
      * @throws CertStoreException if an exception occurs
      */
+    @Override
     public Collection<? extends Certificate> engineGetCertificates(CertSelector selector)
             throws CertStoreException {
 
         // no selector means match all
         if (selector == null) {
-            Set<Certificate> matches = new HashSet<Certificate>();
+            Set<Certificate> matches = new HashSet<>();
             matchX509Certs(new X509CertSelector(), matches);
             matches.addAll(otherCertificates);
             return matches;
         }
 
         if (selector instanceof X509CertSelector == false) {
-            Set<Certificate> matches = new HashSet<Certificate>();
+            Set<Certificate> matches = new HashSet<>();
             matchX509Certs(selector, matches);
             for (Certificate cert : otherCertificates) {
                 if (selector.match(cert)) {
@@ -279,8 +283,10 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
                     return Collections.<X509Certificate>emptySet();
                 }
             } else {
+                // See certSubjects javadoc.
+                @SuppressWarnings("unchecked")
                 List<X509Certificate> list = (List<X509Certificate>)entry;
-                Set<X509Certificate> matches = new HashSet<X509Certificate>(16);
+                Set<X509Certificate> matches = new HashSet<>(16);
                 for (X509Certificate cert : list) {
                     if (x509Selector.match(cert)) {
                         matches.add(cert);
@@ -290,7 +296,7 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
             }
         }
         // cannot use index, iterate all
-        Set<Certificate> matches = new HashSet<Certificate>(16);
+        Set<Certificate> matches = new HashSet<>(16);
         matchX509Certs(x509Selector, matches);
         return matches;
     }
@@ -309,6 +315,8 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
                     matches.add(cert);
                 }
             } else {
+                // See certSubjects javadoc.
+                @SuppressWarnings("unchecked")
                 List<X509Certificate> list = (List<X509Certificate>)obj;
                 for (X509Certificate cert : list) {
                     if (selector.match(cert)) {
@@ -331,18 +339,19 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
      *         match the specified selector
      * @throws CertStoreException if an exception occurs
      */
+    @Override
     public Collection<CRL> engineGetCRLs(CRLSelector selector)
             throws CertStoreException {
 
         if (selector == null) {
-            Set<CRL> matches = new HashSet<CRL>();
+            Set<CRL> matches = new HashSet<>();
             matchX509CRLs(new X509CRLSelector(), matches);
             matches.addAll(otherCRLs);
             return matches;
         }
 
         if (selector instanceof X509CRLSelector == false) {
-            Set<CRL> matches = new HashSet<CRL>();
+            Set<CRL> matches = new HashSet<>();
             matchX509CRLs(selector, matches);
             for (CRL crl : otherCRLs) {
                 if (selector.match(crl)) {
@@ -359,7 +368,7 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
         // see if the issuer is specified
         Collection<X500Principal> issuers = x509Selector.getIssuers();
         if (issuers != null) {
-            HashSet<CRL> matches = new HashSet<CRL>(16);
+            HashSet<CRL> matches = new HashSet<>(16);
             for (X500Principal issuer : issuers) {
                 Object entry = crlIssuers.get(issuer);
                 if (entry == null) {
@@ -370,6 +379,8 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
                         matches.add(crl);
                     }
                 } else { // List
+                    // See crlIssuers javadoc.
+                    @SuppressWarnings("unchecked")
                     List<X509CRL> list = (List<X509CRL>)entry;
                     for (X509CRL crl : list) {
                         if (x509Selector.match(crl)) {
@@ -381,7 +392,7 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
             return matches;
         }
         // cannot use index, iterate all
-        Set<CRL> matches = new HashSet<CRL>(16);
+        Set<CRL> matches = new HashSet<>(16);
         matchX509CRLs(x509Selector, matches);
         return matches;
     }
@@ -398,6 +409,8 @@ public class IndexedCollectionCertStore extends CertStoreSpi {
                     matches.add(crl);
                 }
             } else {
+                // See crlIssuers javadoc.
+                @SuppressWarnings("unchecked")
                 List<X509CRL> list = (List<X509CRL>)obj;
                 for (X509CRL crl : list) {
                     if (selector.match(crl)) {

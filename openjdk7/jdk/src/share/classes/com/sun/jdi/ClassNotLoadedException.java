@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2001, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -69,6 +69,7 @@ package com.sun.jdi;
  */
 public class ClassNotLoadedException extends Exception
 {
+    private static final long serialVersionUID = -6242978768444298722L;
     private String className;
 
     public ClassNotLoadedException(String className) {

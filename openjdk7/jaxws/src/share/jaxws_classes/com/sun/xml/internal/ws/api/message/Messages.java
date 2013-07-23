@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,12 +27,11 @@ package com.sun.xml.internal.ws.api.message;
 
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
-import com.sun.xml.internal.bind.api.JAXBRIContext;
-import com.sun.xml.internal.bind.v2.runtime.MarshallerImpl;
 import com.sun.xml.internal.stream.buffer.XMLStreamBuffer;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
+import com.sun.xml.internal.ws.api.message.saaj.SAAJFactory;
 import com.sun.xml.internal.ws.api.pipe.Tube;
 import com.sun.xml.internal.ws.api.pipe.Codecs;
 import com.sun.xml.internal.ws.fault.SOAPFaultBuilder;
@@ -42,9 +41,9 @@ import com.sun.xml.internal.ws.message.EmptyMessageImpl;
 import com.sun.xml.internal.ws.message.ProblemActionHeader;
 import com.sun.xml.internal.ws.message.stream.PayloadStreamReaderMessage;
 import com.sun.xml.internal.ws.message.jaxb.JAXBMessage;
-import com.sun.xml.internal.ws.message.saaj.SAAJMessage;
 import com.sun.xml.internal.ws.message.source.PayloadSourceMessage;
 import com.sun.xml.internal.ws.message.source.ProtocolSourceMessage;
+import com.sun.xml.internal.ws.spi.db.BindingContextFactory;
 import com.sun.xml.internal.ws.streaming.XMLStreamReaderException;
 import com.sun.xml.internal.ws.streaming.XMLStreamReaderUtil;
 import com.sun.xml.internal.ws.util.DOMUtil;
@@ -54,6 +53,7 @@ import com.sun.xml.internal.ws.resources.AddressingMessages;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 
+import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBElement;
 import javax.xml.bind.Marshaller;
 import javax.xml.bind.annotation.XmlRootElement;
@@ -94,7 +94,7 @@ public abstract class Messages {
 
     /**
      * Creates a {@link Message} backed by a JAXB bean.
-     *
+     * @deprecated
      * @param context
      *      The context to be used to produce infoset from the object. Must not be null.
      * @param jaxbObject
@@ -104,8 +104,18 @@ public abstract class Messages {
      * @param soapVersion
      *      The SOAP version of the message. Must not be null.
      */
-    public static Message create(JAXBRIContext context, Object jaxbObject, SOAPVersion soapVersion) {
+    public static Message create(JAXBContext context, Object jaxbObject, SOAPVersion soapVersion) {
         return JAXBMessage.create(context,jaxbObject,soapVersion);
+    }
+
+    /**
+     * @deprecated
+     * For use when creating a Dispatch object with an unknown JAXB implementation
+     * for he JAXBContext parameter.
+     *
+     */
+    public static Message createRaw(JAXBContext context, Object jaxbObject, SOAPVersion soapVersion) {
+        return JAXBMessage.createRaw(context,jaxbObject,soapVersion);
     }
 
     /**
@@ -113,7 +123,7 @@ public abstract class Messages {
      *      Use {@link #create(JAXBRIContext, Object, SOAPVersion)}
      */
     public static Message create(Marshaller marshaller, Object jaxbObject, SOAPVersion soapVersion) {
-        return create(((MarshallerImpl)marshaller).getContext(),jaxbObject,soapVersion);
+        return create(BindingContextFactory.getBindingContext(marshaller).getJAXBContext(),jaxbObject,soapVersion);
     }
 
     /**
@@ -130,7 +140,7 @@ public abstract class Messages {
      *      never be touched directly.
      */
     public static Message create(SOAPMessage saaj) {
-        return new SAAJMessage(saaj);
+        return SAAJFactory.create(saaj);
     }
 
     /**
@@ -211,7 +221,7 @@ public abstract class Messages {
             for( Node n=header.getFirstChild(); n!=null; n=n.getNextSibling() ) {
                 if(n.getNodeType()==Node.ELEMENT_NODE) {
                     if(headers==null)
-                        headers = new HeaderList();
+                        headers = new HeaderList(ver);
                     headers.add(Headers.create((Element)n));
                 }
             }
@@ -371,7 +381,7 @@ public abstract class Messages {
         SOAPFault fault;
         try {
             if (sv == SOAPVersion.SOAP_12) {
-                fault = SOAPVersion.SOAP_12.saajSoapFactory.createFault();
+                fault = SOAPVersion.SOAP_12.getSOAPFactory().createFault();
                 fault.setFaultCode(SOAPConstants.SOAP_SENDER_FAULT);
                 fault.appendFaultSubcode(subcode);
                 Detail detail = fault.addDetail();
@@ -379,7 +389,7 @@ public abstract class Messages {
                 se = se.addChildElement(av.actionTag);
                 se.addTextNode(unsupportedAction);
             } else {
-                fault = SOAPVersion.SOAP_11.saajSoapFactory.createFault();
+                fault = SOAPVersion.SOAP_11.getSOAPFactory().createFault();
                 fault.setFaultCode(subcode);
             }
             fault.setFaultString(faultstring);

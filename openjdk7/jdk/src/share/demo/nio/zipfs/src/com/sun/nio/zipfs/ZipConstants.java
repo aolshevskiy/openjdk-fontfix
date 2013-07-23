@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2012, Oracle and/or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -185,11 +185,11 @@ class ZipConstants {
      */
     ///////////////////////////////////////////////////////
     static final int CH(byte[] b, int n) {
-       return b[n] & 0xff;
+        return Byte.toUnsignedInt(b[n]);
     }
 
     static final int SH(byte[] b, int n) {
-        return (b[n] & 0xff) | ((b[n + 1] & 0xff) << 8);
+        return Byte.toUnsignedInt(b[n]) | (Byte.toUnsignedInt(b[n + 1]) << 8);
     }
 
     static final long LG(byte[] b, int n) {

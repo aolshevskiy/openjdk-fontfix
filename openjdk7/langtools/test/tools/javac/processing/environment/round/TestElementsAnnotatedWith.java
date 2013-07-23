@@ -26,15 +26,17 @@
  * @bug 6397298 6400986 6425592 6449798 6453386 6508401 6498938 6911854
  * @summary Tests that getElementsAnnotatedWith works properly.
  * @author  Joseph D. Darcy
- * @library ../../../lib
+ * @library /tools/javac/lib
  * @build   JavacTestingAbstractProcessor
  * @compile TestElementsAnnotatedWith.java
  * @compile InheritedAnnotation.java
+ * @compile TpAnno.java
  * @compile -processor TestElementsAnnotatedWith -proc:only SurfaceAnnotations.java
  * @compile -processor TestElementsAnnotatedWith -proc:only BuriedAnnotations.java
  * @compile -processor TestElementsAnnotatedWith -proc:only Part1.java Part2.java
  * @compile -processor TestElementsAnnotatedWith -proc:only C2.java
  * @compile -processor TestElementsAnnotatedWith -proc:only Foo.java
+ * @compile -processor TestElementsAnnotatedWith -proc:only TypeParameterAnnotations.java
  * @compile Foo.java
  * @compile/process -processor TestElementsAnnotatedWith -proc:only Foo
  */

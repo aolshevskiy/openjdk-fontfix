@@ -28,19 +28,7 @@
 #include "gc_implementation/shared/spaceDecorator.hpp"
 #include "memory/sharedHeap.hpp"
 #include "oops/oop.inline.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
-
+#include "runtime/thread.inline.hpp"
 
 MutableNUMASpace::MutableNUMASpace(size_t alignment) : MutableSpace(alignment) {
   _lgrp_spaces = new (ResourceObj::C_HEAP, mtGC) GrowableArray<LGRPSpace*>(0, true);
@@ -960,6 +948,8 @@ void MutableNUMASpace::LGRPSpace::scan_pages(size_t page_size, size_t page_count
       break;
     }
     if (e != scan_end) {
+      assert(e < scan_end, err_msg("e: " PTR_FORMAT " scan_end: " PTR_FORMAT, e, scan_end));
+
       if ((page_expected.size != page_size || page_expected.lgrp_id != lgrp_id())
           && page_expected.size != 0) {
         os::free_memory(s, pointer_delta(e, s, sizeof(char)), page_size);

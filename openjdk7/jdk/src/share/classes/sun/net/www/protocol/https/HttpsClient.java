@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -350,7 +350,7 @@ final class HttpsClient extends HttpClient
                         if (httpuc != null && ret.needsTunneling())
                             httpuc.setTunnelState(TUNNELING);
                         PlatformLogger logger = HttpURLConnection.getHttpLogger();
-                        if (logger.isLoggable(PlatformLogger.FINEST)) {
+                        if (logger.isLoggable(PlatformLogger.Level.FINEST)) {
                             logger.finest("KeepAlive stream retrieved from the cache, " + ret);
                         }
                     }
@@ -668,7 +668,7 @@ final class HttpsClient extends HttpClient
      */
     @Override
     public void closeIdleConnection() {
-        HttpClient http = (HttpClient) kac.get(url, sslSocketFactory);
+        HttpClient http = kac.get(url, sslSocketFactory);
         if (http != null) {
             http.closeServer();
         }
@@ -726,8 +726,7 @@ final class HttpsClient extends HttpClient
             // return the X500Principal of the end-entity cert.
             java.security.cert.Certificate[] certs =
                         session.getPeerCertificates();
-            principal = (X500Principal)
-                ((X509Certificate)certs[0]).getSubjectX500Principal();
+            principal = ((X509Certificate)certs[0]).getSubjectX500Principal();
         }
         return principal;
     }
@@ -748,8 +747,7 @@ final class HttpsClient extends HttpClient
             java.security.cert.Certificate[] certs =
                         session.getLocalCertificates();
             if (certs != null) {
-                principal = (X500Principal)
-                    ((X509Certificate)certs[0]).getSubjectX500Principal();
+                principal = ((X509Certificate)certs[0]).getSubjectX500Principal();
             }
         }
         return principal;

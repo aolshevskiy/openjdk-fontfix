@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -353,6 +353,9 @@ Java_sun_java2d_loops_TransformHelper_Transform
         pInterpFunc = pBicubicFunc;
         maxlinepix = LINE_SIZE / 16;
         break;
+    default:
+        // Should not happen, but just in case.
+        return;
     }
 
     srcInfo.bounds.x1 = sx1;
@@ -525,6 +528,7 @@ Java_sun_java2d_loops_TransformHelper_Transform
     } else {
         pEdges[0] = pEdges[1] = 0;
     }
+
     if (!JNU_IsNull(env, edgeArray)) {
         (*env)->ReleasePrimitiveArrayCritical(env, edgeArray, pEdges, 0);
     } else if (pEdges != edgebuf) {

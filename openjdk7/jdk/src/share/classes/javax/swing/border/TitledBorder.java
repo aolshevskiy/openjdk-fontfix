@@ -67,6 +67,7 @@ import javax.swing.plaf.basic.BasicHTML;
  * @author David Kloba
  * @author Amy Fowler
  */
+@SuppressWarnings("serial")
 public class TitledBorder extends AbstractBorder
 {
     protected String title;
@@ -439,7 +440,7 @@ public class TitledBorder extends AbstractBorder
      * @return the title-font of the titled border
      */
     public Font getTitleFont() {
-        return titleFont;
+        return titleFont == null ? UIManager.getFont("TitledBorder.font") : titleFont;
     }
 
     /**
@@ -448,7 +449,7 @@ public class TitledBorder extends AbstractBorder
      * @return the title-color of the titled border
      */
     public Color getTitleColor() {
-        return titleColor;
+        return titleColor == null ? UIManager.getColor("TitledBorder.titleColor") : titleColor;
     }
 
 
@@ -680,10 +681,6 @@ public class TitledBorder extends AbstractBorder
         if (font != null) {
             return font;
         }
-        font = UIManager.getFont("TitledBorder.font");
-        if (font != null) {
-            return font;
-        }
         if (c != null) {
             font = c.getFont();
             if (font != null) {
@@ -695,10 +692,6 @@ public class TitledBorder extends AbstractBorder
 
     private Color getColor(Component c) {
         Color color = getTitleColor();
-        if (color != null) {
-            return color;
-        }
-        color = UIManager.getColor("TitledBorder.titleColor");
         if (color != null) {
             return color;
         }

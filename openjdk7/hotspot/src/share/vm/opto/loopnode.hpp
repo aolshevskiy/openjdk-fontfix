@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -603,7 +603,10 @@ class PhaseIdealLoop : public PhaseTransform {
   }
 
 public:
-  bool has_node( Node* n ) const { return _nodes[n->_idx] != NULL; }
+  bool has_node( Node* n ) const {
+    guarantee(n != NULL, "No Node.");
+    return _nodes[n->_idx] != NULL;
+  }
   // check if transform created new nodes that need _ctrl recorded
   Node *get_late_ctrl( Node *n, Node *early );
   Node *get_early_ctrl( Node *n );
@@ -737,7 +740,8 @@ private:
     return n;
   }
   uint dom_depth(Node* d) const {
-    assert(d->_idx < _idom_size, "");
+    guarantee(d != NULL, "Null dominator info.");
+    guarantee(d->_idx < _idom_size, "");
     return _dom_depth[d->_idx];
   }
   void set_idom(Node* d, Node* n, uint dom_depth);
@@ -961,7 +965,7 @@ public:
   // Has use internal to the vector set (ie. not in a phi at the loop head)
   bool has_use_internal_to_set( Node* n, VectorSet& vset, IdealLoopTree *loop );
   // clone "n" for uses that are outside of loop
-  void clone_for_use_outside_loop( IdealLoopTree *loop, Node* n, Node_List& worklist );
+  int  clone_for_use_outside_loop( IdealLoopTree *loop, Node* n, Node_List& worklist );
   // clone "n" for special uses that are in the not_peeled region
   void clone_for_special_use_inside_loop( IdealLoopTree *loop, Node* n,
                                           VectorSet& not_peel, Node_List& sink_list, Node_List& worklist );

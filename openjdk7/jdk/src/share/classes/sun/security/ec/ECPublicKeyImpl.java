@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,22 +49,23 @@ public final class ECPublicKeyImpl extends X509Key implements ECPublicKey {
 
     /**
      * Construct a key from its components. Used by the
-     * ECKeyFactory and SunPKCS11.
+     * ECKeyFactory.
      */
-    public ECPublicKeyImpl(ECPoint w, ECParameterSpec params)
+    @SuppressWarnings("deprecation")
+    ECPublicKeyImpl(ECPoint w, ECParameterSpec params)
             throws InvalidKeyException {
         this.w = w;
         this.params = params;
         // generate the encoding
         algid = new AlgorithmId
             (AlgorithmId.EC_oid, ECParameters.getAlgorithmParameters(params));
-        key = ECParameters.encodePoint(w, params.getCurve());
+        key = ECUtil.encodePoint(w, params.getCurve());
     }
 
     /**
-     * Construct a key from its encoding. Used by RSAKeyFactory.
+     * Construct a key from its encoding.
      */
-    public ECPublicKeyImpl(byte[] encoded) throws InvalidKeyException {
+    ECPublicKeyImpl(byte[] encoded) throws InvalidKeyException {
         decode(encoded);
     }
 
@@ -85,6 +86,7 @@ public final class ECPublicKeyImpl extends X509Key implements ECPublicKey {
 
     // Internal API to get the encoded point. Currently used by SunPKCS11.
     // This may change/go away depending on what we do with the public API.
+    @SuppressWarnings("deprecation")
     public byte[] getEncodedPublicValue() {
         return key.clone();
     }
@@ -92,11 +94,17 @@ public final class ECPublicKeyImpl extends X509Key implements ECPublicKey {
     /**
      * Parse the key. Called by X509Key.
      */
+    @SuppressWarnings("deprecation")
     protected void parseKeyBits() throws InvalidKeyException {
+        AlgorithmParameters algParams = this.algid.getParameters();
+        if (algParams == null) {
+            throw new InvalidKeyException("EC domain parameters must be " +
+                "encoded in the algorithm identifier");
+        }
+
         try {
-            AlgorithmParameters algParams = this.algid.getParameters();
             params = algParams.getParameterSpec(ECParameterSpec.class);
-            w = ECParameters.decodePoint(key, params.getCurve());
+            w = ECUtil.decodePoint(key, params.getCurve());
         } catch (IOException e) {
             throw new InvalidKeyException("Invalid EC key", e);
         } catch (InvalidParameterSpecException e) {

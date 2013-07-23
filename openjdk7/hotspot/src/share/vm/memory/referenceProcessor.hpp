@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -353,13 +353,11 @@ class ReferenceProcessor : public CHeapObj<mtGC> {
   // The caller is responsible for taking care of potential
   // interference with concurrent operations on these lists
   // (or predicates involved) by other threads. Currently
-  // only used by the CMS collector.  should_unload_classes is
-  // used to aid assertion checking when classes are collected.
+  // only used by the CMS collector.
   void preclean_discovered_references(BoolObjectClosure* is_alive,
                                       OopClosure*        keep_alive,
                                       VoidClosure*       complete_gc,
                                       YieldClosure*      yield,
-                                      bool               should_unload_classes,
                                       GCTimer*           gc_timer);
 
   // Delete entries in the discovered lists that have
@@ -505,6 +503,7 @@ class ReferenceProcessor : public CHeapObj<mtGC> {
 
   // Balance each of the discovered lists.
   void balance_all_queues();
+  void verify_list(DiscoveredList& ref_list);
 
   // Discover a Reference object, using appropriate discovery criteria
   bool discover_reference(oop obj, ReferenceType rt);

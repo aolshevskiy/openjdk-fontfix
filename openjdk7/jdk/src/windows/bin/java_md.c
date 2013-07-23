@@ -201,7 +201,7 @@ CreateExecutionEnvironment(int *pargc, char ***pargv,
     }
 
     JLI_Snprintf(jvmcfg, so_jvmcfg, "%s%slib%s%s%sjvm.cfg",
-                 jrepath, FILESEP, FILESEP, (char*)GetArch(), FILESEP);
+        jrepath, FILESEP, FILESEP, (char*)GetArch(), FILESEP);
 
     /* Find the specified JVM type */
     if (ReadKnownVMs(jvmcfg, JNI_FALSE) < 1) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -107,7 +107,7 @@ public class SingleByte
                 return decodeBufferLoop(src, dst);
         }
 
-        private final char decode(int b) {
+        public final char decode(int b) {
             return b2c[b + 128];
         }
 
@@ -221,7 +221,7 @@ public class SingleByte
                 return encodeBufferLoop(src, dst);
         }
 
-        private final int encode(char ch) {
+        public final int encode(char ch) {
             char index = c2bIndex[ch >> 8];
             if (index == UNMAPPABLE_ENCODING)
                 return UNMAPPABLE_ENCODING;

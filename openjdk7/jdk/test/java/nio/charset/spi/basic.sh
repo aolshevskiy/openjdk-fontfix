@@ -1,7 +1,7 @@
 #!/bin/sh
 
 #
-# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -38,16 +38,27 @@
 if [ -z "$TESTJAVA" ]; then
   if [ $# -lt 1 ]; then exit 1; fi
   TESTJAVA=$1; shift
+  COMPILEJDK="${TESTJAVA}"
   TESTSRC=`pwd`
   TESTCLASSES=`pwd`
 fi
 
 JAVA=$TESTJAVA/bin/java
-JAR=$TESTJAVA/bin/jar
+JAR=$COMPILEJAVA/bin/jar
 
-JARD=`pwd`/x.jar
-EXTD=`pwd`/x.ext
-TESTD=`pwd`/x.test
+DIR=`pwd`
+case `uname` in
+  SunOS | Linux | Darwin ) CPS=':' ;;
+  Windows* )      CPS=';' ;;
+  CYGWIN*  )
+    DIR=`/usr/bin/cygpath -a -s -m $DIR`
+    CPS=";";;
+  *)              echo "Unknown platform: `uname`"; exit 1 ;;
+esac
+
+JARD=$DIR/x.jar
+EXTD=$DIR/x.ext
+TESTD=$DIR/x.test
 
 CSS='US-ASCII 8859_1 iso-ir-6 UTF-16 windows-1252 !BAR cp1252'
 
@@ -62,7 +73,7 @@ if [ \! -d $EXTD ]; then
     cp $TESTCLASSES/FooProvider.class $TESTCLASSES/FooCharset.class $JARD
     mkdir $TESTD
     cp $TESTCLASSES/Test.class $TESTD
-    (cd $JARD; $JAR -cf $EXTD/test.jar *)
+    (cd $JARD; $JAR ${TESTTOOLVMOPTS} -cf $EXTD/test.jar *)
 fi
 
 if [ $# -gt 0 ]; then
@@ -83,12 +94,6 @@ fi
 
 TMP=${TMP:-$TEMP}; TMP=${TMP:-/tmp}
 cd $TMP
-
-case `uname` in
-  SunOS | Linux | Darwin ) CPS=':' ;;
-  Windows* )      CPS=';' ;;
-  *)              echo "Unknown platform: `uname`"; exit 1 ;;
-esac
 
 failures=0
 for where in ext app; do
@@ -112,7 +117,7 @@ for where in ext app; do
 		     av="$av -Djava.security.manager
 		         -Djava.security.policy==$TESTSRC/charsetProvider.sp";;
     esac
-    if (set -x; $JAVA $av Test $css) 2>&1; then
+    if (set -x; $JAVA ${TESTVMOPTS} $av Test $css) 2>&1; then
       continue;
     else
       failures=`expr $failures + 1`

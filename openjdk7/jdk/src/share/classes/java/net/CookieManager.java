@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,7 +41,7 @@ import sun.util.logging.PlatformLogger;
  *
  * <p> The HTTP cookie management in java.net package looks like:
  * <blockquote>
- * <pre>
+ * <pre>{@code
  *                  use
  * CookieHandler <------- HttpURLConnection
  *       ^
@@ -58,7 +58,7 @@ import sun.util.logging.PlatformLogger;
  *                            | impl
  *                            |
  *                  Internal in-memory implementation
- * </pre>
+ * }</pre>
  * <ul>
  *   <li>
  *     CookieHandler is at the core of cookie management. User can call
@@ -249,7 +249,6 @@ public class CookieManager extends CookieHandler
         return Collections.unmodifiableMap(cookieMap);
     }
 
-
     public void
         put(URI uri, Map<String, List<String>> responseHeaders)
         throws IOException
@@ -284,8 +283,8 @@ public class CookieManager extends CookieHandler
                         cookies = HttpCookie.parse(headerValue);
                     } catch (IllegalArgumentException e) {
                         // Bogus header, make an empty list and log the error
-                        cookies = java.util.Collections.EMPTY_LIST;
-                        if (logger.isLoggable(PlatformLogger.SEVERE)) {
+                        cookies = java.util.Collections.emptyList();
+                        if (logger.isLoggable(PlatformLogger.Level.SEVERE)) {
                             logger.severe("Invalid cookie for " + uri + ": " + headerValue);
                         }
                     }
@@ -310,7 +309,10 @@ public class CookieManager extends CookieHandler
                         // there is no dot at the beginning of effective request-host,
                         // the default Domain can only domain-match itself.)
                         if (cookie.getDomain() == null) {
-                            cookie.setDomain(uri.getHost());
+                            String host = uri.getHost();
+                            if (host != null && !host.contains("."))
+                                host += ".local";
+                            cookie.setDomain(host);
                         }
                         String ports = cookie.getPortlist();
                         if (ports != null) {

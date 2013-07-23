@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,13 +26,10 @@
 package com.sun.security.auth;
 
 import java.io.*;
-import java.lang.RuntimePermission;
 import java.lang.reflect.*;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.*;
 
-import java.security.AccessController;
 import java.security.CodeSource;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -62,13 +59,9 @@ import sun.security.util.PropertyExpander;
  *
  * <ol>
  * <li>
- *   Loop through the <code>java.security.Security</code> properties,
+ *   Loop through the security properties,
  *   <i>auth.policy.url.1</i>, <i>auth.policy.url.2</i>, ...,
- *   <i>auth.policy.url.X</i>".  These properties are set
- *   in the Java security properties file, which is located in the file named
- *   &lt;JAVA_HOME&gt;/lib/security/java.security.
- *   &lt;JAVA_HOME&gt; refers to the value of the java.home system property,
- *   and specifies the directory where the JRE is installed.
+ *   <i>auth.policy.url.X</i>".
  *   Each property value specifies a <code>URL</code> pointing to a
  *   policy file to be loaded.  Read in and load each policy.
  *
@@ -238,6 +231,7 @@ import sun.security.util.PropertyExpander;
  * @see java.security.CodeSource
  * @see java.security.Permissions
  * @see java.security.ProtectionDomain
+ * @see java.security.Security security properties
  */
 @Deprecated
 public class PolicyFile extends javax.security.auth.Policy {
@@ -260,7 +254,7 @@ public class PolicyFile extends javax.security.auth.Policy {
     private static final String AUTH_POLICY_URL = "auth.policy.url.";
 
     private Vector<PolicyEntry> policyEntries;
-    private Hashtable aliasMapping;
+    private Hashtable<Object, Object> aliasMapping;
 
     private boolean initialized = false;
 
@@ -293,7 +287,7 @@ public class PolicyFile extends javax.security.auth.Policy {
             return;
 
         policyEntries = new Vector<PolicyEntry>();
-        aliasMapping = new Hashtable(11);
+        aliasMapping = new Hashtable<Object, Object>(11);
 
         initPolicyFile();
         initialized = true;
@@ -403,7 +397,7 @@ public class PolicyFile extends javax.security.auth.Policy {
                 }
                 try {
                     extra_policy = PropertyExpander.expand(extra_policy);
-                    URL policyURL;;
+                    URL policyURL;
                     File policyFile = new File(extra_policy);
                     if (policyFile.exists()) {
                         policyURL =
@@ -702,8 +696,8 @@ public class PolicyFile extends javax.security.auth.Policy {
                InvocationTargetException
     {
         //XXX we might want to keep a hash of created factories...
-        Class pc = Class.forName(type);
-        Constructor c = pc.getConstructor(PARAMS);
+        Class<?> pc = Class.forName(type);
+        Constructor<?> c = pc.getConstructor(PARAMS);
         return (Permission) c.newInstance(new Object[] { name, actions });
     }
 
@@ -1088,16 +1082,20 @@ public class PolicyFile extends javax.security.auth.Policy {
             // because the earlier CodeSource.implies succeeded
             SubjectCodeSource scs = (SubjectCodeSource)accCs;
 
-            Set<Principal> principalSet = null;
+            Set<? extends Principal> principalSet = null;
             try {
-                Class pClass = Class.forName(principal.principalClass, false,
-                                ClassLoader.getSystemClassLoader());
+                // principal.principalClass should extend Principal
+                // If it doesn't, we should stop here with a ClassCastException.
+                @SuppressWarnings("unchecked")
+                Class<? extends Principal> pClass = (Class<? extends Principal>)
+                        Class.forName(principal.principalClass, false,
+                                      ClassLoader.getSystemClassLoader());
                 principalSet = scs.getSubject().getPrincipals(pClass);
             } catch (Exception e) {
                 if (debug != null) {
                     debug.println("problem finding Principal Class " +
-                                "when expanding SELF permission: " +
-                                e.toString());
+                                  "when expanding SELF permission: " +
+                                  e.toString());
                 }
             }
 
@@ -1107,11 +1105,9 @@ public class PolicyFile extends javax.security.auth.Policy {
             }
 
             String[][] info = new String[principalSet.size()][2];
-            java.util.Iterator<Principal> pIterator = principalSet.iterator();
 
             int i = 0;
-            while (pIterator.hasNext()) {
-                Principal p = pIterator.next();
+            for (Principal p : principalSet) {
                 info[i][0] = p.getClass().getName();
                 info[i][1] = p.getName();
                 i++;

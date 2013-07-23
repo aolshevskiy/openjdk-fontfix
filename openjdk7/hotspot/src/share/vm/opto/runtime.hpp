@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -140,11 +140,11 @@ class OptoRuntime : public AllStatic {
   // =================================
 
   // Allocate storage for a Java instance.
-  static void new_instance_C(klassOopDesc* instance_klass, JavaThread *thread);
+  static void new_instance_C(Klass* instance_klass, JavaThread *thread);
 
   // Allocate storage for a objArray or typeArray
-  static void new_array_C(klassOopDesc* array_klass, int len, JavaThread *thread);
-  static void new_array_nozero_C(klassOopDesc* array_klass, int len, JavaThread *thread);
+  static void new_array_C(Klass* array_klass, int len, JavaThread *thread);
+  static void new_array_nozero_C(Klass* array_klass, int len, JavaThread *thread);
 
   // Post-slow-path-allocation, pre-initializing-stores step for
   // implementing ReduceInitialCardMarks
@@ -152,11 +152,11 @@ class OptoRuntime : public AllStatic {
 
   // Allocate storage for a multi-dimensional arrays
   // Note: needs to be fixed for arbitrary number of dimensions
-  static void multianewarray2_C(klassOopDesc* klass, int len1, int len2, JavaThread *thread);
-  static void multianewarray3_C(klassOopDesc* klass, int len1, int len2, int len3, JavaThread *thread);
-  static void multianewarray4_C(klassOopDesc* klass, int len1, int len2, int len3, int len4, JavaThread *thread);
-  static void multianewarray5_C(klassOopDesc* klass, int len1, int len2, int len3, int len4, int len5, JavaThread *thread);
-  static void multianewarrayN_C(klassOopDesc* klass, arrayOopDesc* dims, JavaThread *thread);
+  static void multianewarray2_C(Klass* klass, int len1, int len2, JavaThread *thread);
+  static void multianewarray3_C(Klass* klass, int len1, int len2, int len3, JavaThread *thread);
+  static void multianewarray4_C(Klass* klass, int len1, int len2, int len3, int len4, JavaThread *thread);
+  static void multianewarray5_C(Klass* klass, int len1, int len2, int len3, int len4, int len5, JavaThread *thread);
+  static void multianewarrayN_C(Klass* klass, arrayOopDesc* dims, JavaThread *thread);
   static void g1_wb_pre_C(oopDesc* orig, JavaThread* thread);
   static void g1_wb_post_C(void* card_addr, JavaThread* thread);
 
@@ -283,6 +283,8 @@ private:
 
   static const TypeFunc* aescrypt_block_Type();
   static const TypeFunc* cipherBlockChaining_aescrypt_Type();
+
+  static const TypeFunc* updateBytesCRC32_Type();
 
   // leaf on stack replacement interpreter accessor types
   static const TypeFunc* osr_end_Type();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
  */
 
 // no precompiled headers
-#include "assembler_sparc.inline.hpp"
+#include "asm/macroAssembler.hpp"
 #include "classfile/classLoader.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmSymbols.hpp"
@@ -48,8 +48,8 @@
 #include "runtime/osThread.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/timer.hpp"
-#include "thread_linux.inline.hpp"
 #include "utilities/events.hpp"
 #include "utilities/vmError.hpp"
 
@@ -178,7 +178,7 @@ static void current_stack_region(address* bottom, size_t* size) {
     // JVM needs to know exact stack location, abort if it fails
     if (rslt != 0) {
       if (rslt == ENOMEM) {
-        vm_exit_out_of_memory(0, "pthread_getattr_np");
+        vm_exit_out_of_memory(0, OOM_MMAP_ERROR, "pthread_getattr_np");
       } else {
         fatal(err_msg("pthread_getattr_np failed with errno = %d", rslt));
       }
@@ -366,18 +366,9 @@ intptr_t* os::Linux::ucontext_get_fp(ucontext_t *uc) {
 
 // Utility functions
 
-extern "C" void Fetch32PFI();
-extern "C" void Fetch32Resume();
-extern "C" void FetchNPFI();
-extern "C" void FetchNResume();
-
 inline static bool checkPrefetch(sigcontext* uc, address pc) {
-  if (pc == (address) Fetch32PFI) {
-    set_cont_address(uc, address(Fetch32Resume));
-    return true;
-  }
-  if (pc == (address) FetchNPFI) {
-    set_cont_address(uc, address(FetchNResume));
+  if (StubRoutines::is_safefetch_fault(pc)) {
+    set_cont_address(uc, address(StubRoutines::continuation_for_safefetch_fault(pc)));
     return true;
   }
   return false;

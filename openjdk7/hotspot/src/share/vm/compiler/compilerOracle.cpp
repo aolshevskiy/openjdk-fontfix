@@ -28,7 +28,7 @@
 #include "memory/oopFactory.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/klass.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/symbol.hpp"
 #include "runtime/handles.inline.hpp"
@@ -67,7 +67,7 @@ class MethodMatcher : public CHeapObj<mtCompiler> {
 
   // utility method
   MethodMatcher* find(methodHandle method) {
-    Symbol* class_name  = Klass::cast(method->method_holder())->name();
+    Symbol* class_name  = method->method_holder()->name();
     Symbol* method_name = method->name();
     for (MethodMatcher* current = this; current != NULL; current = current->_next) {
       if (match(class_name, current->class_name(), current->_class_mode) &&
@@ -236,13 +236,6 @@ static const char * command_names[] = {
   "quiet",
   "help"
 };
-
-static const char * command_name(OracleCommand command) {
-  if (command < OracleFirstCommand || command >= OracleCommandCount) {
-    return "unknown command";
-  }
-  return command_names[command];
-}
 
 class MethodMatcher;
 static MethodMatcher* lists[OracleCommandCount] = { 0, };
@@ -455,7 +448,7 @@ void CompilerOracle::parse_from_line(char* line) {
     //      exclude java/lang/String indexOf
     //      exclude,java/lang/String,indexOf
     // For easy cut-and-paste of method names, allow VM output format
-    // as produced by methodOopDesc::print_short_name:
+    // as produced by Method::print_short_name:
     //      exclude java.lang.String::indexOf
     // For simple implementation convenience here, convert them all to space.
     if (have_colon) {
@@ -625,7 +618,7 @@ void CompilerOracle::append_exclude_to_file(methodHandle method) {
   assert(has_command_file(), "command file must be specified");
   fileStream stream(fopen(cc_file(), "at"));
   stream.print("exclude ");
-  Klass::cast(method->method_holder())->name()->print_symbol_on(&stream);
+  method->method_holder()->name()->print_symbol_on(&stream);
   stream.print(".");
   method->name()->print_symbol_on(&stream);
   method->signature()->print_symbol_on(&stream);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,9 +30,10 @@
 #include "memory/heap.hpp"
 #include "memory/space.hpp"
 #include "services/memoryUsage.hpp"
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/concurrentMarkSweep/compactibleFreeListSpace.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 // A memory pool represents the memory area that the VM manages.
 // The Java virtual machine has at least one memory pool
@@ -46,8 +47,6 @@ class MemoryManager;
 class SensorInfo;
 class Generation;
 class DefNewGeneration;
-class PSPermGen;
-class PermGen;
 class ThresholdSupport;
 
 class MemoryPool : public CHeapObj<mtInternal> {
@@ -187,7 +186,7 @@ public:
   }
 };
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 class CompactibleFreeListSpacePool : public CollectedMemoryPool {
 private:
   CompactibleFreeListSpace* _space;
@@ -201,7 +200,7 @@ public:
   MemoryUsage get_memory_usage();
   size_t used_in_bytes()            { return _space->used(); }
 };
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
 
 class GenerationPool : public CollectedMemoryPool {
@@ -221,6 +220,23 @@ public:
   CodeHeapPool(CodeHeap* codeHeap, const char* name, bool support_usage_threshold);
   MemoryUsage get_memory_usage();
   size_t used_in_bytes()            { return _codeHeap->allocated_capacity(); }
+};
+
+class MetaspacePool : public MemoryPool {
+  size_t calculate_max_size() const;
+  size_t capacity_in_bytes() const;
+ public:
+  MetaspacePool();
+  MemoryUsage get_memory_usage();
+  size_t used_in_bytes();
+};
+
+class CompressedKlassSpacePool : public MemoryPool {
+  size_t capacity_in_bytes() const;
+ public:
+  CompressedKlassSpacePool();
+  MemoryUsage get_memory_usage();
+  size_t used_in_bytes();
 };
 
 #endif // SHARE_VM_SERVICES_MEMORYPOOL_HPP

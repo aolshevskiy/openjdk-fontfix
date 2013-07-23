@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,6 @@
 /*
  */
 
-//package sun.nio.cs.ext;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -95,7 +94,7 @@ public abstract class DoubleByteEncoder
         try {
             while (sp < sl) {
                 char c = sa[sp];
-                if (Surrogate.is(c)) {
+                if (Character.isSurrogate(c)) {
                     if (sgp.parse(c, sa, sp, sl) < 0)
                         return sgp.error();
                     if (sl - sp < 2)
@@ -153,7 +152,7 @@ public abstract class DoubleByteEncoder
         try {
             while (src.hasRemaining()) {
                 char c = src.get();
-                if (Surrogate.is(c)) {
+                if (Character.isSurrogate(c)) {
                     int surr;
                     if ((surr = sgp.parse(c, src)) < 0)
                         return sgp.error();

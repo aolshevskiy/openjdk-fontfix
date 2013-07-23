@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package java.awt;
 
+import java.lang.annotation.Native;
+
 /**
  * The <code>DisplayMode</code> class encapsulates the bit depth, height,
  * width, and refresh rate of a <code>GraphicsDevice</code>. The ability to
@@ -43,6 +45,7 @@ package java.awt;
  * @author Michael Martak
  * @since 1.4
  */
+
 public final class DisplayMode {
 
     private Dimension size;
@@ -89,7 +92,7 @@ public final class DisplayMode {
      * display mode.
      * @see #getBitDepth
      */
-    public final static int BIT_DEPTH_MULTI = -1;
+    @Native public final static int BIT_DEPTH_MULTI = -1;
 
     /**
      * Returns the bit depth of the display, in bits per pixel.  This may be
@@ -107,7 +110,7 @@ public final class DisplayMode {
      * Value of the refresh rate if not known.
      * @see #getRefreshRate
      */
-    public final static int REFRESH_RATE_UNKNOWN = 0;
+    @Native public final static int REFRESH_RATE_UNKNOWN = 0;
 
     /**
      * Returns the refresh rate of the display, in hertz.  This may be

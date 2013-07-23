@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -125,6 +125,9 @@ address StubRoutines::_aescrypt_decryptBlock               = NULL;
 address StubRoutines::_cipherBlockChaining_encryptAESCrypt = NULL;
 address StubRoutines::_cipherBlockChaining_decryptAESCrypt = NULL;
 
+address StubRoutines::_updateBytesCRC32 = NULL;
+address StubRoutines::_crc_table_adr = NULL;
+
 double (* StubRoutines::_intrinsic_log   )(double) = NULL;
 double (* StubRoutines::_intrinsic_log10 )(double) = NULL;
 double (* StubRoutines::_intrinsic_exp   )(double) = NULL;
@@ -132,6 +135,13 @@ double (* StubRoutines::_intrinsic_pow   )(double, double) = NULL;
 double (* StubRoutines::_intrinsic_sin   )(double) = NULL;
 double (* StubRoutines::_intrinsic_cos   )(double) = NULL;
 double (* StubRoutines::_intrinsic_tan   )(double) = NULL;
+
+address StubRoutines::_safefetch32_entry                 = NULL;
+address StubRoutines::_safefetch32_fault_pc              = NULL;
+address StubRoutines::_safefetch32_continuation_pc       = NULL;
+address StubRoutines::_safefetchN_entry                  = NULL;
+address StubRoutines::_safefetchN_fault_pc               = NULL;
+address StubRoutines::_safefetchN_continuation_pc        = NULL;
 
 // Initialization
 //
@@ -147,7 +157,7 @@ void StubRoutines::initialize1() {
     TraceTime timer("StubRoutines generation 1", TraceStartupTime);
     _code1 = BufferBlob::create("StubRoutines (1)", code_size1);
     if (_code1 == NULL) {
-      vm_exit_out_of_memory(code_size1, "CodeCache: no room for StubRoutines (1)");
+      vm_exit_out_of_memory(code_size1, OOM_MALLOC_ERROR, "CodeCache: no room for StubRoutines (1)");
     }
     CodeBuffer buffer(_code1);
     StubGenerator_generate(&buffer, false);
@@ -199,7 +209,7 @@ void StubRoutines::initialize2() {
     TraceTime timer("StubRoutines generation 2", TraceStartupTime);
     _code2 = BufferBlob::create("StubRoutines (2)", code_size2);
     if (_code2 == NULL) {
-      vm_exit_out_of_memory(code_size2, "CodeCache: no room for StubRoutines (2)");
+      vm_exit_out_of_memory(code_size2, OOM_MALLOC_ERROR, "CodeCache: no room for StubRoutines (2)");
     }
     CodeBuffer buffer(_code2);
     StubGenerator_generate(&buffer, true);
@@ -425,6 +435,7 @@ address StubRoutines::select_fill_function(BasicType t, bool aligned, const char
   case T_ARRAY:
   case T_OBJECT:
   case T_NARROWOOP:
+  case T_NARROWKLASS:
   case T_ADDRESS:
     // Currently unsupported
     return NULL;

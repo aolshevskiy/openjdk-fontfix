@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -99,7 +99,7 @@ void ObjectStartArray::set_covered_region(MemRegion mr) {
     // Expand
     size_t expand_by = requested_blocks_size_in_bytes - current_blocks_size_in_bytes;
     if (!_virtual_space.expand_by(expand_by)) {
-      vm_exit_out_of_memory(expand_by, "object start array expansion");
+      vm_exit_out_of_memory(expand_by, OOM_MMAP_ERROR, "object start array expansion");
     }
     // Clear *only* the newly allocated region
     memset(_blocks_region.end(), clean_block, expand_by);
@@ -140,8 +140,10 @@ bool ObjectStartArray::object_starts_in_range(HeapWord* start_addr,
     }
   }
   // No object starts in this slice; verify this using
-  // more traditional methods:
-  assert(object_start(end_addr - 1) <= start_addr,
+  // more traditional methods:  Note that no object can
+  // start before the start_addr.
+  assert(end_addr == start_addr ||
+         object_start(end_addr - 1) <= start_addr,
          "Oops an object does start in this slice?");
   return false;
 }

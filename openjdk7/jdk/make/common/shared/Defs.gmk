@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -208,8 +208,8 @@ ifndef JDK_MAJOR_VERSION
 endif
 
 ifndef JDK_MINOR_VERSION
-  JDK_MINOR_VERSION      = 7
-  PREVIOUS_MINOR_VERSION = 6
+  JDK_MINOR_VERSION      = 8
+  PREVIOUS_MINOR_VERSION = 7
 endif
 
 ifndef JDK_MICRO_VERSION
@@ -609,14 +609,18 @@ endif
 #  2) ant attempts to detect JDK location based on java.exe location
 #     This is fragile as developer may have JRE first on the PATH. 
 #     To workaround this we will specify JAVA_HOME explicitly
+#  3) Sometimes we need to run ant with the boot jdk, sometimes with the import
+#     jdk, sometimes with the jdk we are building (see deploy repo).
 
 ANT_TMPDIR = $(ABS_OUTPUTDIR)/tmp
-ANT_WORKAROUNDS = ANT_OPTS=-Djava.io.tmpdir='$(ANT_TMPDIR)' JAVA_HOME='$(BOOTDIR)'
+ANT_WORKAROUNDS = ANT_OPTS=-Djava.io.tmpdir='$(ANT_TMPDIR)'
 
 ifeq ($(ANT_HOME),)
-  ANT = $(ANT_WORKAROUNDS) ant
+  ANT = $(ANT_WORKAROUNDS) JAVA_HOME='$(BOOTDIR)' ant
+  ANT_WITH_IMPORT = $(ANT_WORKAROUNDS) JAVA_HOME='$(JDK_IMPORT_PATH)' ant
 else
-  ANT = $(ANT_WORKAROUNDS) $(ANT_HOME)/bin/ant
+  ANT = $(ANT_WORKAROUNDS) JAVA_HOME='$(BOOTDIR)' $(ANT_HOME)/bin/ant
+  ANT_WITH_IMPORT = $(ANT_WORKAROUNDS) JAVA_HOME='$(JDK_IMPORT_PATH)' $(ANT_HOME)/bin/ant
 endif
 
 ifdef ALT_COPYRIGHT_YEAR

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,7 +46,7 @@ import java.lang.reflect.Method;
  * @author Jitendra Kotamraju
  * @author Kohsuke Kawaguchi
  */
-public abstract class Invoker {
+public abstract class Invoker extends com.sun.xml.internal.ws.server.sei.Invoker {
     /**
      * Called by {@link WSEndpoint} when it's set up.
      *
@@ -82,11 +82,6 @@ public abstract class Invoker {
      * This method is guaranteed to be only called once by {@link WSEndpoint}.
      */
     public void dispose() {}
-
-    /**
-     *
-     */
-    public abstract Object invoke( @NotNull Packet p, @NotNull Method m, @NotNull Object... args ) throws InvocationTargetException, IllegalAccessException;
 
     /**
      * Invokes {@link Provider#invoke(Object)}

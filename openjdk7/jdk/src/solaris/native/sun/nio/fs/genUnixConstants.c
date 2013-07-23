@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -123,6 +123,7 @@ int main(int argc, const char* argv[]) {
     DEF(ENODATA);
 #endif
     DEF(ERANGE);
+    DEF(EMFILE);
 
     // flags used with openat/unlinkat/etc.
 #if defined(AT_SYMLINK_NOFOLLOW) && defined(AT_REMOVEDIR)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.xml.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -100,18 +99,6 @@ public final class EncodingMessages {
         return localizer.localize(localizableNESTED_DESERIALIZATION_ERROR(arg0));
     }
 
-    public static Localizable localizableXSD_UNKNOWN_PREFIX(Object arg0) {
-        return messageFactory.getMessage("xsd.unknownPrefix", arg0);
-    }
-
-    /**
-     * unknown prefix "{0}"
-     *
-     */
-    public static String XSD_UNKNOWN_PREFIX(Object arg0) {
-        return localizer.localize(localizableXSD_UNKNOWN_PREFIX(arg0));
-    }
-
     public static Localizable localizableNESTED_ENCODING_ERROR(Object arg0) {
         return messageFactory.getMessage("nestedEncodingError", arg0);
     }
@@ -124,28 +111,16 @@ public final class EncodingMessages {
         return localizer.localize(localizableNESTED_ENCODING_ERROR(arg0));
     }
 
-    public static Localizable localizableUNKNOWN_OBJECT() {
-        return messageFactory.getMessage("unknown.object");
+    public static Localizable localizableXSD_UNKNOWN_PREFIX(Object arg0) {
+        return messageFactory.getMessage("xsd.unknownPrefix", arg0);
     }
 
     /**
-     * don't know how to write object: {0}
+     * unknown prefix "{0}"
      *
      */
-    public static String UNKNOWN_OBJECT() {
-        return localizer.localize(localizableUNKNOWN_OBJECT());
-    }
-
-    public static Localizable localizableINCORRECT_MESSAGEINFO() {
-        return messageFactory.getMessage("incorrect.messageinfo");
-    }
-
-    /**
-     * can't write object! unexpected type: {0}
-     *
-     */
-    public static String INCORRECT_MESSAGEINFO() {
-        return localizer.localize(localizableINCORRECT_MESSAGEINFO());
+    public static String XSD_UNKNOWN_PREFIX(Object arg0) {
+        return localizer.localize(localizableXSD_UNKNOWN_PREFIX(arg0));
     }
 
     public static Localizable localizableNESTED_SERIALIZATION_ERROR(Object arg0) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -255,7 +255,7 @@ public class Font implements java.io.Serializable
      * @serial
      * @see #getAttributes()
      */
-    private Hashtable fRequestedAttributes;
+    private Hashtable<Object, Object> fRequestedAttributes;
 
     /*
      * Constants to be used for logical font family names.
@@ -447,6 +447,7 @@ public class Font implements java.io.Serializable
     //       We implement this functionality in a package-private method
     //       to insure that it cannot be overridden by client subclasses.
     //       DO NOT INVOKE CLIENT CODE ON THIS THREAD!
+    @SuppressWarnings("deprecation")
     final FontPeer getPeer_NoClientCode() {
         if(peer == null) {
             Toolkit tk = Toolkit.getDefaultToolkit();
@@ -872,6 +873,33 @@ public class Font implements java.io.Serializable
     public static Font createFont(int fontFormat, InputStream fontStream)
         throws java.awt.FontFormatException, java.io.IOException {
 
+        if (hasTempPermission()) {
+            return createFont0(fontFormat, fontStream, null);
+        }
+
+        // Otherwise, be extra conscious of pending temp file creation and
+        // resourcefully handle the temp file resources, among other things.
+        CreatedFontTracker tracker = CreatedFontTracker.getTracker();
+        boolean acquired = false;
+        try {
+            acquired = tracker.acquirePermit();
+            if (!acquired) {
+                throw new IOException("Timed out waiting for resources.");
+            }
+            return createFont0(fontFormat, fontStream, tracker);
+        } catch (InterruptedException e) {
+            throw new IOException("Problem reading font data.");
+        } finally {
+            if (acquired) {
+                tracker.releasePermit();
+            }
+        }
+    }
+
+    private static Font createFont0(int fontFormat, InputStream fontStream,
+                                    CreatedFontTracker tracker)
+        throws java.awt.FontFormatException, java.io.IOException {
+
         if (fontFormat != Font.TRUETYPE_FONT &&
             fontFormat != Font.TYPE1_FONT) {
             throw new IllegalArgumentException ("font format not recognized");
@@ -885,9 +913,11 @@ public class Font implements java.io.Serializable
                     }
                 }
             );
+            if (tracker != null) {
+                tracker.add(tFile);
+            }
 
             int totalSize = 0;
-            CreatedFontTracker tracker = null;
             try {
                 final OutputStream outStream =
                     AccessController.doPrivileged(
@@ -897,8 +927,8 @@ public class Font implements java.io.Serializable
                             }
                         }
                     );
-                if (!hasTempPermission()) {
-                    tracker = CreatedFontTracker.getTracker();
+                if (tracker != null) {
+                    tracker.set(tFile, outStream);
                 }
                 try {
                     byte[] buf = new byte[8192];
@@ -908,11 +938,11 @@ public class Font implements java.io.Serializable
                             break;
                         }
                         if (tracker != null) {
-                            if (totalSize+bytesRead > tracker.MAX_FILE_SIZE) {
+                            if (totalSize+bytesRead > CreatedFontTracker.MAX_FILE_SIZE) {
                                 throw new IOException("File too big.");
                             }
                             if (totalSize+tracker.getNumBytes() >
-                                tracker.MAX_TOTAL_BYTES)
+                                CreatedFontTracker.MAX_TOTAL_BYTES)
                               {
                                 throw new IOException("Total files too big.");
                             }
@@ -939,6 +969,9 @@ public class Font implements java.io.Serializable
                 Font font = new Font(tFile, fontFormat, true, tracker);
                 return font;
             } finally {
+                if (tracker != null) {
+                    tracker.remove(tFile);
+                }
                 if (!copiedFontData) {
                     if (tracker != null) {
                         tracker.subBytes(totalSize);
@@ -2127,11 +2160,11 @@ public class Font implements java.io.Serializable
         return false;   // REMIND always safe, but prevents caller optimize
     }
 
-    private transient SoftReference flmref;
+    private transient SoftReference<FontLineMetrics> flmref;
     private FontLineMetrics defaultLineMetrics(FontRenderContext frc) {
         FontLineMetrics flm = null;
         if (flmref == null
-            || (flm = (FontLineMetrics)flmref.get()) == null
+            || (flm = flmref.get()) == null
             || !flm.frc.equals(frc)) {
 
             /* The device transform in the frc is not used in obtaining line
@@ -2195,7 +2228,7 @@ public class Font implements java.io.Serializable
                                              ssOffset, italicAngle);
 
             flm = new FontLineMetrics(0, cm, frc);
-            flmref = new SoftReference(flm);
+            flmref = new SoftReference<FontLineMetrics>(flm);
         }
 
         return (FontLineMetrics)flm.clone();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -197,6 +197,10 @@ final class Config {
     // (false).
     private boolean useEcX963Encoding = false;
 
+    // Flag to indicate whether NSS should favour performance (false) or
+    // memory footprint (true).
+    private boolean nssOptimizeSpace = false;
+
     private Config(String filename, InputStream in) throws IOException {
         if (in == null) {
             if (filename.startsWith("--")) {
@@ -329,6 +333,10 @@ final class Config {
         return useEcX963Encoding;
     }
 
+    boolean getNssOptimizeSpace() {
+        return nssOptimizeSpace;
+    }
+
     private static String expand(final String s) throws IOException {
         try {
             return PropertyExpander.expand(s);
@@ -451,6 +459,8 @@ final class Config {
                 nssUseSecmodTrust = parseBooleanEntry(word);
             } else if (word.equals("useEcX963Encoding")) {
                 useEcX963Encoding = parseBooleanEntry(word);
+            } else if (word.equals("nssOptimizeSpace")) {
+                nssOptimizeSpace = parseBooleanEntry(word);
             } else {
                 throw new ConfigurationException
                         ("Unknown keyword '" + word + "', line " + st.lineno());
@@ -563,12 +573,13 @@ final class Config {
 
     private boolean parseBoolean() throws IOException {
         String val = parseWord();
-        if (val.equals("true")) {
-            return true;
-        } else if (val.equals("false")) {
-            return false;
-        } else {
-            throw excToken("Expected boolean value, read:");
+        switch (val) {
+            case "true":
+                return true;
+            case "false":
+                return false;
+            default:
+                throw excToken("Expected boolean value, read:");
         }
     }
 
@@ -642,9 +653,7 @@ final class Config {
     //
 
     private String parseLibrary(String keyword) throws IOException {
-        checkDup(keyword);
-        parseEquals();
-        String lib = parseLine();
+        String lib = parseStringEntry(keyword);
         lib = expand(lib);
         int i = lib.indexOf("/$ISA/");
         if (i != -1) {
@@ -897,14 +906,15 @@ final class Config {
 
     private String parseOperation() throws IOException {
         String op = parseWord();
-        if (op.equals("*")) {
-            return TemplateManager.O_ANY;
-        } else if (op.equals("generate")) {
-            return TemplateManager.O_GENERATE;
-        } else if (op.equals("import")) {
-            return TemplateManager.O_IMPORT;
-        } else {
-            throw excLine("Unknown operation " + op);
+        switch (op) {
+            case "*":
+                return TemplateManager.O_ANY;
+            case "generate":
+                return TemplateManager.O_GENERATE;
+            case "import":
+                return TemplateManager.O_IMPORT;
+            default:
+                throw excLine("Unknown operation " + op);
         }
     }
 
@@ -989,6 +999,7 @@ final class Config {
 }
 
 class ConfigurationException extends IOException {
+    private static final long serialVersionUID = 254492758807673194L;
     ConfigurationException(String msg) {
         super(msg);
     }

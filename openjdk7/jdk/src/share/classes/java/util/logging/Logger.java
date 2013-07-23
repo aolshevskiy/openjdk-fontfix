@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,10 +26,18 @@
 
 package java.util.logging;
 
-import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.security.*;
 import java.lang.ref.WeakReference;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.MissingResourceException;
+import java.util.ResourceBundle;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Supplier;
+import sun.reflect.CallerSensitive;
+import sun.reflect.Reflection;
 
 /**
  * A Logger object is used to log messages for a specific
@@ -96,16 +104,37 @@ import java.lang.ref.WeakReference;
  * for example a format string "{0} {1}" would format two parameters
  * as strings.
  * <p>
+ * A set of methods alternatively take a "msgSupplier" instead of a "msg"
+ * argument.  These methods take a {@link Supplier}{@code <String>} function
+ * which is invoked to construct the desired log message only when the message
+ * actually is to be logged based on the effective log level thus eliminating
+ * unnecessary message construction. For example, if the developer wants to
+ * log system health status for diagnosis, with the String-accepting version,
+ * the code would look like:
+ <pre><code>
+
+   class DiagnosisMessages {
+     static String systemHealthStatus() {
+       // collect system health information
+       ...
+     }
+   }
+   ...
+   logger.log(Level.FINER, DiagnosisMessages.systemHealthStatus());
+</code></pre>
+ * With the above code, the health status is collected unnecessarily even when
+ * the log level FINER is disabled. With the Supplier-accepting version as
+ * below, the status will only be collected when the log level FINER is
+ * enabled.
+ <pre><code>
+
+   logger.log(Level.FINER, DiagnosisMessages::systemHealthStatus);
+</code></pre>
+ * <p>
  * When mapping ResourceBundle names to ResourceBundles, the Logger
  * will first try to use the Thread's ContextClassLoader.  If that
- * is null it will try the SystemClassLoader instead.  As a temporary
- * transition feature in the initial implementation, if the Logger is
- * unable to locate a ResourceBundle from the ContextClassLoader or
- * SystemClassLoader the Logger will also search up the class stack
- * and use successive calling ClassLoaders to try to locate a ResourceBundle.
- * (This call stack search is to allow containers to transition to
- * using ContextClassLoaders and is likely to be removed in future
- * versions.)
+ * is null it will try the
+ * {@linkplain java.lang.ClassLoader#getSystemClassLoader() system ClassLoader} instead.
  * <p>
  * Formatting (including localization) is the responsibility of
  * the output Handler, which will typically call a Formatter.
@@ -162,8 +191,6 @@ import java.lang.ref.WeakReference;
  *
  * @since 1.4
  */
-
-
 public class Logger {
     private static final Handler emptyHandlers[] = new Handler[0];
     private static final int offValue = Level.OFF.intValue();
@@ -189,6 +216,7 @@ public class Logger {
     private ArrayList<LogManager.LoggerWeakRef> kids;   // WeakReferences to loggers that have us as parent
     private volatile Level levelObject;
     private volatile int levelValue;  // current effective level value
+    private WeakReference<ClassLoader> callersClassLoaderRef;
 
     /**
      * GLOBAL_LOGGER_NAME is a name for the global logger.
@@ -204,6 +232,27 @@ public class Logger {
      * @since 1.7
      */
     public static final Logger getGlobal() {
+        // In order to break a cyclic dependence between the LogManager
+        // and Logger static initializers causing deadlocks, the global
+        // logger is created with a special constructor that does not
+        // initialize its log manager.
+        //
+        // If an application calls Logger.getGlobal() before any logger
+        // has been initialized, it is therefore possible that the
+        // LogManager class has not been initialized yet, and therefore
+        // Logger.global.manager will be null.
+        //
+        // In order to finish the initialization of the global logger, we
+        // will therefore call LogManager.getLogManager() here.
+        //
+        // Care must be taken *not* to call Logger.getGlobal() in
+        // LogManager static initializers in order to avoid such
+        // deadlocks.
+        //
+        if (global != null && global.manager == null) {
+            // Complete initialization of the global Logger.
+            global.manager = LogManager.getLogManager();
+        }
         return global;
     }
 
@@ -249,13 +298,29 @@ public class Logger {
      *             no corresponding resource can be found.
      */
     protected Logger(String name, String resourceBundleName) {
+        this(name, resourceBundleName, null);
+    }
+
+    Logger(String name, String resourceBundleName, Class<?> caller) {
         this.manager = LogManager.getLogManager();
-        if (resourceBundleName != null) {
-            // Note: we may get a MissingResourceException here.
-            setupResourceInfo(resourceBundleName);
-        }
+        setupResourceInfo(resourceBundleName, caller);
         this.name = name;
         levelValue = Level.INFO.intValue();
+    }
+
+    private void setCallersClassLoaderRef(Class<?> caller) {
+        ClassLoader callersClassLoader = ((caller != null)
+                                         ? caller.getClassLoader()
+                                         : null);
+        if (callersClassLoader != null) {
+            this.callersClassLoaderRef = new WeakReference(callersClassLoader);
+        }
+    }
+
+    private ClassLoader getCallersClassLoader() {
+        return (callersClassLoaderRef != null)
+                ? callersClassLoaderRef.get()
+                : null;
     }
 
     // This constructor is used only to create the global Logger.
@@ -303,18 +368,17 @@ public class Logger {
         }
     }
 
-    private static Logger demandLogger(String name, String resourceBundleName) {
+    private static Logger demandLogger(String name, String resourceBundleName, Class<?> caller) {
         LogManager manager = LogManager.getLogManager();
         SecurityManager sm = System.getSecurityManager();
         if (sm != null && !SystemLoggerHelper.disableCallerCheck) {
-            // 0: Reflection 1: Logger.demandLogger 2: Logger.getLogger 3: caller
-            final int SKIP_FRAMES = 3;
-            Class<?> caller = sun.reflect.Reflection.getCallerClass(SKIP_FRAMES);
             if (caller.getClassLoader() == null) {
                 return manager.demandSystemLogger(name, resourceBundleName);
             }
         }
-        return manager.demandLogger(name, resourceBundleName);
+        return manager.demandLogger(name, resourceBundleName, caller);
+        // ends up calling new Logger(name, resourceBundleName, caller)
+        // iff the logger doesn't exist already
     }
 
     /**
@@ -347,6 +411,7 @@ public class Logger {
 
     // Synchronization is not required here. All synchronization for
     // adding a new Logger object is handled by LogManager.addLogger().
+    @CallerSensitive
     public static Logger getLogger(String name) {
         // This method is intentionally not a wrapper around a call
         // to getLogger(name, resourceBundleName). If it were then
@@ -358,7 +423,7 @@ public class Logger {
         // would throw an IllegalArgumentException in the second call
         // because the wrapper would result in an attempt to replace
         // the existing "resourceBundleForFoo" with null.
-        return demandLogger(name, null);
+        return demandLogger(name, null, Reflection.getCallerClass());
     }
 
     /**
@@ -404,15 +469,21 @@ public class Logger {
 
     // Synchronization is not required here. All synchronization for
     // adding a new Logger object is handled by LogManager.addLogger().
+    @CallerSensitive
     public static Logger getLogger(String name, String resourceBundleName) {
-        Logger result = demandLogger(name, resourceBundleName);
-        if (result.resourceBundleName == null) {
-            // Note: we may get a MissingResourceException here.
-            result.setupResourceInfo(resourceBundleName);
-        } else if (!result.resourceBundleName.equals(resourceBundleName)) {
-            throw new IllegalArgumentException(result.resourceBundleName +
-                                " != " + resourceBundleName);
-        }
+        Class<?> callerClass = Reflection.getCallerClass();
+        Logger result = demandLogger(name, resourceBundleName, callerClass);
+
+        // MissingResourceException or IllegalArgumentException can be
+        // thrown by setupResourceInfo().
+        // We have to set the callers ClassLoader here in case demandLogger
+        // above found a previously created Logger.  This can happen, for
+        // example, if Logger.getLogger(name) is called and subsequently
+        // Logger.getLogger(name, resourceBundleName) is called.  In this case
+        // we won't necessarily have the correct classloader saved away, so
+        // we need to set it here, too.
+
+        result.setupResourceInfo(resourceBundleName, callerClass);
         return result;
     }
 
@@ -479,11 +550,13 @@ public class Logger {
 
     // Synchronization is not required here. All synchronization for
     // adding a new anonymous Logger object is handled by doSetParent().
+    @CallerSensitive
     public static Logger getAnonymousLogger(String resourceBundleName) {
         LogManager manager = LogManager.getLogManager();
         // cleanup some Loggers that have been GC'ed
         manager.drainLoggerRefQueueBounded();
-        Logger result = new Logger(null, resourceBundleName);
+        Logger result = new Logger(null, resourceBundleName,
+                                   Reflection.getCallerClass());
         result.anonymous = true;
         Logger root = manager.getLogger("");
         result.doSetParent(root);
@@ -499,7 +572,7 @@ public class Logger {
      * @return localization bundle (may be null)
      */
     public ResourceBundle getResourceBundle() {
-        return findResourceBundle(getResourceBundleName());
+        return findResourceBundle(getResourceBundleName(), true);
     }
 
     /**
@@ -581,7 +654,7 @@ public class Logger {
         String ebname = getEffectiveResourceBundleName();
         if (ebname != null && !ebname.equals(SYSTEM_LOGGER_RB_NAME)) {
             lr.setResourceBundleName(ebname);
-            lr.setResourceBundle(findResourceBundle(ebname));
+            lr.setResourceBundle(findResourceBundle(ebname, true));
         }
         log(lr);
     }
@@ -606,6 +679,27 @@ public class Logger {
             return;
         }
         LogRecord lr = new LogRecord(level, msg);
+        doLog(lr);
+    }
+
+    /**
+     * Log a message, which is only to be constructed if the logging level
+     * is such that the message will actually be logged.
+     * <p>
+     * If the logger is currently enabled for the given message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   level   One of the message level identifiers, e.g., SEVERE
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     */
+    public void log(Level level, Supplier<String> msgSupplier) {
+        if (level.intValue() < levelValue || levelValue == offValue) {
+            return;
+        }
+        LogRecord lr = new LogRecord(level, msgSupplier.get());
         doLog(lr);
     }
 
@@ -658,7 +752,7 @@ public class Logger {
      * which is forwarded to all registered output handlers.
      * <p>
      * Note that the thrown argument is stored in the LogRecord thrown
-     * property, rather than the LogRecord parameters property.  Thus is it
+     * property, rather than the LogRecord parameters property.  Thus it is
      * processed specially by output Formatters and is not treated
      * as a formatting parameter to the LogRecord message property.
      * <p>
@@ -671,6 +765,34 @@ public class Logger {
             return;
         }
         LogRecord lr = new LogRecord(level, msg);
+        lr.setThrown(thrown);
+        doLog(lr);
+    }
+
+    /**
+     * Log a lazily constructed message, with associated Throwable information.
+     * <p>
+     * If the logger is currently enabled for the given message level then the
+     * message is constructed by invoking the provided supplier function. The
+     * message and the given {@link Throwable} are then stored in a {@link
+     * LogRecord} which is forwarded to all registered output handlers.
+     * <p>
+     * Note that the thrown argument is stored in the LogRecord thrown
+     * property, rather than the LogRecord parameters property.  Thus it is
+     * processed specially by output Formatters and is not treated
+     * as a formatting parameter to the LogRecord message property.
+     * <p>
+     * @param   level   One of the message level identifiers, e.g., SEVERE
+     * @param   thrown  Throwable associated with log message.
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void log(Level level, Throwable thrown, Supplier<String> msgSupplier) {
+        if (level.intValue() < levelValue || levelValue == offValue) {
+            return;
+        }
+        LogRecord lr = new LogRecord(level, msgSupplier.get());
         lr.setThrown(thrown);
         doLog(lr);
     }
@@ -697,6 +819,33 @@ public class Logger {
             return;
         }
         LogRecord lr = new LogRecord(level, msg);
+        lr.setSourceClassName(sourceClass);
+        lr.setSourceMethodName(sourceMethod);
+        doLog(lr);
+    }
+
+    /**
+     * Log a lazily constructed message, specifying source class and method,
+     * with no arguments.
+     * <p>
+     * If the logger is currently enabled for the given message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   level   One of the message level identifiers, e.g., SEVERE
+     * @param   sourceClass    name of class that issued the logging request
+     * @param   sourceMethod   name of method that issued the logging request
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void logp(Level level, String sourceClass, String sourceMethod,
+                     Supplier<String> msgSupplier) {
+        if (level.intValue() < levelValue || levelValue == offValue) {
+            return;
+        }
+        LogRecord lr = new LogRecord(level, msgSupplier.get());
         lr.setSourceClassName(sourceClass);
         lr.setSourceMethodName(sourceMethod);
         doLog(lr);
@@ -764,7 +913,7 @@ public class Logger {
      * which is forwarded to all registered output handlers.
      * <p>
      * Note that the thrown argument is stored in the LogRecord thrown
-     * property, rather than the LogRecord parameters property.  Thus is it
+     * property, rather than the LogRecord parameters property.  Thus it is
      * processed specially by output Formatters and is not treated
      * as a formatting parameter to the LogRecord message property.
      * <p>
@@ -775,11 +924,45 @@ public class Logger {
      * @param   thrown  Throwable associated with log message.
      */
     public void logp(Level level, String sourceClass, String sourceMethod,
-                                                        String msg, Throwable thrown) {
+                     String msg, Throwable thrown) {
         if (level.intValue() < levelValue || levelValue == offValue) {
             return;
         }
         LogRecord lr = new LogRecord(level, msg);
+        lr.setSourceClassName(sourceClass);
+        lr.setSourceMethodName(sourceMethod);
+        lr.setThrown(thrown);
+        doLog(lr);
+    }
+
+    /**
+     * Log a lazily constructed message, specifying source class and method,
+     * with associated Throwable information.
+     * <p>
+     * If the logger is currently enabled for the given message level then the
+     * message is constructed by invoking the provided supplier function. The
+     * message and the given {@link Throwable} are then stored in a {@link
+     * LogRecord} which is forwarded to all registered output handlers.
+     * <p>
+     * Note that the thrown argument is stored in the LogRecord thrown
+     * property, rather than the LogRecord parameters property.  Thus it is
+     * processed specially by output Formatters and is not treated
+     * as a formatting parameter to the LogRecord message property.
+     * <p>
+     * @param   level   One of the message level identifiers, e.g., SEVERE
+     * @param   sourceClass    name of class that issued the logging request
+     * @param   sourceMethod   name of method that issued the logging request
+     * @param   thrown  Throwable associated with log message.
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void logp(Level level, String sourceClass, String sourceMethod,
+                     Throwable thrown, Supplier<String> msgSupplier) {
+        if (level.intValue() < levelValue || levelValue == offValue) {
+            return;
+        }
+        LogRecord lr = new LogRecord(level, msgSupplier.get());
         lr.setSourceClassName(sourceClass);
         lr.setSourceMethodName(sourceMethod);
         lr.setThrown(thrown);
@@ -798,7 +981,7 @@ public class Logger {
         lr.setLoggerName(name);
         if (rbname != null) {
             lr.setResourceBundleName(rbname);
-            lr.setResourceBundle(findResourceBundle(rbname));
+            lr.setResourceBundle(findResourceBundle(rbname, false));
         }
         log(lr);
     }
@@ -822,7 +1005,6 @@ public class Logger {
      *                         can be null
      * @param   msg     The string message (or a key in the message catalog)
      */
-
     public void logrb(Level level, String sourceClass, String sourceMethod,
                                 String bundleName, String msg) {
         if (level.intValue() < levelValue || levelValue == offValue) {
@@ -912,7 +1094,7 @@ public class Logger {
      * then the msg string is not localized.
      * <p>
      * Note that the thrown argument is stored in the LogRecord thrown
-     * property, rather than the LogRecord parameters property.  Thus is it
+     * property, rather than the LogRecord parameters property.  Thus it is
      * processed specially by output Formatters and is not treated
      * as a formatting parameter to the LogRecord message property.
      * <p>
@@ -1057,7 +1239,7 @@ public class Logger {
      * LogRecord's message is set to "THROW".
      * <p>
      * Note that the thrown argument is stored in the LogRecord thrown
-     * property, rather than the LogRecord parameters property.  Thus is it
+     * property, rather than the LogRecord parameters property.  Thus it is
      * processed specially by output Formatters and is not treated
      * as a formatting parameter to the LogRecord message property.
      * <p>
@@ -1192,6 +1374,130 @@ public class Logger {
         log(Level.FINEST, msg);
     }
 
+    //=======================================================================
+    // Start of simple convenience methods using level names as method names
+    // and use Supplier<String>
+    //=======================================================================
+
+    /**
+     * Log a SEVERE message, which is only to be constructed if the logging
+     * level is such that the message will actually be logged.
+     * <p>
+     * If the logger is currently enabled for the SEVERE message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void severe(Supplier<String> msgSupplier) {
+        log(Level.SEVERE, msgSupplier);
+    }
+
+    /**
+     * Log a WARNING message, which is only to be constructed if the logging
+     * level is such that the message will actually be logged.
+     * <p>
+     * If the logger is currently enabled for the WARNING message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void warning(Supplier<String> msgSupplier) {
+        log(Level.WARNING, msgSupplier);
+    }
+
+    /**
+     * Log a INFO message, which is only to be constructed if the logging
+     * level is such that the message will actually be logged.
+     * <p>
+     * If the logger is currently enabled for the INFO message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void info(Supplier<String> msgSupplier) {
+        log(Level.INFO, msgSupplier);
+    }
+
+    /**
+     * Log a CONFIG message, which is only to be constructed if the logging
+     * level is such that the message will actually be logged.
+     * <p>
+     * If the logger is currently enabled for the CONFIG message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void config(Supplier<String> msgSupplier) {
+        log(Level.CONFIG, msgSupplier);
+    }
+
+    /**
+     * Log a FINE message, which is only to be constructed if the logging
+     * level is such that the message will actually be logged.
+     * <p>
+     * If the logger is currently enabled for the FINE message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void fine(Supplier<String> msgSupplier) {
+        log(Level.FINE, msgSupplier);
+    }
+
+    /**
+     * Log a FINER message, which is only to be constructed if the logging
+     * level is such that the message will actually be logged.
+     * <p>
+     * If the logger is currently enabled for the FINER message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void finer(Supplier<String> msgSupplier) {
+        log(Level.FINER, msgSupplier);
+    }
+
+    /**
+     * Log a FINEST message, which is only to be constructed if the logging
+     * level is such that the message will actually be logged.
+     * <p>
+     * If the logger is currently enabled for the FINEST message
+     * level then the message is constructed by invoking the provided
+     * supplier function and forwarded to all the registered output
+     * Handler objects.
+     * <p>
+     * @param   msgSupplier   A function, which when called, produces the
+     *                        desired log message
+     * @since   1.8
+     */
+    public void finest(Supplier<String> msgSupplier) {
+        log(Level.FINEST, msgSupplier);
+    }
+
     //================================================================
     // End of convenience methods
     //================================================================
@@ -1322,12 +1628,6 @@ public class Logger {
         return useParentHandlers;
     }
 
-    // Private utility method to map a resource bundle name to an
-    // actual resource bundle, using a simple one-entry cache.
-    // Returns null for a null name.
-    // May also return null if we can't find the resource bundle and
-    // there is no suitable previous cached value.
-
     static final String SYSTEM_LOGGER_RB_NAME = "sun.util.logging.resources.logging";
 
     private static ResourceBundle findSystemResourceBundle(final Locale locale) {
@@ -1345,7 +1645,26 @@ public class Logger {
         });
     }
 
-    private synchronized ResourceBundle findResourceBundle(String name) {
+    /**
+     * Private utility method to map a resource bundle name to an
+     * actual resource bundle, using a simple one-entry cache.
+     * Returns null for a null name.
+     * May also return null if we can't find the resource bundle and
+     * there is no suitable previous cached value.
+     *
+     * @param name the ResourceBundle to locate
+     * @param userCallersClassLoader if true search using the caller's ClassLoader
+     * @return ResourceBundle specified by name or null if not found
+     */
+    private synchronized ResourceBundle findResourceBundle(String name,
+                                                           boolean useCallersClassLoader) {
+        // For all lookups, we first check the thread context class loader
+        // if it is set.  If not, we use the system classloader.  If we
+        // still haven't found it we use the callersClassLoaderRef if it
+        // is set and useCallersClassLoader is true.  We set
+        // callersClassLoaderRef initially upon creating the logger with a
+        // non-null resource bundle name.
+
         // Return a null bundle for a null name.
         if (name == null) {
             return null;
@@ -1354,8 +1673,8 @@ public class Logger {
         Locale currentLocale = Locale.getDefault();
 
         // Normally we should hit on our simple one entry cache.
-        if (catalog != null && currentLocale == catalogLocale
-                                        && name == catalogName) {
+        if (catalog != null && currentLocale.equals(catalogLocale)
+                && name.equals(catalogName)) {
             return catalog;
         }
 
@@ -1366,8 +1685,8 @@ public class Logger {
             return catalog;
         }
 
-        // Use the thread's context ClassLoader.  If there isn't one,
-        // use the SystemClassloader.
+        // Use the thread's context ClassLoader.  If there isn't one, use the
+        // {@linkplain java.lang.ClassLoader#getSystemClassLoader() system ClassLoader}.
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         if (cl == null) {
             cl = ClassLoader.getSystemClassLoader();
@@ -1378,59 +1697,65 @@ public class Logger {
             catalogLocale = currentLocale;
             return catalog;
         } catch (MissingResourceException ex) {
-            // Woops.  We can't find the ResourceBundle in the default
+            // We can't find the ResourceBundle in the default
             // ClassLoader.  Drop through.
         }
 
-        // Fall back to searching up the call stack and trying each
-        // calling ClassLoader.
-        for (int ix = 0; ; ix++) {
-            Class clz = sun.reflect.Reflection.getCallerClass(ix);
-            if (clz == null) {
-                break;
+        if (useCallersClassLoader) {
+            // Try with the caller's ClassLoader
+            ClassLoader callersClassLoader = getCallersClassLoader();
+
+            if (callersClassLoader == null || callersClassLoader == cl) {
+                return null;
             }
-            ClassLoader cl2 = clz.getClassLoader();
-            if (cl2 == null) {
-                cl2 = ClassLoader.getSystemClassLoader();
-            }
-            if (cl == cl2) {
-                // We've already checked this classloader.
-                continue;
-            }
-            cl = cl2;
+
             try {
-                catalog = ResourceBundle.getBundle(name, currentLocale, cl);
+                catalog = ResourceBundle.getBundle(name, currentLocale,
+                                                   callersClassLoader);
                 catalogName = name;
                 catalogLocale = currentLocale;
                 return catalog;
             } catch (MissingResourceException ex) {
-                // Ok, this one didn't work either.
-                // Drop through, and try the next one.
+                return null; // no luck
             }
+        } else {
+            return null;
         }
-
-        if (name.equals(catalogName)) {
-            // Return the previous cached value for that name.
-            // This may be null.
-            return catalog;
-        }
-        // Sorry, we're out of luck.
-        return null;
     }
 
     // Private utility method to initialize our one entry
-    // resource bundle cache.
+    // resource bundle name cache and the callers ClassLoader
     // Note: for consistency reasons, we are careful to check
     // that a suitable ResourceBundle exists before setting the
-    // ResourceBundleName.
-    private synchronized void setupResourceInfo(String name) {
+    // resourceBundleName field.
+    // Synchronized to prevent races in setting the fields.
+    private synchronized void setupResourceInfo(String name,
+                                                Class<?> callersClass) {
         if (name == null) {
             return;
         }
-        ResourceBundle rb = findResourceBundle(name);
-        if (rb == null) {
+
+        if (resourceBundleName != null) {
+            // this Logger already has a ResourceBundle
+
+            if (resourceBundleName.equals(name)) {
+                // the names match so there is nothing more to do
+                return;
+            }
+
+            // cannot change ResourceBundles once they are set
+            throw new IllegalArgumentException(
+                resourceBundleName + " != " + name);
+        }
+
+        setCallersClassLoaderRef(callersClass);
+        if (findResourceBundle(name, true) == null) {
             // We've failed to find an expected ResourceBundle.
-            throw new MissingResourceException("Can't find " + name + " bundle", name, "");
+            // unset the caller's ClassLoader since we were unable to find the
+            // the bundle using it
+            this.callersClassLoaderRef = null;
+            throw new MissingResourceException("Can't find " + name + " bundle",
+                                                name, "");
         }
         resourceBundleName = name;
     }

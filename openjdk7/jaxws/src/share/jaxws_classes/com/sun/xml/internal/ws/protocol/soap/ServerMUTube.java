@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,11 +25,9 @@
 
 package com.sun.xml.internal.ws.protocol.soap;
 
-import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.pipe.*;
 import com.sun.xml.internal.ws.client.HandlerConfiguration;
-import com.sun.xml.internal.ws.binding.BindingImpl;
 import javax.xml.namespace.QName;
 import java.util.Set;
 
@@ -39,7 +37,6 @@ import java.util.Set;
 
 public class ServerMUTube extends MUTube {
 
-    private HandlerConfiguration handlerConfig;
     private ServerTubeAssemblerContext tubeContext;
     private final Set<String> roles;
     private final Set<QName> handlerKnownHeaders;
@@ -50,14 +47,13 @@ public class ServerMUTube extends MUTube {
         this.tubeContext = tubeContext;
 
         //On Server, HandlerConfiguration does n't change after publish, so store locally
-        handlerConfig = binding.getHandlerConfig();
+        HandlerConfiguration handlerConfig = binding.getHandlerConfig();
         roles = handlerConfig.getRoles();
-        handlerKnownHeaders = handlerConfig.getHandlerKnownHeaders();
+        handlerKnownHeaders = binding.getKnownHeaders();
     }
 
     protected ServerMUTube(ServerMUTube that, TubeCloner cloner) {
         super(that,cloner);
-        handlerConfig = that.handlerConfig;
         tubeContext = that.tubeContext;
         roles = that.roles;
         handlerKnownHeaders = that.handlerKnownHeaders;

@@ -56,6 +56,7 @@ class AppOutputStream extends OutputStream {
     /**
      * Write the data out, NOW.
      */
+    @Override
     synchronized public void write(byte b[], int off, int len)
             throws IOException {
         if (b == null) {
@@ -95,16 +96,16 @@ class AppOutputStream extends OutputStream {
                 int howmuch;
                 if (isFirstRecordOfThePayload && c.needToSplitPayload()) {
                     howmuch = Math.min(0x01, r.availableDataBytes());
-                    /*
-                     * Nagle's algorithm (TCP_NODELAY) was coming into
-                     * play here when writing short (split) packets.
-                     * Signal to the OutputRecord code to internally
-                     * buffer this small packet until the next outbound
-                     * packet (of any type) is written.
-                     */
-                    if ((len != 1) && (howmuch == 1)) {
-                        holdRecord = true;
-                    }
+                     /*
+                      * Nagle's algorithm (TCP_NODELAY) was coming into
+                      * play here when writing short (split) packets.
+                      * Signal to the OutputRecord code to internally
+                      * buffer this small packet until the next outbound
+                      * packet (of any type) is written.
+                      */
+                     if ((len != 1) && (howmuch == 1)) {
+                         holdRecord = true;
+                     }
                 } else {
                     howmuch = Math.min(len, r.availableDataBytes());
                 }
@@ -131,6 +132,7 @@ class AppOutputStream extends OutputStream {
     /**
      * Write one byte now.
      */
+    @Override
     synchronized public void write(int i) throws IOException {
         oneByte[0] = (byte)i;
         write(oneByte, 0, 1);
@@ -139,6 +141,7 @@ class AppOutputStream extends OutputStream {
     /*
      * Socket close is already synchronized, no need to block here.
      */
+    @Override
     public void close() throws IOException {
         c.close();
     }

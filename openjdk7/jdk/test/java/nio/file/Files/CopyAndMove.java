@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,7 @@
  */
 
 /* @test
- * @bug 4313887 6838333 6917021 7006126
+ * @bug 4313887 6838333 6917021 7006126 6950237 8006645
  * @summary Unit test for java.nio.file.Files copy and move methods
  * @library ..
  * @build CopyAndMove PassThroughFileSystem
@@ -37,16 +37,19 @@ import static java.nio.file.LinkOption.*;
 import java.nio.file.attribute.*;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 public class CopyAndMove {
     static final Random rand = new Random();
     static boolean heads() { return rand.nextBoolean(); }
+    private static boolean testPosixAttributes = false;
 
     public static void main(String[] args) throws Exception {
         Path dir1 = TestUtil.createTemporaryDirectory();
         try {
 
             // Same directory
+            testPosixAttributes = getFileStore(dir1).supportsFileAttributeView("posix");
             testCopyFileToFile(dir1, dir1, TestUtil.supportsLinks(dir1));
             testMove(dir1, dir1, TestUtil.supportsLinks(dir1));
 
@@ -57,6 +60,8 @@ public class CopyAndMove {
             try {
                 boolean testSymbolicLinks =
                     TestUtil.supportsLinks(dir1) && TestUtil.supportsLinks(dir2);
+                testPosixAttributes = getFileStore(dir1).supportsFileAttributeView("posix") &&
+                                      getFileStore(dir2).supportsFileAttributeView("posix");
                 testCopyFileToFile(dir1, dir2, testSymbolicLinks);
                 testMove(dir1, dir2, testSymbolicLinks);
             } finally {
@@ -65,6 +70,8 @@ public class CopyAndMove {
 
             // Target is location associated with custom provider
             Path dir3 = PassThroughFileSystem.create().getPath(dir1.toString());
+            testPosixAttributes = getFileStore(dir1).supportsFileAttributeView("posix") &&
+                                  getFileStore(dir3).supportsFileAttributeView("posix");
             testCopyFileToFile(dir1, dir3, false);
             testMove(dir1, dir3, false);
 
@@ -86,10 +93,17 @@ public class CopyAndMove {
         assertTrue(attrs1.isSymbolicLink() == attrs2.isSymbolicLink());
         assertTrue(attrs1.isOther() == attrs2.isOther());
 
-        // check last modified time
-        long time1 = attrs1.lastModifiedTime().toMillis();
-        long time2 = attrs2.lastModifiedTime().toMillis();
-        assertTrue(time1 == time2);
+        // check last modified time if not a symbolic link
+        if (!attrs1.isSymbolicLink()) {
+            long time1 = attrs1.lastModifiedTime().to(TimeUnit.SECONDS);
+            long time2 = attrs2.lastModifiedTime().to(TimeUnit.SECONDS);
+
+            if (time1 != time2) {
+                System.err.format("File time for %s is %s\n", attrs1.fileKey(), attrs1.lastModifiedTime());
+                System.err.format("File time for %s is %s\n", attrs2.fileKey(), attrs2.lastModifiedTime());
+                assertTrue(false);
+            }
+        }
 
         // check size
         if (attrs1.isRegularFile())
@@ -205,7 +219,10 @@ public class CopyAndMove {
         if (source.getFileSystem().provider() == target.getFileSystem().provider()) {
 
             // verify POSIX attributes
-            if (posixAttributes != null && !basicAttributes.isSymbolicLink()) {
+            if (posixAttributes != null &&
+                !basicAttributes.isSymbolicLink() &&
+                testPosixAttributes)
+            {
                 checkPosixAttributes(posixAttributes,
                     readAttributes(target, PosixFileAttributes.class, NOFOLLOW_LINKS));
             }
@@ -634,7 +651,9 @@ public class CopyAndMove {
 
                 // check POSIX attributes are copied
                 String os = System.getProperty("os.name");
-                if (os.equals("SunOS") || os.equals("Linux")) {
+                if ((os.equals("SunOS") || os.equals("Linux")) &&
+                    testPosixAttributes)
+                {
                     checkPosixAttributes(
                         readAttributes(source, PosixFileAttributes.class, linkOptions),
                         readAttributes(target, PosixFileAttributes.class, linkOptions));

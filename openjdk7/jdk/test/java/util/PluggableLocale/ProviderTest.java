@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,7 @@
 import java.text.*;
 import java.util.*;
 import sun.text.resources.*;
-import sun.util.*;
+import sun.util.locale.provider.*;
 
 public class ProviderTest {
     void checkValidity(Locale target, Object jres, Object providers, Object result, boolean jresPreferred) {
@@ -42,5 +42,7 @@ public class ProviderTest {
                     "result do not match with provider's result. target: "+target+" result: "+result+" providers: "+providers);
             }
         }
+
+        System.out.println("checkValidity succeeded. target: "+target+" result: "+result+" jre's: "+jres+" providers: "+providers+" jre-preferred: "+jresPreferred);
     }
 }

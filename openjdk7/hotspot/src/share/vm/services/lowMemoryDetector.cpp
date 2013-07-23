@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -295,7 +295,7 @@ void SensorInfo::trigger(int count, TRAPS) {
   assert(count <= _pending_trigger_count, "just checking");
 
   if (_sensor_obj != NULL) {
-    klassOop k = Management::sun_management_Sensor_klass(CHECK);
+    Klass* k = Management::sun_management_Sensor_klass(CHECK);
     instanceKlassHandle sensorKlass (THREAD, k);
     Handle sensor_h(THREAD, _sensor_obj);
     Handle usage_h = MemoryService::create_MemoryUsage_obj(_usage, CHECK);
@@ -324,7 +324,7 @@ void SensorInfo::trigger(int count, TRAPS) {
 
 void SensorInfo::clear(int count, TRAPS) {
   if (_sensor_obj != NULL) {
-    klassOop k = Management::sun_management_Sensor_klass(CHECK);
+    Klass* k = Management::sun_management_Sensor_klass(CHECK);
     instanceKlassHandle sensorKlass (THREAD, k);
     Handle sensor(THREAD, _sensor_obj);
 
@@ -353,7 +353,7 @@ void SensorInfo::clear(int count, TRAPS) {
 
 #ifndef PRODUCT
 void SensorInfo::print() {
-  tty->print_cr("%s count = %ld pending_triggers = %ld pending_clears = %ld",
+  tty->print_cr("%s count = " SIZE_FORMAT " pending_triggers = %ld pending_clears = %ld",
                 (_sensor_on ? "on" : "off"),
                 _sensor_count, _pending_trigger_count, _pending_clear_count);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,9 @@
 #include "services/memBaseline.hpp"
 #include "services/memTracker.hpp"
 #include "utilities/ostream.hpp"
+#include "utilities/macros.hpp"
+
+#if INCLUDE_NMT
 
 /*
  * MemBaselineReporter reports data to this outputer class,
@@ -277,5 +280,7 @@ class BaselineTTYOutputer : public BaselineOutputer {
   void done_callsite();
 };
 
+
+#endif // INCLUDE_NMT
 
 #endif // SHARE_VM_SERVICES_MEM_REPORTER_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,13 @@
 
 package sun.util.calendar;
 
-import java.lang.reflect.Field;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.MissingResourceException;
-import java.util.ResourceBundle;
-import java.util.Set;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.security.AccessController;
+import java.security.PrivilegedActionException;
+import java.security.PrivilegedExceptionAction;
+import java.util.Properties;
 import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -99,7 +99,7 @@ public abstract class CalendarSystem {
     };
 
     private static void initNames() {
-        ConcurrentMap<String,String> nameMap = new ConcurrentHashMap<String,String>();
+        ConcurrentMap<String,String> nameMap = new ConcurrentHashMap<>();
 
         // Associate a calendar name with its class name and the
         // calendar class name with its date class name.
@@ -112,7 +112,7 @@ public abstract class CalendarSystem {
         synchronized (CalendarSystem.class) {
             if (!initialized) {
                 names = nameMap;
-                calendars = new ConcurrentHashMap<String,CalendarSystem>();
+                calendars = new ConcurrentHashMap<>();
                 initialized = true;
             }
         }
@@ -164,10 +164,10 @@ public abstract class CalendarSystem {
             cal = LocalGregorianCalendar.getLocalGregorianCalendar(calendarName);
         } else {
             try {
-                Class cl = Class.forName(className);
+                Class<?> cl = Class.forName(className);
                 cal = (CalendarSystem) cl.newInstance();
             } catch (Exception e) {
-                throw new RuntimeException("internal error", e);
+                throw new InternalError(e);
             }
         }
         if (cal == null) {
@@ -175,6 +175,44 @@ public abstract class CalendarSystem {
         }
         CalendarSystem cs =  calendars.putIfAbsent(calendarName, cal);
         return (cs == null) ? cal : cs;
+    }
+
+    /**
+     * Returns a {@link Properties} loaded from lib/calendars.properties.
+     *
+     * @return a {@link Properties} loaded from lib/calendars.properties
+     * @throws IOException if an error occurred when reading from the input stream
+     * @throws IllegalArgumentException if the input stream contains any malformed
+     *                                  Unicode escape sequences
+     */
+    public static Properties getCalendarProperties() throws IOException {
+        Properties calendarProps = null;
+        try {
+            String homeDir = AccessController.doPrivileged(
+                new sun.security.action.GetPropertyAction("java.home"));
+            final String fname = homeDir + File.separator + "lib" + File.separator
+                                 + "calendars.properties";
+            calendarProps = AccessController.doPrivileged(new PrivilegedExceptionAction<Properties>() {
+                @Override
+                public Properties run() throws IOException {
+                    Properties props = new Properties();
+                    try (FileInputStream fis = new FileInputStream(fname)) {
+                        props.load(fis);
+                    }
+                    return props;
+                }
+            });
+        } catch (PrivilegedActionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException) {
+                throw (IOException) cause;
+            } else if (cause instanceof IllegalArgumentException) {
+                throw (IllegalArgumentException) cause;
+            }
+            // Should not happen
+            throw new InternalError(cause);
+        }
+        return calendarProps;
     }
 
     //////////////////////////////// Calendar API //////////////////////////////////

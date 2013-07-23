@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -180,8 +180,7 @@ public final class PrinterStateReasons
         if (severity == null) {
             throw new NullPointerException("severity is null");
         }
-        return super.put((PrinterStateReason) reason,
-                         (Severity) severity);
+        return super.put(reason, severity);
     }
 
     /**

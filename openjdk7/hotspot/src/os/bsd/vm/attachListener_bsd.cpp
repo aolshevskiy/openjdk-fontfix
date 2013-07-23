@@ -199,7 +199,7 @@ int BsdAttachListener::init() {
   ::unlink(initial_path);
   int res = ::bind(listener, (struct sockaddr*)&addr, sizeof(addr));
   if (res == -1) {
-    RESTARTABLE(::close(listener), res);
+    ::close(listener);
     return -1;
   }
 
@@ -217,7 +217,7 @@ int BsdAttachListener::init() {
     }
   }
   if (res == -1) {
-    RESTARTABLE(::close(listener), res);
+    ::close(listener);
     ::unlink(initial_path);
     return -1;
   }
@@ -342,39 +342,24 @@ BsdAttachOperation* BsdAttachListener::dequeue() {
 
     // get the credentials of the peer and check the effective uid/guid
     // - check with jeff on this.
-#ifdef _ALLBSD_SOURCE
     uid_t puid;
     gid_t pgid;
     if (::getpeereid(s, &puid, &pgid) != 0) {
-      int res;
-      RESTARTABLE(::close(s), res);
+      ::close(s);
       continue;
     }
-#else
-    struct ucred cred_info;
-    socklen_t optlen = sizeof(cred_info);
-    if (::getsockopt(s, SOL_SOCKET, SO_PEERCRED, (void*)&cred_info, &optlen) == -1) {
-      int res;
-      RESTARTABLE(::close(s), res);
-      continue;
-    }
-    uid_t puid = cred_info.uid;
-    gid_t pgid = cred_info.gid;
-#endif
     uid_t euid = geteuid();
     gid_t egid = getegid();
 
     if (puid != euid || pgid != egid) {
-      int res;
-      RESTARTABLE(::close(s), res);
+      ::close(s);
       continue;
     }
 
     // peer credential look okay so we read the request
     BsdAttachOperation* op = read_request(s);
     if (op == NULL) {
-      int res;
-      RESTARTABLE(::close(s), res);
+      ::close(s);
       continue;
     } else {
       return op;
@@ -425,7 +410,7 @@ void BsdAttachOperation::complete(jint result, bufferedStream* st) {
   }
 
   // done
-  RESTARTABLE(::close(this->socket()), rc);
+  ::close(this->socket());
 
   // were we externally suspended while we were waiting?
   thread->check_and_wait_while_suspended();

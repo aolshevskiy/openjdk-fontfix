@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2001, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,7 +59,7 @@ public class InternalEventHandler implements Runnable
                             ClassUnloadEvent cuEvent = (ClassUnloadEvent)event;
                             vm.removeReferenceType(cuEvent.classSignature());
 
-                            if ((vm.traceFlags & vm.TRACE_EVENTS) != 0) {
+                            if ((vm.traceFlags & VirtualMachine.TRACE_EVENTS) != 0) {
                                 vm.printTrace("Handled Unload Event for " +
                                               cuEvent.classSignature());
                             }
@@ -68,7 +68,7 @@ public class InternalEventHandler implements Runnable
                             ((ReferenceTypeImpl)cpEvent.referenceType())
                                                             .markPrepared();
 
-                            if ((vm.traceFlags & vm.TRACE_EVENTS) != 0) {
+                            if ((vm.traceFlags & VirtualMachine.TRACE_EVENTS) != 0) {
                                 vm.printTrace("Handled Prepare Event for " +
                                               cpEvent.referenceType().name());
                             }

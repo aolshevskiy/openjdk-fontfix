@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -115,10 +115,8 @@ public class KrbAsReq {
         }
 
         if (sname == null) {
-            sname = new PrincipalName("krbtgt" +
-                                      PrincipalName.NAME_COMPONENT_SEPARATOR +
-                                      cname.getRealmAsString(),
-                            PrincipalName.KRB_NT_SRV_INST);
+            String realm = cname.getRealmAsString();
+            sname = PrincipalName.tgsService(realm, realm);
         }
 
         if (till == null) {
@@ -128,7 +126,6 @@ public class KrbAsReq {
         // enc-authorization-data and additional-tickets never in AS-REQ
         KDCReqBody kdc_req_body = new KDCReqBody(options,
                                                  cname,
-                                                 cname.getRealm(),
                                                  sname,
                                                  from,
                                                  till,

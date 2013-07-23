@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,7 +42,7 @@ inline void PSPromotionManager::claim_or_forward_internal_depth(T* p) {
     if (o->is_forwarded()) {
       o = o->forwardee();
       // Card mark
-      if (PSScavenge::is_obj_in_young((HeapWord*) o)) {
+      if (PSScavenge::is_obj_in_young(o)) {
         PSScavenge::card_table()->inline_write_ref_field_gc(p, o);
       }
       oopDesc::encode_store_heap_oop_not_null(p, o);
@@ -85,7 +85,7 @@ oop PSPromotionManager::copy_to_survivor_space(oop o) {
 
     if (!promote_immediately) {
       // Find the objects age, MT safe.
-      int age = (test_mark->has_displaced_mark_helper() /* o->has_displaced_mark() */) ?
+      uint age = (test_mark->has_displaced_mark_helper() /* o->has_displaced_mark() */) ?
         test_mark->displaced_mark_helper()->age() : test_mark->age();
 
       // Try allocating obj in to-space (unless too old)
@@ -136,6 +136,13 @@ oop PSPromotionManager::copy_to_survivor_space(oop o) {
 
             HeapWord* lab_base = old_gen()->cas_allocate(OldPLABSize);
             if(lab_base != NULL) {
+#ifdef ASSERT
+              // Delay the initialization of the promotion lab (plab).
+              // This exposes uninitialized plabs to card table processing.
+              if (GCWorkerDelayMillis > 0) {
+                os::sleep(Thread::current(), GCWorkerDelayMillis, false);
+              }
+#endif
               _old_lab.initialize(MemRegion(lab_base, OldPLABSize));
               // Try the old lab allocation again.
               new_obj = (oop) _old_lab.allocate(new_obj_size);
@@ -212,13 +219,13 @@ oop PSPromotionManager::copy_to_survivor_space(oop o) {
     new_obj = o->forwardee();
   }
 
-#ifdef DEBUG
+#ifndef PRODUCT
   // This code must come after the CAS test, or it will print incorrect
   // information.
   if (TraceScavenge) {
-    gclog_or_tty->print_cr("{%s %s " PTR_FORMAT " -> " PTR_FORMAT " (" SIZE_FORMAT ")}",
+    gclog_or_tty->print_cr("{%s %s " PTR_FORMAT " -> " PTR_FORMAT " (%d)}",
        PSScavenge::should_scavenge(&new_obj) ? "copying" : "tenuring",
-       new_obj->blueprint()->internal_name(), o, new_obj, new_obj->size());
+       new_obj->klass()->internal_name(), o, new_obj, new_obj->size());
   }
 #endif
 

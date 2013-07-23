@@ -34,7 +34,7 @@
  */
 
 package java.util.concurrent.locks;
-import java.util.concurrent.*;
+import java.util.concurrent.TimeUnit;
 import java.util.Date;
 
 /**
@@ -324,7 +324,7 @@ public interface Condition {
      *   }
      * }}</pre>
      *
-     * <p> Design note: This method requires a nanosecond argument so
+     * <p>Design note: This method requires a nanosecond argument so
      * as to avoid truncation errors in reporting remaining times.
      * Such precision loss would make it difficult for programmers to
      * ensure that total waiting times are not systematically shorter
@@ -360,10 +360,9 @@ public interface Condition {
     /**
      * Causes the current thread to wait until it is signalled or interrupted,
      * or the specified waiting time elapses. This method is behaviorally
-     * equivalent to:<br>
-     * <pre>
-     *   awaitNanos(unit.toNanos(time)) &gt; 0
-     * </pre>
+     * equivalent to:
+     *  <pre> {@code awaitNanos(unit.toNanos(time)) > 0}</pre>
+     *
      * @param time the maximum time to wait
      * @param unit the time unit of the {@code time} argument
      * @return {@code false} if the waiting time detectably elapsed

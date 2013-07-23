@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,13 +21,13 @@
  * questions.
  */
 
-// No way to reserve default Authenticator, need to run in othervm mode.
-
 /*
  * @test
  * @bug 6670868
  * @summary StackOverFlow with bad authenticated Proxy tunnels
  * @run main/othervm HttpsProxyStackOverflow
+ *
+ * No way to reserve default Authenticator, need to run in othervm mode.
  */
 
 import java.io.IOException;
@@ -54,8 +54,7 @@ public class HttpsProxyStackOverflow {
         HttpsURLConnection conn = (HttpsURLConnection) url.openConnection(
                       new Proxy(Proxy.Type.HTTP,
                       new InetSocketAddress("localhost", server.getPort())));
-        try {
-            InputStream is = conn.getInputStream();
+        try (InputStream is = conn.getInputStream()) {
         } catch(IOException unused) {
             // no real server, IOException is expected.
             // failure if StackOverflowError

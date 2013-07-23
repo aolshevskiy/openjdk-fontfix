@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -98,7 +98,7 @@ public class JInfo {
     }
 
     // loads the given class using the system class loader
-    private static Class loadClass(String name) {
+    private static Class<?> loadClass(String name) {
         //
         // We specify the system clas loader so as to cater for development
         // environments where this class is on the boot class path but sa-jdi.jar
@@ -178,7 +178,7 @@ public class JInfo {
     // print usage message
     private static void usage() {
 
-        Class c = loadClass("sun.jvm.hotspot.tools.JInfo");
+        Class<?> c = loadClass("sun.jvm.hotspot.tools.JInfo");
         boolean usageSA = (c != null);
 
         System.out.println("Usage:");

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
 import java.awt.image.BufferedImageOp;
 import java.lang.ref.WeakReference;
+import java.lang.annotation.Native;
 import sun.java2d.ScreenUpdateManager;
 import sun.java2d.SurfaceData;
 import sun.java2d.loops.Blit;
@@ -176,12 +177,12 @@ class D3DBlitLoops {
      * createPackedParams().  (They are also used at the native level when
      * unpacking the params.)
      */
-    private static final int OFFSET_SRCTYPE = 16;
-    private static final int OFFSET_HINT    =  8;
-    private static final int OFFSET_TEXTURE =  3;
-    private static final int OFFSET_RTT     =  2;
-    private static final int OFFSET_XFORM   =  1;
-    private static final int OFFSET_ISOBLIT =  0;
+    @Native private static final int OFFSET_SRCTYPE = 16;
+    @Native private static final int OFFSET_HINT    =  8;
+    @Native private static final int OFFSET_TEXTURE =  3;
+    @Native private static final int OFFSET_RTT     =  2;
+    @Native private static final int OFFSET_XFORM   =  1;
+    @Native private static final int OFFSET_ISOBLIT =  0;
 
     /**
      * Packs the given parameters into a single int value in order to save

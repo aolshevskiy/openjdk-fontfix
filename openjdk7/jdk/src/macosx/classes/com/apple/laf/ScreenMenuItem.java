@@ -118,9 +118,6 @@ final class ScreenMenuItem extends MenuItem implements ActionListener, Component
 
     @Override
     public void setAccelerator(final KeyStroke ks) {
-        // We call CMenuItem.setLabel(..,..,..) directly and does not initialize
-        // shortcut property. So shortcut property should not be used from the
-        // peers code directly or indirectly.
         syncLabelAndKS(this, fMenuItem.getText(), ks);
     }
 

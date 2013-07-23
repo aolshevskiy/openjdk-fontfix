@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2009, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -857,7 +857,7 @@ Java_sun_awt_windows_WTextComponentPeer_initIDs(JNIEnv *env, jclass cls)
         "canAccessClipboard", "()Z");
     env->DeleteLocalRef(textComponentClassID);
 
-    DASSERT(AwtTextComponent::canAccessClipboardMID != NULL)
+    DASSERT(AwtTextComponent::canAccessClipboardMID != NULL);
 
     CATCH_BAD_ALLOC;
 }

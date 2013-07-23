@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -302,7 +302,7 @@ public class TreeSet<E> extends AbstractSet<E>
             m instanceof TreeMap) {
             SortedSet<? extends E> set = (SortedSet<? extends E>) c;
             TreeMap<E,Object> map = (TreeMap<E, Object>) m;
-            Comparator<? super E> cc = (Comparator<? super E>) set.comparator();
+            Comparator<?> cc = set.comparator();
             Comparator<? super E> mc = map.comparator();
             if (cc==mc || (cc != null && cc.equals(mc))) {
                 map.addAllForTreeSet(set, PRESENT);
@@ -469,12 +469,13 @@ public class TreeSet<E> extends AbstractSet<E>
      *
      * @return a shallow copy of this set
      */
+    @SuppressWarnings("unchecked")
     public Object clone() {
-        TreeSet<E> clone = null;
+        TreeSet<E> clone;
         try {
             clone = (TreeSet<E>) super.clone();
         } catch (CloneNotSupportedException e) {
-            throw new InternalError();
+            throw new InternalError(e);
         }
 
         clone.m = new TreeMap<>(m);
@@ -519,20 +520,21 @@ public class TreeSet<E> extends AbstractSet<E>
         s.defaultReadObject();
 
         // Read in Comparator
-        Comparator<? super E> c = (Comparator<? super E>) s.readObject();
+        @SuppressWarnings("unchecked")
+            Comparator<? super E> c = (Comparator<? super E>) s.readObject();
 
         // Create backing TreeMap
-        TreeMap<E,Object> tm;
-        if (c==null)
-            tm = new TreeMap<>();
-        else
-            tm = new TreeMap<>(c);
+        TreeMap<E,Object> tm = new TreeMap<>(c);
         m = tm;
 
         // Read in size
         int size = s.readInt();
 
         tm.readTreeSet(size, s, PRESENT);
+    }
+
+    public Spliterator<E> spliterator() {
+        return TreeMap.keySpliteratorFor(m);
     }
 
     private static final long serialVersionUID = -2479143000061671589L;

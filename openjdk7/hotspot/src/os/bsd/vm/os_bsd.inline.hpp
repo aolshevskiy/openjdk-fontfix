@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,13 @@
 #ifndef OS_BSD_VM_OS_BSD_INLINE_HPP
 #define OS_BSD_VM_OS_BSD_INLINE_HPP
 
-#include "runtime/atomic.hpp"
+#include "runtime/atomic.inline.hpp"
 #include "runtime/os.hpp"
+
 #ifdef TARGET_OS_ARCH_bsd_x86
-# include "atomic_bsd_x86.inline.hpp"
 # include "orderAccess_bsd_x86.inline.hpp"
 #endif
 #ifdef TARGET_OS_ARCH_bsd_zero
-# include "atomic_bsd_zero.inline.hpp"
 # include "orderAccess_bsd_zero.inline.hpp"
 #endif
 
@@ -57,14 +56,6 @@ inline const char* os::line_separator() {
 
 inline const char* os::path_separator() {
   return ":";
-}
-
-inline const char* os::jlong_format_specifier() {
-  return "%lld";
-}
-
-inline const char* os::julong_format_specifier() {
-  return "%llu";
 }
 
 // File names are case-sensitive on windows only
@@ -187,11 +178,11 @@ inline size_t os::write(int fd, const void *buf, unsigned int nBytes) {
 }
 
 inline int os::close(int fd) {
-  RESTARTABLE_RETURN_INT(::close(fd));
+  return ::close(fd);
 }
 
 inline int os::socket_close(int fd) {
-  RESTARTABLE_RETURN_INT(::close(fd));
+  return ::close(fd);
 }
 
 inline int os::socket(int domain, int type, int protocol) {
@@ -294,4 +285,5 @@ inline int os::set_sock_opt(int fd, int level, int optname,
                             const char* optval, socklen_t optlen) {
   return ::setsockopt(fd, level, optname, optval, optlen);
 }
+
 #endif // OS_BSD_VM_OS_BSD_INLINE_HPP

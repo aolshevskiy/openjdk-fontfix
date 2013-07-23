@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
- Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 
  This code is free software; you can redistribute it and/or modify it
@@ -37,11 +37,12 @@
 // INCLUDE_TRACE
 
 #include "memory/resourceArea.hpp"
-#include "runtime/handles.inline.hpp"
 #include "tracefiles/traceTypes.hpp"
 #include "trace/traceEvent.hpp"
+#include "utilities/macros.hpp"
 
 #if INCLUDE_TRACE
+
 
 #include "trace/traceStream.hpp"
 #include "utilities/ostream.hpp"
@@ -119,6 +120,13 @@ public:
  private:
 <xsl:apply-templates select="value|structvalue|transition_value|relation" mode="write-fields"/>
 
+  void writeEventContent(void) {
+    TraceStream ts(*tty);
+    ts.print("<xsl:value-of select="@label"/>: [");
+<xsl:apply-templates select="value|structvalue" mode="write-data"/>
+    ts.print("]\n");
+  }
+
  public:
 <xsl:apply-templates select="value|structvalue|transition_value|relation" mode="write-setters"/>
 
@@ -131,11 +139,12 @@ public:
   <xsl:value-of select="concat('  Event', @id, '(EventStartTime timing=TIMED) : TraceEvent&lt;Event', @id, '&gt;(timing) {}', $newline)"/>
   void writeEvent(void) {
     ResourceMark rm;
-    HandleMark hm;
-    TraceStream ts(*tty);
-    ts.print("<xsl:value-of select="@label"/>: [");
-<xsl:apply-templates select="value|structvalue" mode="write-data"/>
-    ts.print("]\n");
+    if (UseLockedTracing) {
+      ttyLocker lock;
+      writeEventContent();
+    } else {
+      writeEventContent();
+    }
   }
 };
 

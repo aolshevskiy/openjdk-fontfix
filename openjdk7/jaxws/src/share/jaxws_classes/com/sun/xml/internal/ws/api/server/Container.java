@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,17 @@
  */
 
 package com.sun.xml.internal.ws.api.server;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
+
+import com.sun.istack.internal.NotNull;
+import com.sun.xml.internal.ws.api.Component;
+import com.sun.xml.internal.ws.api.ComponentEx;
+import com.sun.xml.internal.ws.api.ComponentRegistry;
 
 /**
  * Root of the SPI implemented by the container
@@ -61,7 +72,9 @@ package com.sun.xml.internal.ws.api.server;
  * @author Kohsuke Kawaguchi
  * @see WSEndpoint
  */
-public abstract class Container {
+public abstract class Container implements ComponentRegistry, ComponentEx {
+        private final Set<Component> components = new CopyOnWriteArraySet<Component>();
+
     /**
      * For derived classes.
      */
@@ -69,29 +82,33 @@ public abstract class Container {
     }
 
     /**
-     * Gets the specified SPI.
-     *
-     * <p>
-     * This method works as a kind of directory service
-     * for SPIs between technologies on top of JAX-WS
-     * and the container.
-     *
-     * @param spiType
-     *      Always non-null.
-     *
-     * @return
-     *      null if such an SPI is not implemented by this container.
-     */
-    public abstract <T> T getSPI(Class<T> spiType);
-
-
-    /**
      * Constant that represents a "no {@link Container}",
      * which always returns null from {@link #getSPI(Class)}.
      */
-    public static final Container NONE = new Container() {
-        public <T> T getSPI(Class<T> spiType) {
-            return null;
+    public static final Container NONE = new NoneContainer();
+
+    private static final class NoneContainer extends Container {
+    }
+
+    public <S> S getSPI(Class<S> spiType) {
+        for (Component c : components) {
+                S s = c.getSPI(spiType);
+                if (s != null)
+                        return s;
         }
-    };
+        return null;
+    }
+
+        public Set<Component> getComponents() {
+                return components;
+        }
+
+        public @NotNull <E> Iterable<E> getIterableSPI(Class<E> spiType) {
+        E item = getSPI(spiType);
+        if (item != null) {
+                Collection<E> c = Collections.singletonList(item);
+                return c;
+        }
+        return Collections.emptySet();
+    }
 }

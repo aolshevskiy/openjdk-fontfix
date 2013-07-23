@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -63,6 +63,10 @@ public class ReadCertificates extends PKCS11Test {
             System.out.println("Provider does not support ECDSA, skipping...");
             return;
         }
+
+        /*
+         * PKCS11Test.main will remove this provider if needed
+         */
         Providers.setAt(p, 1);
 
         random = new SecureRandom();
@@ -132,7 +136,6 @@ public class ReadCertificates extends PKCS11Test {
             }
         }
 
-        Security.removeProvider(p.getName());
         System.out.println("OK");
     }
 

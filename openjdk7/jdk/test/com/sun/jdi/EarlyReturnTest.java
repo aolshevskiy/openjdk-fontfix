@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -292,7 +292,9 @@ public class EarlyReturnTest extends TestScaffold {
     private String[] excludes = {
         "javax.*",
         "sun.*",
-        "com.sun.*"};
+        "com.sun.*",
+        "com.oracle.*",
+        "oracle.*"};
 
     static VirtualMachineManager vmm ;
     ClassType targetClass;

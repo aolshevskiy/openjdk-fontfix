@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,12 +34,12 @@
 #include "j2secmod.h"
 
 void *findFunction(JNIEnv *env, jlong jHandle, const char *functionName) {
-    void *hModule = (void*)jHandle;
+    void *hModule = (void*)jlong_to_ptr(jHandle);
     void *fAddress = dlsym(hModule, functionName);
     if (fAddress == NULL) {
         char errorMessage[256];
         snprintf(errorMessage, sizeof(errorMessage), "Symbol not found: %s", functionName);
-        JNU_ThrowNullPointerException(env, errorMessage);
+        throwNullPointerException(env, errorMessage);
         return NULL;
     }
     return fAddress;
@@ -53,7 +53,7 @@ JNIEXPORT jlong JNICALL Java_sun_security_pkcs11_Secmod_nssGetLibraryHandle
     void *hModule = dlopen(libName, RTLD_NOLOAD);
     dprintf2("-handle for %s: %u\n", libName, hModule);
     (*env)->ReleaseStringUTFChars(env, jLibName, libName);
-    return (jlong)hModule;
+    return ptr_to_jlong(hModule);
 }
 
 JNIEXPORT jlong JNICALL Java_sun_security_pkcs11_Secmod_nssLoadLibrary
@@ -68,9 +68,9 @@ JNIEXPORT jlong JNICALL Java_sun_security_pkcs11_Secmod_nssLoadLibrary
     dprintf2("-handle: %u (0X%X)\n", hModule, hModule);
 
     if (hModule == NULL) {
-        JNU_ThrowIOException(env, dlerror());
+        throwIOException(env, dlerror());
         return 0;
     }
 
-    return (jlong)hModule;
+    return ptr_to_jlong(hModule);
 }

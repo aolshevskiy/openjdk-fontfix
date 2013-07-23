@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,20 +25,24 @@
 
 package com.apple.eawt.event;
 
+import sun.awt.SunToolkit;
+
 import java.awt.*;
 import java.util.*;
 import java.util.List;
 
 import javax.swing.*;
 
+import java.lang.annotation.Native;
+
 final class GestureHandler {
     private static final String CLIENT_PROPERTY = "com.apple.eawt.event.internalGestureHandler";
 
     // native constants for the supported types of high-level gestures
-    static final int PHASE = 1;
-    static final int ROTATE = 2;
-    static final int MAGNIFY = 3;
-    static final int SWIPE = 4;
+    @Native static final int PHASE = 1;
+    @Native static final int ROTATE = 2;
+    @Native static final int MAGNIFY = 3;
+    @Native static final int SWIPE = 4;
 
     // installs a private instance of GestureHandler, if necessary
     static void addGestureListenerTo(final JComponent component, final GestureListener listener) {
@@ -68,7 +72,7 @@ final class GestureHandler {
     static void handleGestureFromNative(final Window window, final int type, final double x, final double y, final double a, final double b) {
         if (window == null) return; // should never happen...
 
-        EventQueue.invokeLater(new Runnable() {
+        SunToolkit.executeOnEventHandlerThread(window, new Runnable() {
             public void run() {
                 final Component component = SwingUtilities.getDeepestComponentAt(window, (int)x, (int)y);
 

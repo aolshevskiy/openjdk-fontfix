@@ -41,9 +41,7 @@ JFR =
 ifndef OPENJDK
   ifndef JAVASE_EMBEDDED
     ifeq ($(JFR_SRCDIRS_EXIST), true)
-      ifneq (${ARCH},arm)
-        JFR = jfr
-      endif
+      JFR = jfr
     endif
   endif
 endif

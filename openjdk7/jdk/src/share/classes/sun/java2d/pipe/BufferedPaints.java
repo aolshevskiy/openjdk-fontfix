@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,6 +45,8 @@ import sun.java2d.SurfaceData;
 import sun.java2d.loops.CompositeType;
 import sun.java2d.loops.SurfaceType;
 import static sun.java2d.pipe.BufferedOpCodes.*;
+
+import java.lang.annotation.Native;
 
 public class BufferedPaints {
 
@@ -247,7 +249,7 @@ public class BufferedPaints {
         BufferedImage bi = paint.getImage();
         SurfaceData dstData = sg2d.surfaceData;
         SurfaceData srcData =
-            dstData.getSourceSurfaceData(bi, sg2d.TRANSFORM_ISIDENT,
+            dstData.getSourceSurfaceData(bi, SunGraphics2D.TRANSFORM_ISIDENT,
                                          CompositeType.SrcOver, null);
         boolean filter =
             (sg2d.interpolationType !=
@@ -300,7 +302,7 @@ public class BufferedPaints {
      * shaders.  So for now we will cap this value at 12, but we can
      * re-evaluate this in the future as hardware becomes more capable.
      */
-    public static final int MULTI_MAX_FRACTIONS = 12;
+    @Native public static final int MULTI_MAX_FRACTIONS = 12;
 
     /**
      * Helper function to convert a color component in sRGB space to

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,9 +25,10 @@
 
 package com.sun.xml.internal.ws.transport.http;
 
+import com.oracle.webservices.internal.api.message.BasePropertySet;
+import com.oracle.webservices.internal.api.message.PropertySet;
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
-import com.sun.xml.internal.ws.api.PropertySet;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.server.WebServiceContextDelegate;
 
@@ -36,8 +37,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.security.Principal;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 
 /**
@@ -51,12 +55,12 @@ import java.util.Map;
  *
  * <p>
  * This class extends {@link PropertySet} so that a transport can
- * expose its properties to the appliation and pipes. (This object
+ * expose its properties to the application and pipes. (This object
  * will be added to {@link Packet#addSatellite(PropertySet)}.)
  *
  * @author Jitendra Kotamraju
  */
-public abstract class WSHTTPConnection extends PropertySet {
+public abstract class WSHTTPConnection extends BasePropertySet {
 
     public static final int OK=200;
     public static final int ONEWAY=202;
@@ -94,6 +98,12 @@ public abstract class WSHTTPConnection extends PropertySet {
      */
     public abstract void setResponseHeaders(@NotNull Map<String,List<String>> headers);
 
+    public void setResponseHeader(String key, String value) {
+        setResponseHeader(key, Collections.singletonList(value));
+    }
+
+    public abstract void setResponseHeader(String key, List<String> value);
+
     /**
      * Sets the <tt>"Content-Type"</tt> header.
      *
@@ -102,7 +112,7 @@ public abstract class WSHTTPConnection extends PropertySet {
      * the previously set value. If not, this method adds it.
      *
      * <p>
-     * Note that this method and {@link #setResponseHeaders(Map&lt;String,List&lt;String>>)}
+     * Note that this method and {@link #setResponseHeaders(java.util.Map)}
      * may be invoked in any arbitrary order.
      *
      * @param value
@@ -188,10 +198,24 @@ public abstract class WSHTTPConnection extends PropertySet {
     public abstract @NotNull Map<String,List<String>> getRequestHeaders();
 
     /**
+     * HTTP request header names.
+     *
+     * @deprecated
+     *      This is a potentially expensive operation.
+     *      Programs that want to access HTTP headers should consider using
+     *      other methods such as {@link #getRequestHeader(String)}.
+     *
+     * @return
+     *      can be empty but never null.
+     */
+    public abstract @NotNull Set<String> getRequestHeaderNames();
+
+    /**
      * @return
      *      HTTP response headers.
      */
     public abstract Map<String,List<String>> getResponseHeaders();
+
     /**
      * Gets an HTTP request header.
      *
@@ -205,14 +229,59 @@ public abstract class WSHTTPConnection extends PropertySet {
     public abstract @Nullable String getRequestHeader(@NotNull String headerName);
 
     /**
+     * Gets an HTTP request header.
+     *
+     * @return
+     *      null if no header exists.
+     */
+    public abstract @Nullable List<String> getRequestHeaderValues(@NotNull String headerName);
+
+    /**
      * HTTP Query string, such as "foo=bar", or null if none exists.
      */
     public abstract @Nullable String getQueryString();
 
     /**
-     * Requested path. A string like "/foo/bar/baz"
+     * Extra portion of the request URI after the end of the expected address of the service
+     * but before the query string
      */
     public abstract @Nullable String getPathInfo();
+
+    /**
+     * Requested path. A string like "/foo/bar/baz"
+     */
+    public abstract @NotNull String getRequestURI();
+
+    /**
+     * Requested scheme, e.g. "http" or "https"
+     */
+    public abstract @NotNull String getRequestScheme();
+
+    /**
+     * Server name
+     */
+    public abstract @NotNull String getServerName();
+
+    /**
+     * Server port
+     */
+    public abstract int getServerPort();
+
+    /**
+     * Portion of the request URI that groups related service addresses.  The value, if non-empty, will
+     * always begin with '/', but will never end with '/'.  Environments that do not support
+     * context paths must return an empty string.
+     */
+    public @NotNull String getContextPath() {
+        return "";
+    }
+
+    /**
+     * Environment specific context , if available
+     */
+    public Object getContext() {
+        return null;
+    }
 
     /**
      * Gets the absolute URL up to the context path.
@@ -231,6 +300,34 @@ public abstract class WSHTTPConnection extends PropertySet {
      *         else false
      */
     public abstract boolean isSecure();
+
+    /**
+     * User principal associated with the request
+     *
+     * @return user principal
+     */
+    public Principal getUserPrincipal() {
+        return null;
+    }
+
+    /**
+     * Whether user associated with the request holds the given role
+     *
+     * @param role Role to check
+     * @return if the caller holds the role
+     */
+    public boolean isUserInRole(String role) {
+        return false;
+    }
+
+    /**
+     * Gets request metadata attribute
+     * @param key Request metadata key
+     * @return Value of metadata attribute or null, if no value present
+     */
+    public Object getRequestAttribute(String key) {
+        return null;
+    }
 
     private volatile boolean closed;
 
@@ -251,7 +348,7 @@ public abstract class WSHTTPConnection extends PropertySet {
     /**
      * Subclasses are expected to override
      *
-     * @return
+     * @return a {@link String} containing the protocol name and version number
      */
     public String getProtocol() {
         return "HTTP/1.1";
@@ -261,7 +358,7 @@ public abstract class WSHTTPConnection extends PropertySet {
      * Subclasses are expected to override
      *
      * @since JAX-WS RI 2.2.2
-     * @return
+     * @return value of given cookie
      */
     public String getCookie(String name) {
         return null;
@@ -278,8 +375,6 @@ public abstract class WSHTTPConnection extends PropertySet {
 
     /**
      * Subclasses are expected to override
-     *
-     * @return
      */
     public void setContentLengthResponseHeader(int value) {
     }

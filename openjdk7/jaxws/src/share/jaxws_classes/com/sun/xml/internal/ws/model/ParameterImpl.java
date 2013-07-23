@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,10 @@ import com.sun.xml.internal.bind.api.TypeReference;
 import com.sun.xml.internal.ws.api.model.JavaMethod;
 import com.sun.xml.internal.ws.api.model.Parameter;
 import com.sun.xml.internal.ws.api.model.ParameterBinding;
+import com.sun.xml.internal.ws.spi.db.RepeatedElementBridge;
+import com.sun.xml.internal.ws.spi.db.WrapperComposite;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+import com.sun.xml.internal.ws.spi.db.TypeInfo;
 
 import javax.jws.WebParam.Mode;
 import javax.xml.namespace.QName;
@@ -57,14 +61,19 @@ public class ParameterImpl implements Parameter {
     private String partName;
     private final int index;
     private final Mode mode;
+    /** @deprecated */
     private TypeReference typeReference;
+    private TypeInfo typeInfo;
     private QName name;
     private final JavaMethodImpl parent;
 
-    public ParameterImpl(JavaMethodImpl parent, TypeReference type, Mode mode, int index) {
+    WrapperParameter wrapper;
+    TypeInfo itemTypeInfo;
+
+    public ParameterImpl(JavaMethodImpl parent, TypeInfo type, Mode mode, int index) {
         assert type != null;
 
-        this.typeReference = type;
+        this.typeInfo = type;
         this.name = type.tagName;
         this.mode = mode;
         this.index = index;
@@ -86,10 +95,35 @@ public class ParameterImpl implements Parameter {
         return name;
     }
 
+    public XMLBridge getXMLBridge() {
+        return getOwner().getXMLBridge(typeInfo);
+    }
+
+    public XMLBridge getInlinedRepeatedElementBridge() {
+        TypeInfo itemType = getItemType();
+        if (itemType != null) {
+            XMLBridge xb = getOwner().getXMLBridge(itemType);
+            if (xb != null) return new RepeatedElementBridge(typeInfo, xb);
+        }
+        return null;
+    }
+
+    public TypeInfo getItemType() {
+        if (itemTypeInfo != null) return itemTypeInfo;
+        //RpcLit cannot inline repeated element in wrapper
+        if (parent.getBinding().isRpcLit() || wrapper == null) return null;
+        //InlinedRepeatedElementBridge is only used for dynamic wrapper (no wrapper class)
+        if (!WrapperComposite.class.equals(wrapper.getTypeInfo().type)) return null;
+        if (!getBinding().isBody()) return null;
+        itemTypeInfo = typeInfo.getItemType();
+        return  itemTypeInfo;
+    }
+
+    /**  @deprecated  */
     public Bridge getBridge() {
         return getOwner().getBridge(typeReference);
     }
-
+    /**  @deprecated  */
     protected Bridge getBridge(TypeReference typeRef) {
         return getOwner().getBridge(typeRef);
     }
@@ -97,16 +131,20 @@ public class ParameterImpl implements Parameter {
     /**
      * TODO: once the model gets JAXBContext, shouldn't {@link Bridge}s
      * be made available from model objects?
-     *
+     * @deprecated use getTypeInfo
      * @return Returns the TypeReference associated with this Parameter
      */
     public TypeReference getTypeReference() {
         return typeReference;
     }
+    public TypeInfo getTypeInfo() {
+        return typeInfo;
+    }
 
     /**
      * Sometimes we need to overwrite the typeReferenc, such as during patching for rpclit
-     * @see AbstractSEIModelImpl#applyParameterBinding(com.sun.xml.internal.ws.model.wsdl.WSDLBoundPortTypeImpl)
+     * @see AbstractSEIModelImpl#applyRpcLitParamBinding(JavaMethodImpl, WrapperParameter, WSDLBoundPortType, WebParam.Mode)
+     * @deprecated
      */
     void setTypeReference(TypeReference type){
         typeReference = type;
@@ -215,7 +253,8 @@ public class ParameterImpl implements Parameter {
         this.partName = partName;
     }
 
-    void fillTypes(List<TypeReference> types) {
-        types.add(getTypeReference());
+    void fillTypes(List<TypeInfo> types) {
+        TypeInfo itemType = getItemType();
+        types.add((itemType != null) ? itemType : getTypeInfo());
     }
 }

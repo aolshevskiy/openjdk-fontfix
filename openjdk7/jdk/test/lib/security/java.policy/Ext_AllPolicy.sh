@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 4215035 7083664
+# @bug 4215035
 # @summary standard extensions path is hard-coded in default system policy file
 #
 # @build Ext_AllPolicy
@@ -45,6 +45,9 @@ if [ "${TESTJAVA}" = "" ] ; then
   echo "TESTJAVA not set.  Test cannot execute."
   echo "FAILED!!!"
   exit 1
+fi
+if [ "${COMPILEJAVA}" = "" ]; then
+  COMPILEJAVA="${TESTJAVA}"
 fi
 
 # set platform-dependent variables
@@ -74,10 +77,10 @@ esac
 # the test code
 
 cd ${TESTCLASSES}
-${TESTJAVA}${FS}bin${FS}jar -cvf Ext_AllPolicy.jar Ext_AllPolicy.class
+${COMPILEJAVA}${FS}bin${FS}jar ${TESTTOOLVMOPTS} -cvf Ext_AllPolicy.jar Ext_AllPolicy.class
 
 rm Ext_AllPolicy.class
-${TESTJAVA}${FS}bin${FS}java \
+${TESTJAVA}${FS}bin${FS}java ${TESTVMOPTS} \
         -Djava.security.manager -Djava.ext.dirs="${TESTCLASSES}" Ext_AllPolicy
 
 exit $?

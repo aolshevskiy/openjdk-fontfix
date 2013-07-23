@@ -23,14 +23,12 @@
 
 /*
  * @test
- * @bug 7195931 7197071 7198146
- * @summary UnsatisfiedLinkError on PKCS11.C_GetOperationState while
- *          using NSS from jre7u6+
+ * @bug 7197071
+ * @summary Makefiles for various security providers aren't including
+ *          the default manifest.
  */
 import java.net.*;
 import java.io.*;
-import java.security.*;
-import java.lang.reflect.*;
 
 /**
  * When the Java specification version is incremented, all of the providers
@@ -42,7 +40,6 @@ public class CheckManifestForRelease {
      * @param args the command line arguments
      */
     public static void main(String[] args) throws Exception {
-        checkP11MessageDigestClone();
         checkFileManifests();
     }
 
@@ -122,66 +119,5 @@ public class CheckManifestForRelease {
                 "Implementation-Version does not match " +
                 "Specification-Version");
         }
-    }
-
-    /*
-     * Workaround for unfortunately generified forName() API
-     */
-    @SuppressWarnings("unchecked")
-    static private Class<Provider> getProviderClass(String name)
-            throws Exception {
-        return (Class<Provider>)Class.forName(name);
-    }
-
-    /*
-     * Check the symptom, an UnsatisfiedLinkError in MessageDigests.
-     */
-    static private void checkP11MessageDigestClone() throws Exception {
-
-        System.out.println("=============");
-        System.out.println("Checking for UnsatisfiedLinkError");
-        String os = System.getProperty("os.name");
-        // Only run on Solaris
-        if (!os.equals("SunOS")) {
-            return;
-        }
-
-        /*
-         * We have to do some gyrations here, since the code to exercise
-         * this is in the P11 MessageDigests, and most of those mechanisms
-         * are disabled by default.
-         */
-        String customP11File =
-            System.getProperty("TESTSRC", ".") + "/p11-solaris.txt";
-
-        /*
-         * In 7u, we don't have a 64 PKCS11 windows build yet, so we
-         * have to do some dynamic checking to determine if there is
-         * a PKCS11 library available to test against.  Otherwise, the
-         * windows 64 bit will throw a compilation error before the
-         * test is even run.
-         */
-        Constructor<Provider> cons;
-        Provider provider;
-        try {
-            Class<Provider> clazz =
-                getProviderClass("sun.security.pkcs11.SunPKCS11");
-            cons = clazz.getConstructor(new Class[]{String.class});
-            provider = cons.newInstance(new Object[]{customP11File});
-        } catch (Exception ex) {
-            System.out.println("Skipping test - no PKCS11 provider available");
-            return;
-        }
-
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA1", provider);
-            md.update((byte) 0x01);
-            System.out.println(md.getProvider());
-            md.clone();
-        } catch (Exception e) {
-            // These kinds of failure are ok.  We're testing the
-            // UnsatisfiedLinkError here.
-        }
-        System.out.println("Passed.");
     }
 }

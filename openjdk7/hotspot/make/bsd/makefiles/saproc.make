@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -24,36 +24,40 @@
 
 # Rules to build serviceability agent library, used by vm.make
 
-# libsaproc[_g].so: serviceability agent
+# libsaproc.so(dylib): serviceability agent
 SAPROC   = saproc
-SAPROC_G = $(SAPROC)$(G_SUFFIX)
 
 ifeq ($(OS_VENDOR), Darwin)
   LIBSAPROC   = lib$(SAPROC).dylib
-  LIBSAPROC_G = lib$(SAPROC_G).dylib
 else
   LIBSAPROC   = lib$(SAPROC).so
-  LIBSAPROC_G = lib$(SAPROC_G).so
 endif
 
 AGENT_DIR = $(GAMMADIR)/agent
 
 SASRCDIR = $(AGENT_DIR)/src/os/$(Platform_os_family)
 
-NON_STUB_SASRCFILES = $(SASRCDIR)/salibelf.c          \
-                      $(SASRCDIR)/symtab.c            \
-                      $(SASRCDIR)/libproc_impl.c      \
-                      $(SASRCDIR)/ps_proc.c           \
-                      $(SASRCDIR)/ps_core.c           \
-                      $(SASRCDIR)/BsdDebuggerLocal.c
+BSD_NON_STUB_SASRCFILES = $(SASRCDIR)/salibelf.c             \
+                      $(SASRCDIR)/symtab.c                   \
+                      $(SASRCDIR)/libproc_impl.c             \
+                      $(SASRCDIR)/ps_proc.c                  \
+                      $(SASRCDIR)/ps_core.c                  \
+                      $(SASRCDIR)/BsdDebuggerLocal.c         \
+                      $(AGENT_DIR)/src/share/native/sadis.c
+
+DARWIN_NON_STUB_SASRCFILES = $(SASRCDIR)/symtab.c            \
+                      $(SASRCDIR)/libproc_impl.c             \
+                      $(SASRCDIR)/ps_core.c                  \
+                      $(SASRCDIR)/MacosxDebuggerLocal.m      \
+                      $(AGENT_DIR)/src/share/native/sadis.c
 
 ifeq ($(OS_VENDOR), FreeBSD)
-  SASRCFILES = $(NON_STUB_SASRCFILES)
+  SASRCFILES = $(BSD_NON_STUB_SASRCFILES)
   SALIBS = -lutil -lthread_db
   SAARCH = $(ARCHFLAG)
 else
   ifeq ($(OS_VENDOR), Darwin)
-    SASRCFILES = $(SASRCDIR)/MacosxDebuggerLocal.m
+    SASRCFILES = $(DARWIN_NON_STUB_SASRCFILES)
     SALIBS = -g -framework Foundation -F/System/Library/Frameworks/JavaVM.framework/Frameworks -framework JavaNativeFoundation -framework Security -framework CoreFoundation
     #objc compiler blows up on -march=i586, perhaps it should not be included in the macosx intel 32-bit C++ compiles?
     SAARCH = $(subst -march=i586,,$(ARCHFLAG))
@@ -104,7 +108,7 @@ $(LIBSAPROC): $(SASRCFILES) $(SAMAPFILE)
 	fi
 	@echo Making SA debugger back-end...
 	$(QUIETLY) $(CC) -D$(BUILDARCH) -D_GNU_SOURCE                   \
-                   $(SYMFLAG) $(SAARCH) $(SHARED_FLAG) $(PICFLAG)     \
+	           $(SYMFLAG) $(SAARCH) $(SHARED_FLAG) $(PICFLAG)       \
 	           -I$(SASRCDIR)                                        \
 	           -I$(GENERATED)                                       \
 	           $(BOOT_JAVA_INCLUDES)                                \
@@ -113,7 +117,6 @@ $(LIBSAPROC): $(SASRCFILES) $(SAMAPFILE)
 	           $(SA_DEBUG_CFLAGS)                                   \
 	           -o $@                                                \
 	           $(SALIBS)
-	$(QUIETLY) [ -f $(LIBSAPROC_G) ] || { ln -s $@ $(LIBSAPROC_G); }
 
 install_saproc: $(BUILDLIBSAPROC)
 	$(QUIETLY) if [ -e $(LIBSAPROC) ] ; then             \

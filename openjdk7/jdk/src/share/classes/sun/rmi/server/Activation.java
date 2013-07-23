@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -2230,7 +2230,13 @@ public class Activation implements Serializable {
         }
 
         public InetAddress getInetAddress() {
-            return serverSocket.getInetAddress();
+            return AccessController.doPrivileged(
+                new PrivilegedAction<InetAddress>() {
+                    @Override
+                    public InetAddress run() {
+                        return serverSocket.getInetAddress();
+                    }
+                });
         }
 
         public int getLocalPort() {
@@ -2238,7 +2244,13 @@ public class Activation implements Serializable {
         }
 
         public SocketAddress getLocalSocketAddress() {
-            return serverSocket.getLocalSocketAddress();
+            return AccessController.doPrivileged(
+                new PrivilegedAction<SocketAddress>() {
+                    @Override
+                    public SocketAddress run() {
+                        return serverSocket.getLocalSocketAddress();
+                    }
+                });
         }
 
         /**

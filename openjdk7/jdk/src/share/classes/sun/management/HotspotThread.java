@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,7 +58,7 @@ class HotspotThread
         String[] names = new String[count];
         long[] times = new long[count];
         int numThreads = getInternalThreadTimes0(names, times);
-        Map<String, Long> result = new HashMap<String, Long>(numThreads);
+        Map<String, Long> result = new HashMap<>(numThreads);
         for (int i = 0; i < numThreads; i++) {
             result.put(names[i], new Long(times[i]));
         }

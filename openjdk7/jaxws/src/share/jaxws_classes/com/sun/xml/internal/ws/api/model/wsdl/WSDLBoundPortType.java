@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,9 @@ import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
 import com.sun.xml.internal.ws.api.BindingID;
 import com.sun.xml.internal.ws.api.message.Message;
+import com.sun.xml.internal.ws.api.model.ParameterBinding;
 
+import javax.jws.WebParam.Mode;
 import javax.jws.soap.SOAPBinding;
 import javax.xml.namespace.QName;
 
@@ -112,4 +114,14 @@ public interface WSDLBoundPortType extends WSDLFeaturedObject, WSDLExtensible {
      *      null if no operation with the given tag name is found.
      */
     @Nullable WSDLBoundOperation getOperation(String namespaceUri, String localName);
+
+    /**
+     * Gets the {@link ParameterBinding} for a given operation, part name and the direction - IN/OUT
+     *
+     * @param operation wsdl:operation@name value. Must be non-null.
+     * @param part      wsdl:part@name such as value of soap:header@part. Must be non-null.
+     * @param mode      {@link Mode#IN} or {@link Mode#OUT}. Must be non-null.
+     * @return null if the binding could not be resolved for the part.
+     */
+    ParameterBinding getBinding(QName operation, String part, Mode mode);
 }

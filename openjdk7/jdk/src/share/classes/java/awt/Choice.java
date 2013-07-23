@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,7 @@ import java.io.ObjectInputStream;
 import java.io.IOException;
 
 import javax.accessibility.*;
+
 
 /**
  * The <code>Choice</code> class presents a pop-up menu of choices.
@@ -81,7 +82,7 @@ public class Choice extends Component implements ItemSelectable, Accessible {
      * @see #insert(String, int)
      * @see #remove(String)
      */
-    Vector pItems;
+    Vector<String> pItems;
 
     /**
      * The index of the current choice for this <code>Choice</code>
@@ -100,7 +101,16 @@ public class Choice extends Component implements ItemSelectable, Accessible {
     /*
      * JDK 1.1 serialVersionUID
      */
-     private static final long serialVersionUID = -4075310674757313071L;
+    private static final long serialVersionUID = -4075310674757313071L;
+
+    static {
+        /* ensure that the necessary native libraries are loaded */
+        Toolkit.loadLibraries();
+        /* initialize JNI field and method ids */
+        if (!GraphicsEnvironment.isHeadless()) {
+            initIDs();
+        }
+    }
 
     /**
      * Creates a new choice menu. The menu initially has no items in it.
@@ -116,7 +126,7 @@ public class Choice extends Component implements ItemSelectable, Accessible {
      */
     public Choice() throws HeadlessException {
         GraphicsEnvironment.checkHeadless();
-        pItems = new Vector();
+        pItems = new Vector<>();
     }
 
     /**
@@ -178,7 +188,7 @@ public class Choice extends Component implements ItemSelectable, Accessible {
      * be called on the toolkit thread.
      */
     final String getItemImpl(int index) {
-        return (String)pItems.elementAt(index);
+        return pItems.elementAt(index);
     }
 
     /**
@@ -511,7 +521,7 @@ public class Choice extends Component implements ItemSelectable, Accessible {
      * @since 1.4
      */
     public synchronized ItemListener[] getItemListeners() {
-        return (ItemListener[])(getListeners(ItemListener.class));
+        return getListeners(ItemListener.class);
     }
 
     /**
@@ -707,6 +717,10 @@ public class Choice extends Component implements ItemSelectable, Accessible {
       }
     }
 
+    /**
+     * Initialize JNI field and method IDs
+     */
+    private static native void initIDs();
 
 /////////////////
 // Accessibility support

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,11 +36,11 @@ import com.sun.xml.internal.ws.api.pipe.Tube;
 import com.sun.xml.internal.ws.api.client.WSPortInfo;
 import com.sun.xml.internal.ws.binding.BindingImpl;
 import com.sun.xml.internal.ws.client.WSServiceDelegate;
-import com.sun.xml.internal.ws.client.PortInfo;
+import com.sun.xml.internal.ws.message.jaxb.JAXBDispatchMessage;
+import com.sun.xml.internal.ws.spi.db.BindingContextFactory;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
-import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 import javax.xml.namespace.QName;
 import javax.xml.transform.Source;
@@ -61,15 +61,22 @@ public class JAXBDispatch extends DispatchImpl<Object> {
 
     private final JAXBContext jaxbcontext;
 
+    // We will support a JAXBContext parameter from an unknown JAXB
+    // implementation by marshaling and unmarshaling directly from the
+    // context object, as there is no Bond available.
+    private final boolean isContextSupported;
+
     @Deprecated
     public JAXBDispatch(QName port, JAXBContext jc, Service.Mode mode, WSServiceDelegate service, Tube pipe, BindingImpl binding, WSEndpointReference epr) {
         super(port, mode, service, pipe, binding, epr);
         this.jaxbcontext = jc;
+        this.isContextSupported = BindingContextFactory.isContextSupported(jc);
     }
 
     public JAXBDispatch(WSPortInfo portInfo, JAXBContext jc, Service.Mode mode, BindingImpl binding, WSEndpointReference epr) {
         super(portInfo, mode, binding, epr);
         this.jaxbcontext = jc;
+        this.isContextSupported = BindingContextFactory.isContextSupported(jc);
     }
 
     Object toReturnValue(Packet response) {
@@ -94,26 +101,34 @@ public class JAXBDispatch extends DispatchImpl<Object> {
     Packet createPacket(Object msg) {
         assert jaxbcontext != null;
 
-        try {
-            Marshaller marshaller = jaxbcontext.createMarshaller();
-            marshaller.setProperty("jaxb.fragment", Boolean.TRUE);
-
-            Message message = (msg == null) ? Messages.createEmpty(soapVersion): Messages.create(marshaller, msg, soapVersion);
-            return new Packet(message);
-        } catch (JAXBException e) {
-            throw new WebServiceException(e);
+        Message message;
+        if (mode == Service.Mode.MESSAGE) {
+            message = isContextSupported ?
+                    new JAXBDispatchMessage(BindingContextFactory.create(jaxbcontext), msg, soapVersion) :
+                    new JAXBDispatchMessage(jaxbcontext, msg, soapVersion);
+        } else {
+            if (msg == null) {
+                message = Messages.createEmpty(soapVersion);
+            } else {
+                message = isContextSupported ?
+                        Messages.create(jaxbcontext, msg, soapVersion) :
+                        Messages.createRaw(jaxbcontext, msg, soapVersion);
+            }
         }
+
+        return new Packet(message);
+
     }
 
     public void setOutboundHeaders(Object... headers) {
-        if(headers==null)
+        if (headers == null)
             throw new IllegalArgumentException();
         Header[] hl = new Header[headers.length];
-        for( int i=0; i<hl.length; i++ ) {
-            if(headers[i]==null)
+        for (int i = 0; i < hl.length; i++) {
+            if (headers[i] == null)
                 throw new IllegalArgumentException();
             // TODO: handle any JAXBContext.
-            hl[i] = Headers.create((JAXBRIContext)jaxbcontext,headers[i]);
+            hl[i] = Headers.create((JAXBRIContext) jaxbcontext, headers[i]);
         }
         super.setOutboundHeaders(hl);
     }

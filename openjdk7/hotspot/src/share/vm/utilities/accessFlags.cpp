@@ -59,6 +59,8 @@ void AccessFlags::atomic_clear_bits(jint bits) {
   } while(f != old_flags);
 }
 
+#if !defined(PRODUCT) || INCLUDE_JVMTI
+
 void AccessFlags::print_on(outputStream* st) const {
   if (is_public      ()) st->print("public "      );
   if (is_private     ()) st->print("private "     );
@@ -75,7 +77,10 @@ void AccessFlags::print_on(outputStream* st) const {
   if (is_synthetic   ()) st->print("synthetic "   );
   if (is_old         ()) st->print("{old} "       );
   if (is_obsolete    ()) st->print("{obsolete} "  );
+  if (on_stack       ()) st->print("{on_stack} "  );
 }
+
+#endif // !PRODUCT || INCLUDE_JVMTI
 
 void accessFlags_init() {
   assert(sizeof(AccessFlags) == sizeof(jint), "just checking size of flags");

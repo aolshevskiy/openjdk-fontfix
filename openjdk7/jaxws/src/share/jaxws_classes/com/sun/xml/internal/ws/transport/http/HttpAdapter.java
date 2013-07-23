@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,12 +25,35 @@
 
 package com.sun.xml.internal.ws.transport.http;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.net.HttpURLConnection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.TreeMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
+import javax.xml.ws.Binding;
+import javax.xml.ws.WebServiceException;
+import javax.xml.ws.http.HTTPBinding;
+
+import com.oracle.webservices.internal.api.message.PropertySet;
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
-import com.sun.xml.internal.ws.api.PropertySet;
+import com.sun.xml.internal.ws.api.Component;
+import com.sun.xml.internal.ws.api.EndpointAddress;
+import com.sun.xml.internal.ws.api.SOAPVersion;
+import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
+import com.sun.xml.internal.ws.api.addressing.NonAnonymousResponseProcessor;
 import com.sun.xml.internal.ws.api.ha.HaInfo;
-import com.sun.xml.internal.ws.api.ha.StickyFeature;
 import com.sun.xml.internal.ws.api.message.ExceptionHasMessage;
 import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.message.Packet;
@@ -40,7 +63,6 @@ import com.sun.xml.internal.ws.api.server.AbstractServerAsyncTransport;
 import com.sun.xml.internal.ws.api.server.Adapter;
 import com.sun.xml.internal.ws.api.server.BoundEndpoint;
 import com.sun.xml.internal.ws.api.server.DocumentAddressResolver;
-import com.sun.xml.internal.ws.api.server.EndpointComponent;
 import com.sun.xml.internal.ws.api.server.Module;
 import com.sun.xml.internal.ws.api.server.PortAddressResolver;
 import com.sun.xml.internal.ws.api.server.SDDocument;
@@ -48,32 +70,19 @@ import com.sun.xml.internal.ws.api.server.ServiceDefinition;
 import com.sun.xml.internal.ws.api.server.TransportBackChannel;
 import com.sun.xml.internal.ws.api.server.WSEndpoint;
 import com.sun.xml.internal.ws.api.server.WebServiceContextDelegate;
+import com.sun.xml.internal.ws.fault.SOAPFaultBuilder;
 import com.sun.xml.internal.ws.resources.WsservletMessages;
 import com.sun.xml.internal.ws.server.UnsupportedMediaException;
 import com.sun.xml.internal.ws.util.ByteArrayBuffer;
 import com.sun.xml.internal.ws.util.Pool;
 
-import javax.xml.ws.Binding;
-import javax.xml.ws.WebServiceException;
-import javax.xml.ws.WebServiceFeature;
-import javax.xml.ws.http.HTTPBinding;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
-import java.net.HttpURLConnection;
-import java.util.*;
-import java.util.Map.Entry;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
- * {@link Adapter} that receives messages in HTTP.
+ * {@link com.sun.xml.internal.ws.api.server.Adapter} that receives messages in HTTP.
  *
  * <p>
  * This object also assigns unique query string (such as "xsd=1") to
- * each {@link SDDocument} so that they can be served by HTTP GET requests.
+ * each {@link com.sun.xml.internal.ws.api.server.SDDocument} so that they can be served by HTTP GET requests.
  *
  * @author Kohsuke Kawaguchi
  * @author Jitendra Kotamraju
@@ -81,13 +90,13 @@ import java.util.logging.Logger;
 public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
 
     /**
-     * {@link SDDocument}s keyed by the query string like "?abc".
+     * {@link com.sun.xml.internal.ws.api.server.SDDocument}s keyed by the query string like "?abc".
      * Used for serving documents via HTTP GET.
      *
-     * Empty if the endpoint doesn't have {@link ServiceDefinition}.
+     * Empty if the endpoint doesn't have {@link com.sun.xml.internal.ws.api.server.ServiceDefinition}.
      * Read-only.
      */
-    private Map<String,SDDocument> wsdls;
+    protected Map<String,SDDocument> wsdls;
 
     /**
      * Reverse map of {@link #wsdls}. Read-only.
@@ -104,18 +113,19 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
     public final HttpAdapterList<? extends HttpAdapter> owner;
 
     /**
-     * Servlet URL pattern with which this {@link HttpAdapter} is associated.
+     * Servlet URL pattern with which this {@link com.sun.xml.internal.ws.transport.http.HttpAdapter} is associated.
      */
     public final String urlPattern;
 
     protected boolean stickyCookie;
 
+    protected boolean disableJreplicaCookie = false;
 
     /**
-     * Creates a lone {@link HttpAdapter} that does not know of any other
-     * {@link HttpAdapter}s.
+     * Creates a lone {@link com.sun.xml.internal.ws.transport.http.HttpAdapter} that does not know of any other
+     * {@link com.sun.xml.internal.ws.transport.http.HttpAdapter}s.
      *
-     * This is convenient for creating an {@link HttpAdapter} for an environment
+     * This is convenient for creating an {@link com.sun.xml.internal.ws.transport.http.HttpAdapter} for an environment
      * where they don't know each other (such as JavaSE deployment.)
      *
      * @param endpoint web service endpoint
@@ -131,11 +141,14 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
      * @param endpoint web service endpoint
      * @param owner list of related adapters
      */
-    protected HttpAdapter(WSEndpoint endpoint, HttpAdapterList<? extends HttpAdapter> owner) {
+    protected HttpAdapter(WSEndpoint endpoint,
+                          HttpAdapterList<? extends HttpAdapter> owner) {
         this(endpoint,owner,null);
     }
 
-    protected HttpAdapter(WSEndpoint endpoint, HttpAdapterList<? extends HttpAdapter> owner, String urlPattern) {
+    protected HttpAdapter(WSEndpoint endpoint,
+                          HttpAdapterList<? extends HttpAdapter> owner,
+                          String urlPattern) {
         super(endpoint);
         this.owner = owner;
         this.urlPattern = urlPattern;
@@ -157,7 +170,7 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
      *
      * @param sdef service definition
      */
-    public void initWSDLMap(ServiceDefinition sdef) {
+    public final void initWSDLMap(ServiceDefinition sdef) {
         this.serviceDefinition = sdef;
         if(sdef==null) {
             wsdls = Collections.emptyMap();
@@ -178,7 +191,7 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
 
             int wsdlnum = 1;
             int xsdnum = 1;
-            for (Map.Entry<String, SDDocument> e : systemIds.entrySet()) {
+            for (Entry<String, SDDocument> e : systemIds.entrySet()) {
                 SDDocument sdd = e.getValue();
                 if (sdd.isWSDL()) {
                     wsdls.put("wsdl="+(wsdlnum++),sdd);
@@ -209,6 +222,7 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
         }
     }
 
+    @Override
     protected HttpToolkit createToolkit() {
         return new HttpToolkit();
     }
@@ -224,12 +238,12 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
      * and "connection" here is an HTTP connection.
      *
      * <p>
-     * To populate a request {@link Packet} with more info,
-     * define {@link PropertySet.Property properties} on
+     * To populate a request {@link com.sun.xml.internal.ws.api.message.Packet} with more info,
+     * define {@link com.oracle.webservices.internal.api.message.PropertySet.Property properties} on
      * {@link WSHTTPConnection}.
      *
      * @param connection to receive/send HTTP messages for web service endpoints
-     * @throws IOException when I/O errors happen
+     * @throws java.io.IOException when I/O errors happen
      */
     public void handle(@NotNull WSHTTPConnection connection) throws IOException {
         if (handleGet(connection)) {
@@ -250,10 +264,11 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
     public boolean handleGet(@NotNull WSHTTPConnection connection) throws IOException {
         if (connection.getRequestMethod().equals("GET")) {
             // metadata query. let the interceptor run
-            for (EndpointComponent c : endpoint.getComponentRegistry()) {
+            for (Component c : endpoint.getComponents()) {
                 HttpMetadataPublisher spi = c.getSPI(HttpMetadataPublisher.class);
-                if (spi != null && spi.handleMetadataRequest(this, connection))
-                    return true; // handled
+                if (spi != null && spi.handleMetadataRequest(this, connection)) {
+                    return true;
+                } // handled
             }
 
             if (isMetadataQuery(connection.getQueryString())) {
@@ -308,10 +323,13 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
         packet.wasTransportSecure = con.isSecure();
         packet.acceptableMimeTypes = con.getRequestHeader("Accept");
         packet.addSatellite(con);
+        addSatellites(packet);
+        packet.isAdapterDeliversNonAnonymousResponse = true;
+        packet.component = this;
         packet.transportBackChannel = new Oneway(con);
         packet.webServiceContextDelegate = con.getWebServiceContextDelegate();
-
-        if (dump) {
+        packet.setState(Packet.State.ServerRequest);
+        if (dump || LOGGER.isLoggable(Level.FINER)) {
             ByteArrayBuffer buf = new ByteArrayBuffer();
             buf.write(in);
             in.close();
@@ -322,28 +340,73 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
         return packet;
     }
 
+    protected void addSatellites(Packet packet) {
+    }
+
     /**
-     * Some stacks may send non WS-I BP 1.2 conformant SoapAction.
-     * Make sure SOAPAction is quoted as {@link Packet#soapAction} expectsa quoted soapAction value.
+     * Some stacks may send non WS-I BP 1.2 conforming SoapAction.
+     * Make sure SOAPAction is quoted as {@link com.sun.xml.internal.ws.api.message.Packet#soapAction} expects quoted soapAction value.
      *
      * @param soapAction SoapAction HTTP Header
      * @return quoted SOAPAction value
      */
-    private String fixQuotesAroundSoapAction(String soapAction) {
+    static public String fixQuotesAroundSoapAction(String soapAction) {
         if(soapAction != null && (!soapAction.startsWith("\"") || !soapAction.endsWith("\"")) ) {
-            LOGGER.warning("Received WS-I BP non-conformant Unquoted SoapAction HTTP header: "+ soapAction);
+            if (LOGGER.isLoggable(Level.INFO)) {
+                LOGGER.log(Level.INFO, "Received WS-I BP non-conformant Unquoted SoapAction HTTP header: {0}", soapAction);
+            }
             String fixedSoapAction = soapAction;
-            if(!soapAction.startsWith("\""))
+            if(!soapAction.startsWith("\"")) {
                 fixedSoapAction = "\"" + fixedSoapAction;
-            if(!soapAction.endsWith("\""))
+            }
+            if(!soapAction.endsWith("\"")) {
                 fixedSoapAction = fixedSoapAction + "\"";
+            }
             return fixedSoapAction;
         }
         return soapAction;
     }
 
+    protected NonAnonymousResponseProcessor getNonAnonymousResponseProcessor() {
+        return NonAnonymousResponseProcessor.getDefault();
+    }
+
+    /**
+     * This method is added for the case of the sub-class wants to override the method to
+     * print details. E.g. convert soapfault as HTML msg for 403 error connstatus.
+     * @param os
+     */
+    protected void writeClientError(int connStatus, @NotNull OutputStream os, @NotNull Packet packet) throws IOException {
+        //do nothing
+    }
+
+    private boolean isClientErrorStatus(int connStatus)
+    {
+        return (connStatus == HttpURLConnection.HTTP_FORBIDDEN); // add more for future.
+    }
+
+    private boolean isNonAnonymousUri(EndpointAddress addr){
+        return (addr != null) && !addr.toString().equals(AddressingVersion.W3C.anonymousUri) &&
+                        !addr.toString().equals(AddressingVersion.MEMBER.anonymousUri);
+    }
 
     private void encodePacket(@NotNull Packet packet, @NotNull WSHTTPConnection con, @NotNull Codec codec) throws IOException {
+        if (isNonAnonymousUri(packet.endpointAddress) && packet.getMessage() != null) {
+           try {
+                // Message is targeted to non-anonymous response endpoint.
+                // After call to non-anonymous processor, typically, packet.getMessage() will be null
+                // however, processors could use this pattern to modify the response sent on the back-channel,
+                // e.g. send custom HTTP headers with the HTTP 202
+                    packet = getNonAnonymousResponseProcessor().process(packet);
+            } catch (RuntimeException re) {
+                // if processing by NonAnonymousResponseProcessor fails, new SOAPFaultMessage is created to be sent
+                // to back-channel client
+                SOAPVersion soapVersion = packet.getBinding().getSOAPVersion();
+                Message faultMsg = SOAPFaultBuilder.createSOAPFaultMessage(soapVersion, null, re);
+                packet = packet.createServerResponse(faultMsg, packet.endpoint.getPort(), null, packet.endpoint.getBinding());
+            }
+        }
+
         if (con.isClosed()) {
             return;                 // Connection is already closed
         }
@@ -354,11 +417,21 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
             if (!con.isClosed()) {
                 // set the response code if not already set
                 // for example, 415 may have been set earlier for Unsupported Content-Type
-                if (con.getStatus() == 0)
+                if (con.getStatus() == 0) {
                     con.setStatus(WSHTTPConnection.ONEWAY);
+                }
+                OutputStream os = con.getProtocol().contains("1.1") ? con.getOutput() : new Http10OutputStream(con);
+                if (dump || LOGGER.isLoggable(Level.FINER)) {
+                    ByteArrayBuffer buf = new ByteArrayBuffer();
+                    codec.encode(packet, buf);
+                    dump(buf, "HTTP response " + con.getStatus(), con.getResponseHeaders());
+                    buf.writeTo(os);
+                } else {
+                    codec.encode(packet, os);
+                }
                 // close the response channel now
                 try {
-                    con.getOutput().close(); // no payload
+                    os.close(); // no payload
                 } catch (IOException e) {
                     throw new WebServiceException(e);
                 }
@@ -372,11 +445,25 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
                         : HttpURLConnection.HTTP_OK);
             }
 
+            if (isClientErrorStatus(con.getStatus())) {
+                OutputStream os = con.getOutput();
+                if (dump || LOGGER.isLoggable(Level.FINER)) {
+                    ByteArrayBuffer buf = new ByteArrayBuffer();
+                    writeClientError(con.getStatus(), buf, packet);
+                    dump(buf, "HTTP response " + con.getStatus(), con.getResponseHeaders());
+                    buf.writeTo(os);
+                } else {
+                    writeClientError(con.getStatus(), os, packet);
+                }
+                os.close();
+                  return;
+            }
+
             ContentType contentType = codec.getStaticContentType(packet);
             if (contentType != null) {
                 con.setContentTypeResponseHeader(contentType.getContentType());
                 OutputStream os = con.getProtocol().contains("1.1") ? con.getOutput() : new Http10OutputStream(con);
-                if (dump) {
+                if (dump || LOGGER.isLoggable(Level.FINER)) {
                     ByteArrayBuffer buf = new ByteArrayBuffer();
                     codec.encode(packet, buf);
                     dump(buf, "HTTP response " + con.getStatus(), con.getResponseHeaders());
@@ -390,7 +477,7 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
                 ByteArrayBuffer buf = new ByteArrayBuffer();
                 contentType = codec.encode(packet, buf);
                 con.setContentTypeResponseHeader(contentType.getContentType());
-                if (dump) {
+                if (dump || LOGGER.isLoggable(Level.FINER)) {
                     dump(buf, "HTTP response " + con.getStatus(), con.getResponseHeaders());
                 }
                 OutputStream os = con.getOutput();
@@ -436,7 +523,9 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
             }
             if (haInfo != null) {
                 con.setCookie("METRO_KEY", haInfo.getKey());
-                con.setCookie("JREPLICA", haInfo.getReplicaInstance());
+                if (!disableJreplicaCookie) {
+                    con.setCookie("JREPLICA", haInfo.getReplicaInstance());
+                }
             }
         }
     }
@@ -479,6 +568,7 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
             }
 
             endpoint.process(request, new WSEndpoint.CompletionCallback() {
+                @Override
                 public void onCompletion(@NotNull Packet response) {
                     try {
                         try {
@@ -499,6 +589,7 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
 
     public static  final CompletionCallback NO_OP_COMPLETION_CALLBACK = new CompletionCallback() {
 
+        @Override
         public void onCompletion() {
             //NO-OP
         }
@@ -518,35 +609,37 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
             super.handle(con);
         }
 
+        @Override
         protected void encodePacket(WSHTTPConnection con, @NotNull Packet packet, @NotNull Codec codec) throws IOException {
             HttpAdapter.this.encodePacket(packet, con, codec);
         }
 
-        protected @Nullable String getAcceptableMimeTypes(WSHTTPConnection con) {
+        protected @Override @Nullable String getAcceptableMimeTypes(WSHTTPConnection con) {
             return null;
         }
 
-        protected @Nullable TransportBackChannel getTransportBackChannel(WSHTTPConnection con) {
+        protected @Override @Nullable TransportBackChannel getTransportBackChannel(WSHTTPConnection con) {
             return new Oneway(con);
         }
 
-        protected @NotNull
+        protected @Override @NotNull
         PropertySet getPropertySet(WSHTTPConnection con) {
             return con;
         }
 
-        protected @NotNull WebServiceContextDelegate getWebServiceContextDelegate(WSHTTPConnection con) {
+        protected @Override @NotNull WebServiceContextDelegate getWebServiceContextDelegate(WSHTTPConnection con) {
             return con.getWebServiceContextDelegate();
         }
     }
 
-    final class Oneway implements TransportBackChannel {
+    static final class Oneway implements TransportBackChannel {
         WSHTTPConnection con;
         boolean closed;
 
         Oneway(WSHTTPConnection con) {
             this.con = con;
         }
+        @Override
         public void close() {
             if (!closed) {
                 closed = true;
@@ -557,10 +650,28 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
                     con.setStatus(WSHTTPConnection.ONEWAY);
                 }
 
+                OutputStream output = null;
                 try {
-                    con.getOutput().close(); // no payload
+                    output = con.getOutput();
                 } catch (IOException e) {
-                    throw new WebServiceException(e);
+                    // no-op
+                }
+
+                if (dump || LOGGER.isLoggable(Level.FINER)) {
+                    try {
+                        ByteArrayBuffer buf = new ByteArrayBuffer();
+                        dump(buf, "HTTP response " + con.getStatus(), con.getResponseHeaders());
+                    } catch (Exception e) {
+                        throw new WebServiceException(e.toString(), e);
+                    }
+                }
+
+                if (output != null) {
+                        try {
+                                output.close(); // no payload
+                        } catch (IOException e) {
+                                throw new WebServiceException(e);
+                        }
                 }
                 con.close();
             }
@@ -592,7 +703,7 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
                     try {
                         packet = head.process(packet, con.getWebServiceContextDelegate(),
                                 packet.transportBackChannel);
-                    } catch(Exception e) {
+                    } catch(Throwable e) {
                         LOGGER.log(Level.SEVERE, e.getMessage(), e);
                         if (!con.isClosed()) {
                             writeInternalServerError(con);
@@ -603,6 +714,9 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
                 encodePacket(packet, con, codec);
             } finally {
                 if (!con.isClosed()) {
+                    if (LOGGER.isLoggable(Level.FINE)) {
+                        LOGGER.log(Level.FINE, "Closing HTTP Connection with status: {0}", con.getStatus());
+                    }
                     con.close();
                 }
             }
@@ -631,7 +745,7 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
      * @param con
      *      The connection to which the data will be sent.
      *
-     * @throws IOException when I/O errors happen
+     * @throws java.io.IOException when I/O errors happen
      */
     public void publishWSDL(@NotNull WSHTTPConnection con) throws IOException {
         con.getInput().close();
@@ -647,19 +761,29 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
 
         OutputStream os = con.getProtocol().contains("1.1") ? con.getOutput() : new Http10OutputStream(con);
 
-        final PortAddressResolver portAddressResolver = owner.createPortAddressResolver(con.getBaseAddress());
+        PortAddressResolver portAddressResolver = getPortAddressResolver(con.getBaseAddress());
+        DocumentAddressResolver resolver = getDocumentAddressResolver(portAddressResolver);
+
+        doc.writeTo(portAddressResolver, resolver, os);
+        os.close();
+    }
+
+    public PortAddressResolver getPortAddressResolver(String baseAddress) {
+        return owner.createPortAddressResolver(baseAddress, endpoint.getImplementationClass());
+    }
+
+    public DocumentAddressResolver getDocumentAddressResolver(
+                        PortAddressResolver portAddressResolver) {
         final String address = portAddressResolver.getAddressFor(endpoint.getServiceName(), endpoint.getPortName().getLocalPart());
         assert address != null;
-        DocumentAddressResolver resolver = new DocumentAddressResolver() {
+        return new DocumentAddressResolver() {
+            @Override
             public String getRelativeAddressFor(@NotNull SDDocument current, @NotNull SDDocument referenced) {
                 // the map on endpoint should account for all SDDocument
                 assert revWsdls.containsKey(referenced);
                 return address+'?'+ revWsdls.get(referenced);
             }
         };
-
-        doc.writeTo(portAddressResolver, resolver, os);
-        os.close();
     }
 
     /**
@@ -711,30 +835,42 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
         }
     }
 
-    private void dump(ByteArrayBuffer buf, String caption, Map<String, List<String>> headers) throws IOException {
-        System.out.println("---["+caption +"]---");
+    private static void dump(ByteArrayBuffer buf, String caption, Map<String, List<String>> headers) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PrintWriter pw = new PrintWriter(baos, true);
+        pw.println("---["+caption +"]---");
         if (headers != null) {
             for (Entry<String, List<String>> header : headers.entrySet()) {
                 if (header.getValue().isEmpty()) {
                     // I don't think this is legal, but let's just dump it,
                     // as the point of the dump is to uncover problems.
-                    System.out.println(header.getValue());
+                    pw.println(header.getValue());
                 } else {
                     for (String value : header.getValue()) {
-                        System.out.println(header.getKey() + ": " + value);
+                        pw.println(header.getKey() + ": " + value);
                     }
                 }
             }
         }
-        buf.writeTo(System.out);
-        System.out.println("--------------------");
+        buf.writeTo(baos);
+        pw.println("--------------------");
+
+        String msg = baos.toString();
+        if (dump) {
+          System.out.println(msg);
+        }
+        if (LOGGER.isLoggable(Level.FINER)) {
+          LOGGER.log(Level.FINER, msg);
+        }
     }
 
     /*
      * Generates the listing of all services.
      */
     private void writeWebServicesHtmlPage(WSHTTPConnection con) throws IOException {
-        if (!publishStatusPage) return;
+        if (!publishStatusPage) {
+            return;
+        }
 
         // TODO: resurrect the ability to localize according to the current request.
 
@@ -808,9 +944,13 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
     /**
      * Dumps what goes across HTTP transport.
      */
-    public static boolean dump = false;
+    public static volatile boolean dump = false;
 
-    public static boolean publishStatusPage = true;
+    public static volatile boolean publishStatusPage = true;
+
+    public static synchronized void setPublishStatus(boolean publish) {
+        publishStatusPage = publish;
+    }
 
     static {
         try {
@@ -819,11 +959,14 @@ public class HttpAdapter extends Adapter<HttpAdapter.HttpToolkit> {
             // OK to ignore this
         }
         try {
-            publishStatusPage = System.getProperty(HttpAdapter.class.getName()+".publishStatusPage").equals("true");
+            setPublishStatus(System.getProperty(HttpAdapter.class.getName()+".publishStatusPage").equals("true"));
         } catch( Throwable t ) {
             // OK to ignore this
         }
     }
 
+    public static void setDump(boolean dumpMessages) {
+        HttpAdapter.dump = dumpMessages;
+    }
     private static final Logger LOGGER = Logger.getLogger(HttpAdapter.class.getName());
 }

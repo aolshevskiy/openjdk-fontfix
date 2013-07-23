@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,8 @@
 package com.sun.tools.internal.ws.wscompile;
 
 import com.sun.codemodel.internal.JPackage;
-import com.sun.mirror.apt.Filer;
 
+import javax.annotation.processing.Filer;
 import java.io.File;
 import java.io.IOException;
 import java.io.Writer;
@@ -44,15 +44,18 @@ public class FilerCodeWriter extends WSCodeWriter {
 
     private Writer w;
 
-    public FilerCodeWriter(File outDir, WsgenOptions options) throws IOException {
+    public FilerCodeWriter(File outDir, Options options) throws IOException {
         super(outDir, options);
         this.filer = options.filer;
     }
 
-
     public Writer openSource(JPackage pkg, String fileName) throws IOException {
         String tmp = fileName.substring(0, fileName.length()-5);
-        w = filer.createSourceFile(pkg.name()+"."+tmp);
+        if (pkg.name() != null && ! "".equals(pkg.name())) {
+                w = filer.createSourceFile(pkg.name() + "." + tmp).openWriter();
+        } else {
+                w = filer.createSourceFile(tmp).openWriter();
+        }
         return w;
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,15 +29,20 @@ import java.io.*;
 import java.util.*;
 
 import com.sun.javadoc.*;
-import com.sun.tools.doclets.internal.toolkit.util.*;
 import com.sun.tools.doclets.formats.html.markup.*;
 import com.sun.tools.doclets.internal.toolkit.*;
+import com.sun.tools.doclets.internal.toolkit.util.*;
 
 /**
  * Generate Index for all the Member Names with Indexing in
  * Unicode Order. This class is a base class for {@link SingleIndexWriter} and
  * {@link SplitIndexWriter}. It uses the functionality from
  * {@link HtmlDocletWriter} to generate the Index Contents.
+ *
+ *  <p><b>This is NOT part of any supported API.
+ *  If you write code that depends on this, you do so at your own risk.
+ *  This code and its internal interfaces are subject to change or
+ *  deletion without notice.</b>
  *
  * @see    IndexBuilder
  * @author Atul M Dambalkar
@@ -51,32 +56,18 @@ public class AbstractIndexWriter extends HtmlDocletWriter {
     protected IndexBuilder indexbuilder;
 
     /**
-     * This constructor will be used by {@link SplitIndexWriter}. Initialises
+     * This constructor will be used by {@link SplitIndexWriter}. Initializes
      * path to this file and relative path from this file.
      *
+     * @param configuration  The current configuration
      * @param path       Path to the file which is getting generated.
-     * @param filename   Name of the file which is getting genrated.
-     * @param relpath    Relative path from this file to the current directory.
      * @param indexbuilder Unicode based Index from {@link IndexBuilder}
      */
     protected AbstractIndexWriter(ConfigurationImpl configuration,
-                                  String path, String filename,
-                                  String relpath, IndexBuilder indexbuilder)
+                                  DocPath path,
+                                  IndexBuilder indexbuilder)
                                   throws IOException {
-        super(configuration, path, filename, relpath);
-        this.indexbuilder = indexbuilder;
-    }
-
-    /**
-     * This Constructor will be used by {@link SingleIndexWriter}.
-     *
-     * @param filename   Name of the file which is getting genrated.
-     * @param indexbuilder Unicode based Index form {@link IndexBuilder}
-     */
-    protected AbstractIndexWriter(ConfigurationImpl configuration,
-                                  String filename, IndexBuilder indexbuilder)
-                                  throws IOException {
-        super(configuration, filename);
+        super(configuration, path);
         this.indexbuilder = indexbuilder;
     }
 
@@ -148,8 +139,8 @@ public class AbstractIndexWriter extends HtmlDocletWriter {
      * @param dlTree the content tree to which the description will be added
      */
     protected void addDescription(ClassDoc cd, Content dlTree) {
-        Content link = new RawHtml(
-                getLink(new LinkInfoImpl(LinkInfoImpl.CONTEXT_INDEX, cd, true)));
+        Content link = getLink(new LinkInfoImpl(configuration,
+                        LinkInfoImpl.Kind.INDEX, cd).strong(true));
         Content dt = HtmlTree.DT(link);
         dt.addContent(" - ");
         addClassInfo(cd, dt);
@@ -160,7 +151,7 @@ public class AbstractIndexWriter extends HtmlDocletWriter {
     }
 
     /**
-     * Add the classkind(class, interface, exception, error of the class
+     * Add the classkind (class, interface, exception), error of the class
      * passed.
      *
      * @param cd the class being documented
@@ -169,8 +160,9 @@ public class AbstractIndexWriter extends HtmlDocletWriter {
     protected void addClassInfo(ClassDoc cd, Content contentTree) {
         contentTree.addContent(getResource("doclet.in",
                 Util.getTypeName(configuration, cd, false),
-                getPackageLinkString(cd.containingPackage(),
-                Util.getPackageName(cd.containingPackage()), false)));
+                getPackageLink(cd.containingPackage(),
+                    Util.getPackageName(cd.containingPackage()))
+                ));
     }
 
     /**
@@ -183,11 +175,8 @@ public class AbstractIndexWriter extends HtmlDocletWriter {
         String name = (member instanceof ExecutableMemberDoc)?
             member.name() + ((ExecutableMemberDoc)member).flatSignature() :
             member.name();
-        if (name.indexOf("<") != -1 || name.indexOf(">") != -1) {
-                name = Util.escapeHtmlChars(name);
-        }
         Content span = HtmlTree.SPAN(HtmlStyle.strong,
-                getDocLink(LinkInfoImpl.CONTEXT_INDEX, member, name));
+                getDocLink(LinkInfoImpl.Kind.INDEX, member, name));
         Content dt = HtmlTree.DT(span);
         dt.addContent(" - ");
         addMemberDesc(member, dt);
@@ -261,7 +250,7 @@ public class AbstractIndexWriter extends HtmlDocletWriter {
                         getResource("doclet.Method_in", classdesc));
             }
         }
-        addPreQualifiedClassLink(LinkInfoImpl.CONTEXT_INDEX, containing,
+        addPreQualifiedClassLink(LinkInfoImpl.Kind.INDEX, containing,
                 false, contentTree);
     }
 }

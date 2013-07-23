@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,9 +31,10 @@ import java.nio.channels.*;
 import java.util.*;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.security.PrivilegedExceptionAction;
 
 
-class Net {                                             // package-private
+public class Net {
 
     private Net() { }
 
@@ -43,6 +44,34 @@ class Net {                                             // package-private
             return "UNSPEC";
         }
     };
+
+    // set to true if exclusive binding is on for Windows
+    private static final boolean exclusiveBind;
+
+    static {
+        int availLevel = isExclusiveBindAvailable();
+        if (availLevel >= 0) {
+            String exclBindProp =
+                java.security.AccessController.doPrivileged(
+                    new PrivilegedAction<String>() {
+                        @Override
+                        public String run() {
+                            return System.getProperty(
+                                    "sun.net.useExclusiveBind");
+                        }
+                    });
+            if (exclBindProp != null) {
+                exclusiveBind = exclBindProp.length() == 0 ?
+                        true : Boolean.parseBoolean(exclBindProp);
+            } else if (availLevel == 1) {
+                exclusiveBind = true;
+            } else {
+                exclusiveBind = false;
+            }
+        } else {
+            exclusiveBind = false;
+        }
+    }
 
     // -- Miscellaneous utilities --
 
@@ -61,6 +90,13 @@ class Net {                                             // package-private
     }
 
     /**
+     * Returns true if exclusive binding is on
+     */
+    static boolean useExclusiveBind() {
+        return exclusiveBind;
+    }
+
+    /**
      * Tells whether IPv6 sockets can join IPv4 multicast groups
      */
     static boolean canIPv6SocketJoinIPv4Group() {
@@ -75,7 +111,7 @@ class Net {                                             // package-private
         return canJoin6WithIPv4Group0();
     }
 
-    static InetSocketAddress checkAddress(SocketAddress sa) {
+    public static InetSocketAddress checkAddress(SocketAddress sa) {
         if (sa == null)
             throw new NullPointerException();
         if (!(sa instanceof InetSocketAddress))
@@ -145,6 +181,34 @@ class Net {                                             // package-private
         throws IOException
     {
         translateException(x, false);
+    }
+
+    /**
+     * Returns the local address after performing a SecurityManager#checkConnect.
+     */
+    static InetSocketAddress getRevealedLocalAddress(InetSocketAddress addr) {
+        SecurityManager sm = System.getSecurityManager();
+        if (addr == null || sm == null)
+            return addr;
+
+        try{
+            sm.checkConnect(addr.getAddress().getHostAddress(), -1);
+            // Security check passed
+        } catch (SecurityException e) {
+            // Return loopback address only if security check fails
+            addr = getLoopbackAddress(addr.getPort());
+        }
+        return addr;
+    }
+
+    static String getRevealedLocalAddressAsString(InetSocketAddress addr) {
+        return System.getSecurityManager() == null ? addr.toString() :
+                getLoopbackAddress(addr.getPort()).toString();
+    }
+
+    private static InetSocketAddress getLoopbackAddress(int port) {
+        return new InetSocketAddress(InetAddress.getLoopbackAddress(),
+                                     port);
     }
 
     /**
@@ -308,6 +372,12 @@ class Net {                                             // package-private
 
     private static native boolean isIPv6Available0();
 
+    /*
+     * Returns 1 for Windows versions that support exclusive binding by default, 0
+     * for those that do not, and -1 for Solaris/Linux/Mac OS
+     */
+    private static native int isExclusiveBindAvailable();
+
     private static native boolean canIPv6SocketJoinIPv4Group0();
 
     private static native boolean canJoin6WithIPv4Group0();
@@ -330,7 +400,7 @@ class Net {                                             // package-private
     // Due to oddities SO_REUSEADDR on windows reuse is ignored
     private static native int socket0(boolean preferIPv6, boolean stream, boolean reuse);
 
-    static void bind(FileDescriptor fd, InetAddress addr, int port)
+    public static void bind(FileDescriptor fd, InetAddress addr, int port)
         throws IOException
     {
         bind(UNSPEC, fd, addr, port);
@@ -341,11 +411,12 @@ class Net {                                             // package-private
     {
         boolean preferIPv6 = isIPv6Available() &&
             (family != StandardProtocolFamily.INET);
-        bind0(preferIPv6, fd, addr, port);
+        bind0(fd, preferIPv6, exclusiveBind, addr, port);
     }
 
-    private static native void bind0(boolean preferIPv6, FileDescriptor fd,
-                                     InetAddress addr, int port)
+    private static native void bind0(FileDescriptor fd, boolean preferIPv6,
+                                     boolean useExclBind, InetAddress addr,
+                                     int port)
         throws IOException;
 
     static native void listen(FileDescriptor fd, int backlog) throws IOException;
@@ -383,7 +454,7 @@ class Net {                                             // package-private
     private static native InetAddress localInetAddress(FileDescriptor fd)
         throws IOException;
 
-    static InetSocketAddress localAddress(FileDescriptor fd)
+    public static InetSocketAddress localAddress(FileDescriptor fd)
         throws IOException
     {
         return new InetSocketAddress(localInetAddress(fd), localPort(fd));
@@ -407,6 +478,9 @@ class Net {                                             // package-private
 
     private static native void setIntOption0(FileDescriptor fd, boolean mayNeedConversion,
                                              int level, int opt, int arg)
+        throws IOException;
+
+    static native int poll(FileDescriptor fd, int events, long timeout)
         throws IOException;
 
     // -- Multicast support --

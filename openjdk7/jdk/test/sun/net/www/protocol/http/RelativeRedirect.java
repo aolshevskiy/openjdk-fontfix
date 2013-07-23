@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
  * @test
  * @bug 4726087
  * @library ../../httptest/
- * @build HttpCallback HttpServer ClosedChannelList HttpTransaction
+ * @build HttpCallback TestHttpServer ClosedChannelList HttpTransaction
  * @run main RelativeRedirect
  * @summary URLConnection cannot handle redirects
  */
@@ -35,7 +35,7 @@ import java.net.*;
 
 public class RelativeRedirect implements HttpCallback {
     static int count = 0;
-    static HttpServer server;
+    static TestHttpServer server;
 
     static class MyAuthenticator extends Authenticator {
         public MyAuthenticator () {
@@ -89,7 +89,7 @@ public class RelativeRedirect implements HttpCallback {
         MyAuthenticator auth = new MyAuthenticator ();
         Authenticator.setDefault (auth);
         try {
-            server = new HttpServer (new RelativeRedirect(), 1, 10, 0);
+            server = new TestHttpServer (new RelativeRedirect(), 1, 10, 0);
             System.out.println ("Server: listening on port: " + server.getLocalPort());
             URL url = new URL("http://localhost:"+server.getLocalPort());
             System.out.println ("client opening connection to: " + url);

@@ -31,13 +31,13 @@ import com.sun.xml.internal.bind.v2.runtime.Location;
 
 /**
  * Provides unified view of the underlying reflection library,
- * such as {@code java.lang.reflect} and/or APT.
+ * such as {@code java.lang.reflect} and/or Annotation Processing.
  *
  * <p>
  * This interface provides navigation over the reflection model
  * to decouple the caller from any particular implementation.
  * This allows the JAXB RI to reuse much of the code between
- * the compile time (which works on top of APT) and the run-time
+ * the compile time (which works on top of Annotation Processing) and the run-time
  * (which works on top of {@code java.lang.reflect})
  *
  * <p>
@@ -397,4 +397,12 @@ public interface Navigator<T,C,F,M> {
      * (static classes.)
      */
     boolean isInnerClass(C clazz);
+
+    /**
+     * Checks if types are the same
+     * @param t1 type
+     * @param t2 type
+     * @return true if types are the same
+     */
+    boolean isSameType(T t1, T t2);
 }

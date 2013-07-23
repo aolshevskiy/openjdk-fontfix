@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -70,14 +70,11 @@ class GarbageCollectorImpl extends MemoryManagerImpl
     private String[] poolNames = null;
     synchronized String[] getAllPoolNames() {
         if (poolNames == null) {
-            List pools = ManagementFactory.getMemoryPoolMXBeans();
+            List<MemoryPoolMXBean> pools = ManagementFactory.getMemoryPoolMXBeans();
             poolNames = new String[pools.size()];
             int i = 0;
-            for (ListIterator iter = pools.listIterator();
-                 iter.hasNext();
-                 i++) {
-                MemoryPoolMXBean p = (MemoryPoolMXBean) iter.next();
-                poolNames[i] = p.getName();
+            for (MemoryPoolMXBean m : pools) {
+                poolNames[i++] = m.getName();
             }
         }
         return poolNames;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -207,7 +207,7 @@ public class ProxyClient implements JConsoleContext {
             serverStubClass = Class.forName(rmiServerImplStubClassName).asSubclass(Remote.class);
         } catch (ClassNotFoundException e) {
             // should never reach here
-            throw (InternalError) new InternalError(e.getMessage()).initCause(e);
+            throw new InternalError(e.getMessage(), e);
         }
         rmiServerImplStubClass = serverStubClass;
     }
@@ -307,10 +307,10 @@ public class ProxyClient implements JConsoleContext {
         }
     }
 
-    void connect() {
+    void connect(boolean requireSSL) {
         setConnectionState(ConnectionState.CONNECTING);
         try {
-            tryConnect();
+            tryConnect(requireSSL);
             setConnectionState(ConnectionState.CONNECTED);
         } catch (Exception e) {
             if (JConsole.isDebug()) {
@@ -320,7 +320,7 @@ public class ProxyClient implements JConsoleContext {
         }
     }
 
-    private void tryConnect() throws IOException {
+    private void tryConnect(boolean requireRemoteSSL) throws IOException {
         if (jmxUrl == null && "localhost".equals(hostName) && port == 0) {
             // Monitor self
             this.jmxc = null;
@@ -340,6 +340,10 @@ public class ProxyClient implements JConsoleContext {
                     this.jmxUrl = new JMXServiceURL(lvm.connectorAddress());
                 }
             }
+            Map<String, Object> env = new HashMap<String, Object>();
+            if (requireRemoteSSL) {
+                env.put("jmx.remote.x.check.stub", "true");
+            }
             // Need to pass in credentials ?
             if (userName == null && password == null) {
                 if (isVmConnector()) {
@@ -348,12 +352,11 @@ public class ProxyClient implements JConsoleContext {
                         checkSslConfig();
                     }
                     this.jmxc = new RMIConnector(stub, null);
-                    jmxc.connect();
+                    jmxc.connect(env);
                 } else {
-                    this.jmxc = JMXConnectorFactory.connect(jmxUrl);
+                    this.jmxc = JMXConnectorFactory.connect(jmxUrl, env);
                 }
             } else {
-                Map<String, String[]> env = new HashMap<String, String[]>();
                 env.put(JMXConnector.CREDENTIALS,
                         new String[] {userName, password});
                 if (isVmConnector()) {
@@ -394,18 +397,10 @@ public class ProxyClient implements JConsoleContext {
         } catch (MalformedObjectNameException e) {
             // should not reach here
             throw new InternalError(e.getMessage());
-        } catch (IntrospectionException e) {
-            InternalError ie = new InternalError(e.getMessage());
-            ie.initCause(e);
-            throw ie;
-        } catch (InstanceNotFoundException e) {
-            InternalError ie = new InternalError(e.getMessage());
-            ie.initCause(e);
-            throw ie;
-        } catch (ReflectionException e) {
-            InternalError ie = new InternalError(e.getMessage());
-            ie.initCause(e);
-            throw ie;
+        } catch (IntrospectionException |
+                 InstanceNotFoundException |
+                 ReflectionException e) {
+            throw new InternalError(e.getMessage(), e);
         }
 
         if (hasPlatformMXBeans) {

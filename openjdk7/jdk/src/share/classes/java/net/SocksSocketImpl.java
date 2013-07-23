@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.BufferedOutputStream;
 import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.security.PrivilegedExceptionAction;
 import sun.net.SocksProxy;
 import sun.net.www.ParseUtil;
@@ -590,7 +591,13 @@ class SocksSocketImpl extends PlainSocketImpl implements SocksConsts {
         /* Test for AnyLocal */
         InetAddress naddr = baddr;
         if (naddr.isAnyLocalAddress()) {
-            naddr = cmdsock.getLocalAddress();
+            naddr = AccessController.doPrivileged(
+                        new PrivilegedAction<InetAddress>() {
+                            public InetAddress run() {
+                                return cmdsock.getLocalAddress();
+
+                            }
+                        });
             addr1 = naddr.getAddress();
         }
         out.write(PROTO_VERS4);
@@ -644,7 +651,7 @@ class SocksSocketImpl extends PlainSocketImpl implements SocksConsts {
      * means "accept incoming connection from", so the SocketAddress is the
      * the one of the host we do accept connection from.
      *
-     * @param      addr   the Socket address of the remote host.
+     * @param      saddr   the Socket address of the remote host.
      * @exception  IOException  if an I/O error occurs when binding this socket.
      */
     protected synchronized void socksBind(InetSocketAddress saddr) throws IOException {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,8 +26,7 @@
 package sun.security.smartcardio;
 
 import java.security.AccessController;
-
-import sun.security.action.LoadLibraryAction;
+import java.security.PrivilegedAction;
 
 // Platform specific code and constants
 class PlatformPCSC {
@@ -44,7 +43,12 @@ class PlatformPCSC {
 
     private static Throwable loadLibrary() {
         try {
-            AccessController.doPrivileged(new LoadLibraryAction("j2pcsc"));
+            AccessController.doPrivileged(new PrivilegedAction<Void>() {
+                public Void run() {
+                    System.loadLibrary("j2pcsc");
+                    return null;
+                }
+            });
             return null;
         } catch (Throwable e) {
             return e;

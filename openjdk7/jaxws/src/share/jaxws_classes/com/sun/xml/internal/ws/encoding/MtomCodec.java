@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,9 +27,8 @@ package com.sun.xml.internal.ws.encoding;
 
 import com.sun.istack.internal.NotNull;
 import com.sun.xml.internal.bind.DatatypeConverterImpl;
-import com.sun.xml.internal.bind.v2.runtime.output.Encoded;
 import com.sun.xml.internal.ws.api.SOAPVersion;
-import com.sun.xml.internal.ws.api.WSBinding;
+import com.sun.xml.internal.ws.api.WSFeatureList;
 import com.sun.xml.internal.ws.api.message.Attachment;
 import com.sun.xml.internal.ws.api.message.AttachmentSet;
 import com.sun.xml.internal.ws.api.message.Packet;
@@ -37,7 +36,10 @@ import com.sun.xml.internal.ws.api.pipe.ContentType;
 import com.sun.xml.internal.ws.api.pipe.StreamSOAPCodec;
 import com.sun.xml.internal.ws.api.streaming.XMLStreamReaderFactory;
 import com.sun.xml.internal.ws.api.streaming.XMLStreamWriterFactory;
+import com.sun.xml.internal.ws.developer.SerializationFeature;
+import com.sun.xml.internal.ws.developer.StreamingDataHandler;
 import com.sun.xml.internal.ws.message.MimeAttachmentSet;
+import com.sun.xml.internal.ws.streaming.XMLStreamWriterUtil;
 import com.sun.xml.internal.ws.util.ByteArrayDataSource;
 import com.sun.xml.internal.ws.util.xml.XMLStreamReaderFilter;
 import com.sun.xml.internal.ws.util.xml.XMLStreamWriterFilter;
@@ -56,7 +58,6 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
 import javax.xml.ws.WebServiceException;
-import javax.xml.ws.WebServiceFeature;
 import javax.xml.ws.soap.MTOMFeature;
 import javax.xml.bind.attachment.AttachmentMarshaller;
 import java.io.IOException;
@@ -72,44 +73,31 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Mtom messge Codec. It can be used even for non-soap message's mtom encoding.
+ * Mtom message Codec. It can be used even for non-soap message's mtom encoding.
  *
  * @author Vivek Pandey
  * @author Jitendra Kotamraju
  */
 public class MtomCodec extends MimeCodec {
+
     public static final String XOP_XML_MIME_TYPE = "application/xop+xml";
+    public static final String XOP_LOCALNAME = "Include";
+    public static final String XOP_NAMESPACEURI = "http://www.w3.org/2004/08/xop/include";
 
     private final StreamSOAPCodec codec;
-
-    // encoding related parameters
-    private String boundary;
-    private String rootId;
-    private final String soapXopContentType;
-    private String messageContentType;
     private final MTOMFeature mtomFeature;
+    private final SerializationFeature sf;
+    private final static String DECODED_MESSAGE_CHARSET = "decodedMessageCharset";
 
-    MtomCodec(SOAPVersion version, StreamSOAPCodec codec, WSBinding binding, WebServiceFeature mtomFeature){
-        super(version, binding);
+    MtomCodec(SOAPVersion version, StreamSOAPCodec codec, WSFeatureList features){
+        super(version, features);
         this.codec = codec;
-        createConteTypeHeader();
-        this.soapXopContentType = XOP_XML_MIME_TYPE +";charset=utf-8;type=\""+version.contentType+"\"";
-        if(mtomFeature == null)
+        sf = features.get(SerializationFeature.class);
+        MTOMFeature mtom = features.get(MTOMFeature.class);
+        if(mtom == null)
             this.mtomFeature = new MTOMFeature();
         else
-            this.mtomFeature = (MTOMFeature) mtomFeature;
-    }
-
-    private void createConteTypeHeader(){
-        String uuid = UUID.randomUUID().toString();
-        boundary = "uuid:" + uuid;
-        rootId = "<rootpart*"+uuid+"@example.jaxws.sun.com>";
-        String boundaryParameter = "boundary=\"" + boundary +"\"";
-        messageContentType = MULTIPART_RELATED_MIME_TYPE +
-                ";start=\""+rootId +"\"" +
-                ";type=\"" + XOP_XML_MIME_TYPE + "\";" +
-                boundaryParameter +
-                ";start-info=\"" + version.contentType + "\"";
+            this.mtomFeature = mtom;
     }
 
     /**
@@ -117,39 +105,64 @@ public class MtomCodec extends MimeCodec {
      *
      * @return A non-null content type for soap11 or soap 1.2 content type
      */
+    @Override
     public ContentType getStaticContentType(Packet packet) {
-        return getContentType(packet);
+        return getStaticContentTypeStatic(packet, version);
     }
 
-    private ContentType getContentType(Packet packet){
-        switch(version){
-            case SOAP_11:
-                return new ContentTypeImpl(messageContentType, (packet.soapAction == null)?"":packet.soapAction, null);
-            case SOAP_12:
-                if(packet.soapAction != null){
-                    messageContentType += ";action=\""+packet.soapAction+"\"";
-                }
-                return new ContentTypeImpl(messageContentType, null, null);
-        }
-        //never happens
-        return null;
+    public static ContentType getStaticContentTypeStatic(Packet packet, SOAPVersion version) {
+        ContentType ct = (ContentType) packet.getInternalContentType();
+        if ( ct != null ) return ct;
+
+        String uuid = UUID.randomUUID().toString();
+        String boundary = "uuid:" + uuid;
+        String rootId = "<rootpart*"+uuid+"@example.jaxws.sun.com>";
+        String soapActionParameter = SOAPVersion.SOAP_11.equals(version) ?  null : createActionParameter(packet);
+
+        String boundaryParameter = "boundary=\"" + boundary +"\"";
+        String messageContentType = MULTIPART_RELATED_MIME_TYPE +
+                ";start=\""+rootId +"\"" +
+                ";type=\"" + XOP_XML_MIME_TYPE + "\";" +
+                boundaryParameter +
+                ";start-info=\"" + version.contentType +
+                (soapActionParameter == null? "" : soapActionParameter) +
+                "\"";
+
+        ContentTypeImpl ctImpl = SOAPVersion.SOAP_11.equals(version) ?
+                new ContentTypeImpl(messageContentType, (packet.soapAction == null)?"":packet.soapAction, null) :
+                new ContentTypeImpl(messageContentType, null, null);
+        ctImpl.setBoundary(boundary);
+        ctImpl.setRootId(rootId);
+        packet.setContentType(ctImpl);
+        return ctImpl;
     }
 
+    private static String createActionParameter(Packet packet) {
+        return packet.soapAction != null? ";action=\\\""+packet.soapAction+"\\\"" : "";
+    }
+
+    @Override
     public ContentType encode(Packet packet, OutputStream out) throws IOException {
-        //get the current boundary thaat will be reaturned from this method
-        ContentType contentType = getContentType(packet);
+        ContentTypeImpl ctImpl = (ContentTypeImpl) this.getStaticContentType(packet);
+        String boundary = ctImpl.getBoundary();
+        String rootId = ctImpl.getRootId();
 
         if(packet.getMessage() != null){
             try {
+                String encoding = getPacketEncoding(packet);
+                packet.invocationProperties.remove(DECODED_MESSAGE_CHARSET);
+
+                String actionParameter = getActionParameter(packet, version);
+                String soapXopContentType = getSOAPXopContentType(encoding, version, actionParameter);
+
                 writeln("--"+boundary, out);
-                writeln("Content-Id: " + rootId, out);
-                writeln("Content-Type: "+ soapXopContentType,  out);
-                writeln("Content-Transfer-Encoding: binary", out);
-                writeln(out);
+                writeMimeHeaders(soapXopContentType, rootId, out);
 
                 //mtom attachments that need to be written after the root part
                 List<ByteArrayBuffer> mtomAttachments = new ArrayList<ByteArrayBuffer>();
-                MtomStreamWriterImpl writer = new MtomStreamWriterImpl(XMLStreamWriterFactory.create(out),out, mtomAttachments);
+                MtomStreamWriterImpl writer = new MtomStreamWriterImpl(
+                        XMLStreamWriterFactory.create(out, encoding), mtomAttachments, boundary, mtomFeature);
+
                 packet.getMessage().writeTo(writer);
                 XMLStreamWriterFactory.recycle(writer);
                 writeln(out);
@@ -158,8 +171,10 @@ public class MtomCodec extends MimeCodec {
                     bos.write(out);
                 }
 
-                //now write out the attachments in the message
-                writeAttachments(packet.getMessage().getAttachments(),out);
+                // now write out the attachments in the message that weren't
+                // previously written
+                writeNonMtomAttachments(packet.getMessage().getAttachments(),
+                        out, boundary);
 
                 //write out the end boundary
                 writeAsAscii("--"+boundary, out);
@@ -170,21 +185,38 @@ public class MtomCodec extends MimeCodec {
             }
         }
         //now create the boundary for next encode() call
-        createConteTypeHeader();
-        return contentType;
+//        createConteTypeHeader();
+        return ctImpl;
     }
 
-    private class ByteArrayBuffer{
+    public static String getSOAPXopContentType(String encoding, SOAPVersion version,
+            String actionParameter) {
+        return XOP_XML_MIME_TYPE +";charset="+encoding+";type=\""+version.contentType+ actionParameter + "\"";
+    }
+
+    public static String getActionParameter(Packet packet, SOAPVersion version) {
+        return (version == SOAPVersion.SOAP_11) ? "" : createActionParameter(packet);
+    }
+
+    public static class ByteArrayBuffer{
         final String contentId;
 
-        private DataHandler dh;
+        private final DataHandler dh;
+        private final String boundary;
 
-        ByteArrayBuffer(@NotNull DataHandler dh) {
+        ByteArrayBuffer(@NotNull DataHandler dh, String b) {
             this.dh = dh;
-            this.contentId = encodeCid();
+            String cid = null;
+            if (dh instanceof StreamingDataHandler) {
+                StreamingDataHandler sdh = (StreamingDataHandler) dh;
+                if (sdh.getHrefCid() != null)
+                    cid = sdh.getHrefCid();
+            }
+            this.contentId = cid != null ? cid : encodeCid();
+            boundary = b;
         }
 
-        void write(OutputStream os) throws IOException {
+        public void write(OutputStream os) throws IOException {
             //build attachment frame
             writeln("--"+boundary, os);
             writeMimeHeaders(dh.getContentType(), contentId, os);
@@ -193,7 +225,7 @@ public class MtomCodec extends MimeCodec {
         }
     }
 
-    private void writeMimeHeaders(String contentType, String contentId, OutputStream out) throws IOException {
+    public static void writeMimeHeaders(String contentType, String contentId, OutputStream out) throws IOException {
         String cid = contentId;
         if(cid != null && cid.length() >0 && cid.charAt(0) != '<')
             cid = '<' + cid + '>';
@@ -203,25 +235,41 @@ public class MtomCodec extends MimeCodec {
         writeln(out);
     }
 
-    private void writeAttachments(AttachmentSet attachments, OutputStream out) throws IOException {
-        for(Attachment att : attachments){
-            //build attachment frame
-            writeln("--"+boundary, out);
+    // Compiler warning for not calling close, but cannot call close,
+    // will consume attachment bytes.
+        @SuppressWarnings("resource")
+    private void writeNonMtomAttachments(AttachmentSet attachments,
+            OutputStream out, String boundary) throws IOException {
+
+        for (Attachment att : attachments) {
+
+            DataHandler dh = att.asDataHandler();
+            if (dh instanceof StreamingDataHandler) {
+                StreamingDataHandler sdh = (StreamingDataHandler) dh;
+                // If DataHandler has href Content-ID, it is MTOM, so skip.
+                if (sdh.getHrefCid() != null)
+                    continue;
+            }
+
+            // build attachment frame
+            writeln("--" + boundary, out);
             writeMimeHeaders(att.getContentType(), att.getContentId(), out);
             att.writeTo(out);
-            writeln(out);                    // write \r\n
+            writeln(out); // write \r\n
         }
     }
 
+    @Override
     public ContentType encode(Packet packet, WritableByteChannel buffer) {
         throw new UnsupportedOperationException();
     }
 
+    @Override
     public MtomCodec copy() {
-        return new MtomCodec(version, (StreamSOAPCodec)codec.copy(), binding, mtomFeature);
+        return new MtomCodec(version, (StreamSOAPCodec)codec.copy(), features);
     }
 
-    private String encodeCid(){
+    private static String encodeCid(){
         String cid="example.jaxws.sun.com";
         String name = UUID.randomUUID()+"@";
         return name + cid;
@@ -240,6 +288,12 @@ public class MtomCodec extends MimeCodec {
             throw new UnsupportedMediaException(charset);
         }
 
+        if (charset != null) {
+            packet.invocationProperties.put(DECODED_MESSAGE_CHARSET, charset);
+        } else {
+            packet.invocationProperties.remove(DECODED_MESSAGE_CHARSET);
+        }
+
         // we'd like to reuse those reader objects but unfortunately decoder may be reused
         // before the decoded message is completely used.
         XMLStreamReader mtomReader = new MtomXMLStreamReaderEx( mpp,
@@ -247,40 +301,65 @@ public class MtomCodec extends MimeCodec {
         );
 
         packet.setMessage(codec.decode(mtomReader, new MimeAttachmentSet(mpp)));
-
+        packet.setMtomFeature(mtomFeature);
+        packet.setContentType(mpp.getContentType());
     }
 
-    private class MtomStreamWriterImpl extends XMLStreamWriterFilter implements XMLStreamWriterEx,
-            MtomStreamWriter {
-        private final OutputStream out;
-        private final Encoded encoded = new Encoded();
-        private final List<ByteArrayBuffer> mtomAttachments;
+    private String getPacketEncoding(Packet packet) {
+        // If SerializationFeature is set, just use that encoding
+        if (sf != null && sf.getEncoding() != null) {
+            return sf.getEncoding().equals("") ? SOAPBindingCodec.DEFAULT_ENCODING : sf.getEncoding();
+        }
+        return determinePacketEncoding(packet);
+    }
 
-        public MtomStreamWriterImpl(XMLStreamWriter w, OutputStream out, List<ByteArrayBuffer> mtomAttachments) {
-            super(w);
-            this.out = out;
-            this.mtomAttachments = mtomAttachments;
+    public static String determinePacketEncoding(Packet packet) {
+        if (packet != null && packet.endpoint != null) {
+            // Use request message's encoding for Server-side response messages
+            String charset = (String)packet.invocationProperties.get(DECODED_MESSAGE_CHARSET);
+            return charset == null
+                    ? SOAPBindingCodec.DEFAULT_ENCODING : charset;
         }
 
+        // Use default encoding for client-side request messages
+        return SOAPBindingCodec.DEFAULT_ENCODING;
+    }
+
+    public static class MtomStreamWriterImpl extends XMLStreamWriterFilter implements XMLStreamWriterEx,
+            MtomStreamWriter, HasEncoding {
+        private final List<ByteArrayBuffer> mtomAttachments;
+        private final String boundary;
+        private final MTOMFeature myMtomFeature;
+        public MtomStreamWriterImpl(XMLStreamWriter w, List<ByteArrayBuffer> mtomAttachments, String b, MTOMFeature myMtomFeature) {
+            super(w);
+            this.mtomAttachments = mtomAttachments;
+            this.boundary = b;
+            this.myMtomFeature = myMtomFeature;
+        }
+
+        @Override
         public void writeBinary(byte[] data, int start, int len, String contentType) throws XMLStreamException {
             //check threshold and if less write as base64encoded value
-            if(mtomFeature.getThreshold() > len){
+            if(myMtomFeature.getThreshold() > len){
                 writeCharacters(DatatypeConverterImpl._printBase64Binary(data, start, len));
                 return;
             }
-            ByteArrayBuffer bab = new ByteArrayBuffer(new DataHandler(new ByteArrayDataSource(data, start, len, contentType)));
+            ByteArrayBuffer bab = new ByteArrayBuffer(new DataHandler(new ByteArrayDataSource(data, start, len, contentType)), boundary);
             writeBinary(bab);
         }
 
+        @Override
         public void writeBinary(DataHandler dataHandler) throws XMLStreamException {
             // TODO how do we check threshold and if less inline the data
-            writeBinary(new ByteArrayBuffer(dataHandler));
+            writeBinary(new ByteArrayBuffer(dataHandler, boundary));
         }
 
+        @Override
         public OutputStream writeBinary(String contentType) throws XMLStreamException {
             throw new UnsupportedOperationException();
         }
 
+        @Override
         public void writePCDATA(CharSequence data) throws XMLStreamException {
             if(data == null)
                 return;
@@ -295,16 +374,12 @@ public class MtomCodec extends MimeCodec {
         private void writeBinary(ByteArrayBuffer bab) {
             try {
                 mtomAttachments.add(bab);
-
-                writer.writeCharacters("");   // Force completion of open elems
+                writer.setPrefix("xop", XOP_NAMESPACEURI);
+                writer.writeNamespace("xop", XOP_NAMESPACEURI);
+                writer.writeStartElement(XOP_NAMESPACEURI, XOP_LOCALNAME);
+                writer.writeAttribute("href", "cid:"+bab.contentId);
+                writer.writeEndElement();
                 writer.flush();
-                //flush the underlying writer to write-out any cached data to the underlying
-                // stream before writing directly to it
-                //write out the xop reference
-                encoded.set(XOP_PREF+bab.contentId+XOP_SUFF);
-                out.write(encoded.buf,0,encoded.len);
-            } catch (IOException e) {
-                throw new WebServiceException(e);
             } catch (XMLStreamException e) {
                 throw new WebServiceException(e);
             }
@@ -327,29 +402,33 @@ public class MtomCodec extends MimeCodec {
          * While writing, it calls the AttachmentMarshaller methods for adding attachments.
          * JAXB writes xop:Include in this case.
          */
+        @Override
         public AttachmentMarshaller getAttachmentMarshaller() {
             return new AttachmentMarshaller() {
 
+                @Override
                 public String addMtomAttachment(DataHandler data, String elementNamespace, String elementLocalName) {
                     // Should we do the threshold processing on DataHandler ? But that would be
                     // expensive as DataHolder need to read the data again from its source
-                    ByteArrayBuffer bab = new ByteArrayBuffer(data);
+                    ByteArrayBuffer bab = new ByteArrayBuffer(data, boundary);
                     mtomAttachments.add(bab);
                     return "cid:"+bab.contentId;
                 }
 
+                @Override
                 public String addMtomAttachment(byte[] data, int offset, int length, String mimeType, String elementNamespace, String elementLocalName) {
                     // inline the data based on the threshold
-                    if (mtomFeature.getThreshold() > length) {
+                    if (myMtomFeature.getThreshold() > length) {
                         return null;                // JAXB inlines the attachment data
                     }
-                    ByteArrayBuffer bab = new ByteArrayBuffer(new DataHandler(new ByteArrayDataSource(data, offset, length, mimeType)));
+                    ByteArrayBuffer bab = new ByteArrayBuffer(new DataHandler(new ByteArrayDataSource(data, offset, length, mimeType)), boundary);
                     mtomAttachments.add(bab);
                     return "cid:"+bab.contentId;
                 }
 
+                @Override
                 public String addSwaRefAttachment(DataHandler data) {
-                    ByteArrayBuffer bab = new ByteArrayBuffer(data);
+                    ByteArrayBuffer bab = new ByteArrayBuffer(data, boundary);
                     mtomAttachments.add(bab);
                     return "cid:"+bab.contentId;
                 }
@@ -361,25 +440,38 @@ public class MtomCodec extends MimeCodec {
             };
         }
 
-        private class MtomNamespaceContextEx implements NamespaceContextEx {
-            private NamespaceContext nsContext;
+        public List<ByteArrayBuffer> getMtomAttachments() {
+            return this.mtomAttachments;
+        }
+
+        @Override
+        public String getEncoding() {
+            return XMLStreamWriterUtil.getEncoding(writer);
+        }
+
+        private static class MtomNamespaceContextEx implements NamespaceContextEx {
+            private final NamespaceContext nsContext;
 
             public MtomNamespaceContextEx(NamespaceContext nsContext) {
                 this.nsContext = nsContext;
             }
 
+            @Override
             public Iterator<Binding> iterator() {
                 throw new UnsupportedOperationException();
             }
 
+            @Override
             public String getNamespaceURI(String prefix) {
                 return nsContext.getNamespaceURI(prefix);
             }
 
+            @Override
             public String getPrefix(String namespaceURI) {
                 return nsContext.getPrefix(namespaceURI);
             }
 
+            @Override
             public Iterator getPrefixes(String namespaceURI) {
                 return nsContext.getPrefixes(namespaceURI);
             }
@@ -392,7 +484,7 @@ public class MtomCodec extends MimeCodec {
         }
     }
 
-    private static class MtomXMLStreamReaderEx extends XMLStreamReaderFilter implements XMLStreamReaderEx {
+    public static class MtomXMLStreamReaderEx extends XMLStreamReaderFilter implements XMLStreamReaderEx {
         /**
          * The parser for the outer MIME 'shell'.
          */
@@ -404,11 +496,14 @@ public class MtomCodec extends MimeCodec {
         //To be used with #getTextCharacters
         private char[] base64EncodedText;
 
+        private String xopHref;
+
         public MtomXMLStreamReaderEx(MimeMultipartParser mimeMP, XMLStreamReader reader) {
             super(reader);
             this.mimeMP = mimeMP;
         }
 
+        @Override
         public CharSequence getPCDATA() throws XMLStreamException {
             if(xopReferencePresent){
                 return base64AttData;
@@ -416,40 +511,47 @@ public class MtomCodec extends MimeCodec {
             return reader.getText();
         }
 
+        @Override
         public NamespaceContextEx getNamespaceContext() {
             NamespaceContext nsContext = reader.getNamespaceContext();
             return new MtomNamespaceContextEx(nsContext);
         }
 
+        @Override
         public String getElementTextTrim() throws XMLStreamException {
             throw new UnsupportedOperationException();
         }
 
         private static class MtomNamespaceContextEx implements NamespaceContextEx {
-            private NamespaceContext nsContext;
+            private final NamespaceContext nsContext;
 
             public MtomNamespaceContextEx(NamespaceContext nsContext) {
                 this.nsContext = nsContext;
             }
 
+            @Override
             public Iterator<Binding> iterator() {
                 throw new UnsupportedOperationException();
             }
 
+            @Override
             public String getNamespaceURI(String prefix) {
                 return nsContext.getNamespaceURI(prefix);
             }
 
+            @Override
             public String getPrefix(String namespaceURI) {
                 return nsContext.getPrefix(namespaceURI);
             }
 
+            @Override
             public Iterator getPrefixes(String namespaceURI) {
                 return nsContext.getPrefixes(namespaceURI);
             }
 
         }
 
+        @Override
         public int getTextLength() {
             if (xopReferencePresent) {
                 return base64AttData.length();
@@ -457,6 +559,7 @@ public class MtomCodec extends MimeCodec {
             return reader.getTextLength();
         }
 
+        @Override
         public int getTextStart() {
             if (xopReferencePresent) {
                 return 0;
@@ -464,22 +567,29 @@ public class MtomCodec extends MimeCodec {
             return reader.getTextStart();
         }
 
+        @Override
         public int getEventType() {
             if(xopReferencePresent)
                 return XMLStreamConstants.CHARACTERS;
             return super.getEventType();
         }
 
+        @Override
         public int next() throws XMLStreamException {
             int event = reader.next();
             if (event == XMLStreamConstants.START_ELEMENT && reader.getLocalName().equals(XOP_LOCALNAME) && reader.getNamespaceURI().equals(XOP_NAMESPACEURI)) {
                 //its xop reference, take the URI reference
                 String href = reader.getAttributeValue(null, "href");
                 try {
+                    xopHref = href;
                     Attachment att = getAttachment(href);
                     if(att != null){
+                        DataHandler dh = att.asDataHandler();
+                        if (dh instanceof StreamingDataHandler) {
+                            ((StreamingDataHandler)dh).setHrefCid(att.getContentId());
+                        }
                         base64AttData = new Base64Data();
-                        base64AttData.set(att.asDataHandler());
+                        base64AttData.set(dh);
                     }
                     xopReferencePresent = true;
                 } catch (IOException e) {
@@ -492,6 +602,7 @@ public class MtomCodec extends MimeCodec {
             if(xopReferencePresent){
                 xopReferencePresent = false;
                 base64EncodedText = null;
+                xopHref = null;
             }
             return event;
         }
@@ -515,6 +626,7 @@ public class MtomCodec extends MimeCodec {
             return mimeMP.getAttachmentPart(cid);
         }
 
+        @Override
         public char[] getTextCharacters() {
             if (xopReferencePresent) {
                 char[] chars = new char[base64AttData.length()];
@@ -524,6 +636,7 @@ public class MtomCodec extends MimeCodec {
             return reader.getTextCharacters();
         }
 
+        @Override
         public int getTextCharacters(int sourceStart, char[] target, int targetStart, int length) throws XMLStreamException {
             if(xopReferencePresent){
                 if(target == null){
@@ -551,17 +664,25 @@ public class MtomCodec extends MimeCodec {
             return reader.getTextCharacters(sourceStart, target, targetStart, length);
         }
 
+        @Override
         public String getText() {
             if (xopReferencePresent) {
                 return base64AttData.toString();
             }
             return reader.getText();
         }
-    }
 
-    private static final String XOP_PREF = "<Include xmlns=\"http://www.w3.org/2004/08/xop/include\" href=\"cid:";
-    private static final String XOP_SUFF = "\"/>";
-    private static final String XOP_LOCALNAME = "Include";
-    private static final String XOP_NAMESPACEURI = "http://www.w3.org/2004/08/xop/include";
+        protected boolean isXopReference() throws XMLStreamException {
+            return xopReferencePresent;
+        }
+
+        protected String getXopHref() {
+            return xopHref;
+        }
+
+        public MimeMultipartParser getMimeMultipartParser() {
+            return mimeMP;
+        }
+    }
 
 }

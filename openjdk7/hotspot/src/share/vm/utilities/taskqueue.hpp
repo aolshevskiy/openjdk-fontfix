@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -253,6 +253,7 @@ public:
 
 template <class E, MEMFLAGS F, unsigned int N = TASKQUEUE_SIZE>
 class GenericTaskQueue: public TaskQueueSuper<N, F> {
+  ArrayAllocator<E, F> _array_allocator;
 protected:
   typedef typename TaskQueueSuper<N, F>::Age Age;
   typedef typename TaskQueueSuper<N, F>::idx_t idx_t;
@@ -314,7 +315,7 @@ GenericTaskQueue<E, F, N>::GenericTaskQueue() {
 
 template<class E, MEMFLAGS F, unsigned int N>
 void GenericTaskQueue<E, F, N>::initialize() {
-  _elems = NEW_C_HEAP_ARRAY(E, N, F);
+  _elems = _array_allocator.allocate(N);
 }
 
 template<class E, MEMFLAGS F, unsigned int N>
@@ -339,8 +340,12 @@ bool GenericTaskQueue<E, F, N>::push_slow(E t, uint dirty_n_elems) {
   if (dirty_n_elems == N - 1) {
     // Actually means 0, so do the push.
     uint localBot = _bottom;
-    // g++ complains if the volatile result of the assignment is unused.
-    const_cast<E&>(_elems[localBot] = t);
+    // g++ complains if the volatile result of the assignment is
+    // unused, so we cast the volatile away.  We cannot cast directly
+    // to void, because gcc treats that as not using the result of the
+    // assignment.  However, casting to E& means that we trigger an
+    // unused-value warning.  So, we cast the E& to void.
+    (void)const_cast<E&>(_elems[localBot] = t);
     OrderAccess::release_store(&_bottom, increment_index(localBot));
     TASKQUEUE_STATS_ONLY(stats.record_push());
     return true;
@@ -396,7 +401,12 @@ bool GenericTaskQueue<E, F, N>::pop_global(E& t) {
     return false;
   }
 
-  const_cast<E&>(t = _elems[oldAge.top()]);
+  // g++ complains if the volatile result of the assignment is
+  // unused, so we cast the volatile away.  We cannot cast directly
+  // to void, because gcc treats that as not using the result of the
+  // assignment.  However, casting to E& means that we trigger an
+  // unused-value warning.  So, we cast the E& to void.
+  (void) const_cast<E&>(t = _elems[oldAge.top()]);
   Age newAge(oldAge);
   newAge.increment();
   Age resAge = _age.cmpxchg(newAge, oldAge);
@@ -496,9 +506,7 @@ public:
     }
   }
 
-  bool steal_1_random(uint queue_num, int* seed, E& t);
   bool steal_best_of_2(uint queue_num, int* seed, E& t);
-  bool steal_best_of_all(uint queue_num, int* seed, E& t);
 
   void register_queue(uint i, T* q);
 
@@ -535,46 +543,6 @@ GenericTaskQueueSet<T, F>::steal(uint queue_num, int* seed, E& t) {
   }
   TASKQUEUE_STATS_ONLY(queue(queue_num)->stats.record_steal(false));
   return false;
-}
-
-template<class T, MEMFLAGS F> bool
-GenericTaskQueueSet<T, F>::steal_best_of_all(uint queue_num, int* seed, E& t) {
-  if (_n > 2) {
-    int best_k;
-    uint best_sz = 0;
-    for (uint k = 0; k < _n; k++) {
-      if (k == queue_num) continue;
-      uint sz = _queues[k]->size();
-      if (sz > best_sz) {
-        best_sz = sz;
-        best_k = k;
-      }
-    }
-    return best_sz > 0 && _queues[best_k]->pop_global(t);
-  } else if (_n == 2) {
-    // Just try the other one.
-    int k = (queue_num + 1) % 2;
-    return _queues[k]->pop_global(t);
-  } else {
-    assert(_n == 1, "can't be zero.");
-    return false;
-  }
-}
-
-template<class T, MEMFLAGS F> bool
-GenericTaskQueueSet<T, F>::steal_1_random(uint queue_num, int* seed, E& t) {
-  if (_n > 2) {
-    uint k = queue_num;
-    while (k == queue_num) k = TaskQueueSetSuper::randomParkAndMiller(seed) % _n;
-    return _queues[2]->pop_global(t);
-  } else if (_n == 2) {
-    // Just try the other one.
-    int k = (queue_num + 1) % 2;
-    return _queues[k]->pop_global(t);
-  } else {
-    assert(_n == 1, "can't be zero.");
-    return false;
-  }
 }
 
 template<class T, MEMFLAGS F> bool
@@ -681,8 +649,12 @@ GenericTaskQueue<E, F, N>::push(E t) {
   uint dirty_n_elems = dirty_size(localBot, top);
   assert(dirty_n_elems < N, "n_elems out of range.");
   if (dirty_n_elems < max_elems()) {
-    // g++ complains if the volatile result of the assignment is unused.
-    const_cast<E&>(_elems[localBot] = t);
+    // g++ complains if the volatile result of the assignment is
+    // unused, so we cast the volatile away.  We cannot cast directly
+    // to void, because gcc treats that as not using the result of the
+    // assignment.  However, casting to E& means that we trigger an
+    // unused-value warning.  So, we cast the E& to void.
+    (void) const_cast<E&>(_elems[localBot] = t);
     OrderAccess::release_store(&_bottom, increment_index(localBot));
     TASKQUEUE_STATS_ONLY(stats.record_push());
     return true;
@@ -706,7 +678,12 @@ GenericTaskQueue<E, F, N>::pop_local(E& t) {
   // This is necessary to prevent any read below from being reordered
   // before the store just above.
   OrderAccess::fence();
-  const_cast<E&>(t = _elems[localBot]);
+  // g++ complains if the volatile result of the assignment is
+  // unused, so we cast the volatile away.  We cannot cast directly
+  // to void, because gcc treats that as not using the result of the
+  // assignment.  However, casting to E& means that we trigger an
+  // unused-value warning.  So, we cast the E& to void.
+  (void) const_cast<E&>(t = _elems[localBot]);
   // This is a second read of "age"; the "size()" above is the first.
   // If there's still at least one element in the queue, based on the
   // "_bottom" and "age" we've read, then there can be no interference with

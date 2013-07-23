@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,8 @@ import com.sun.xml.internal.bind.api.Bridge;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
 import com.sun.xml.internal.ws.api.addressing.WSEndpointReference;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+
 import org.xml.sax.ContentHandler;
 import org.xml.sax.ErrorHandler;
 import org.xml.sax.SAXException;
@@ -244,8 +246,14 @@ public interface Header {
 
     /**
      * Reads the header as a JAXB object by using the given unmarshaller.
+     * @deprecated
      */
     public <T> T readAsJAXB(Bridge<T> bridge) throws JAXBException;
+
+    /**
+     * Reads the header as a data-bond object
+     */
+    public <T> T readAsJAXB(XMLBridge<T> bridge) throws JAXBException;
 
     /**
      * Reads this header as an {@link WSEndpointReference}.

@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 4273771 7083664
+# @bug 4273771
 # @summary Need to add "usePolicy" RuntimePermission to policytool
 #
 # @run applet/manual=done UsePolicy.html
@@ -55,7 +55,6 @@ case "$OS" in
     NULL=/dev/null
     PS=";"
     FS="/"
-    CP="cp -f"
     ;;
   Windows* )
     NULL=NUL

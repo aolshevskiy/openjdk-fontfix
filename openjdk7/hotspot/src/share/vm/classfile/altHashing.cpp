@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,7 @@
 // return a random number, which is one of the possible hash code used for
 // objects.  We don't want to call the synchronizer hash code to install
 // this value because it may safepoint.
-intptr_t object_hash(klassOop k) {
+intptr_t object_hash(Klass* k) {
   intptr_t hc = k->java_mirror()->mark()->hash();
   return hc != markOopDesc::no_hash ? hc : os::random();
 }
@@ -242,8 +242,8 @@ static const juint MURMUR3_32_X86_CHECK_VALUE = 0xB0F57EE3;
 void AltHashing::testMurmur3_32_ByteArray() {
   // printf("testMurmur3_32_ByteArray\n");
 
-  jbyte* vector = new jbyte[256];
-  jbyte* hashes = new jbyte[4 * 256];
+  jbyte vector[256];
+  jbyte hashes[4 * 256];
 
   for (int i = 0; i < 256; i++) {
     vector[i] = (jbyte) i;

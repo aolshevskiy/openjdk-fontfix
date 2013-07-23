@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -90,7 +90,7 @@ import java.io.InputStream;
  * the intended columns, which can be assured with the SQL <i>AS</i> clause.
  * <P>
  * A set of updater methods were added to this interface
- * in the JDBC 2.0 API (Java<sup><font size=-2>TM</font></sup> 2 SDK,
+ * in the JDBC 2.0 API (Java&trade; 2 SDK,
  * Standard Edition, version 1.2). The comments regarding parameters
  * to the getter methods also apply to parameters to the
  * updater methods.
@@ -148,7 +148,7 @@ import java.io.InputStream;
 public interface ResultSet extends Wrapper, AutoCloseable {
 
     /**
-     * Moves the cursor froward one row from its current position.
+     * Moves the cursor forward one row from its current position.
      * A <code>ResultSet</code> cursor is initially positioned
      * before the first row; the first call to the method
      * <code>next</code> makes the first row the current row; the
@@ -356,8 +356,10 @@ public interface ResultSet extends Wrapper, AutoCloseable {
      *            called on a closed result set
      * @exception SQLFeatureNotSupportedException if the JDBC driver does not support
      * this method
-     * @deprecated
+     * @deprecated Use {@code getBigDecimal(int columnIndex)}
+     *             or {@code getBigDecimal(String columnLabel)}
      */
+    @Deprecated
     BigDecimal getBigDecimal(int columnIndex, int scale) throws SQLException;
 
     /**
@@ -477,6 +479,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
      * @deprecated use <code>getCharacterStream</code> in place of
      *              <code>getUnicodeStream</code>
      */
+    @Deprecated
     java.io.InputStream getUnicodeStream(int columnIndex) throws SQLException;
 
     /**
@@ -641,8 +644,10 @@ public interface ResultSet extends Wrapper, AutoCloseable {
      *            called on a closed result set
      * @exception SQLFeatureNotSupportedException if the JDBC driver does not support
      * this method
-     * @deprecated
+     * @deprecated Use {@code getBigDecimal(int columnIndex)}
+     *             or {@code getBigDecimal(String columnLabel)}
      */
+    @Deprecated
     BigDecimal getBigDecimal(String columnLabel, int scale) throws SQLException;
 
     /**
@@ -760,6 +765,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
      * this method
      * @deprecated use <code>getCharacterStream</code> instead
      */
+    @Deprecated
     java.io.InputStream getUnicodeStream(String columnLabel) throws SQLException;
 
     /**
@@ -1344,7 +1350,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
      * @param rows the number of rows to fetch
      * @exception SQLException if a database access error occurs; this method
      * is called on a closed result set or the
-     * condition <code>rows >= 0 </code> is not satisfied
+     * condition {@code rows >= 0} is not satisfied
      * @since 1.2
      * @see #getFetchSize
      */
@@ -1828,6 +1834,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
 
     /**
      * Updates the designated column with an <code>Object</code> value.
+     *
      * The updater methods are used to update column values in the
      * current row or the insert row.  The updater methods do not
      * update the underlying database; instead the <code>updateRow</code> or
@@ -1860,6 +1867,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
 
     /**
      * Updates the designated column with an <code>Object</code> value.
+     *
      * The updater methods are used to update column values in the
      * current row or the insert row.  The updater methods do not
      * update the underlying database; instead the <code>updateRow</code> or
@@ -2218,6 +2226,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
 
     /**
      * Updates the designated column with an <code>Object</code> value.
+     *
      * The updater methods are used to update column values in the
      * current row or the insert row.  The updater methods do not
      * update the underlying database; instead the <code>updateRow</code> or
@@ -2250,6 +2259,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
 
     /**
      * Updates the designated column with an <code>Object</code> value.
+     *
      * The updater methods are used to update column values in the
      * current row or the insert row.  The updater methods do not
      * update the underlying database; instead the <code>updateRow</code> or
@@ -4091,7 +4101,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
      * Appendix B, Table B-3 and conversion of appropriate user defined SQL
      * types to a Java type which implements {@code SQLData}, or {@code Struct}.
      * Additional conversions may be supported and are vendor defined.
-     *
+     * @param <T> the type of the class modeled by this Class object
      * @param columnIndex the first column is 1, the second is 2, ...
      * @param type Class representing the Java data type to convert the designated
      * column to.
@@ -4125,6 +4135,7 @@ public interface ResultSet extends Wrapper, AutoCloseable {
      * of the column
      * @param type Class representing the Java data type to convert the designated
      * column to.
+     * @param <T> the type of the class modeled by this Class object
      * @return an instance of {@code type} holding the column value
      * @throws SQLException if conversion is not supported, type is null or
      *         another error occurs. The getCause() method of the
@@ -4136,4 +4147,146 @@ public interface ResultSet extends Wrapper, AutoCloseable {
      */
      public <T> T getObject(String columnLabel, Class<T> type) throws SQLException;
 
+    //------------------------- JDBC 4.2 -----------------------------------
+
+    /**
+     * Updates the designated column with an {@code Object} value.
+     *
+     * The updater methods are used to update column values in the
+     * current row or the insert row.  The updater methods do not
+     * update the underlying database; instead the {@code updateRow} or
+     * {@code insertRow} methods are called to update the database.
+     *<p>
+     * If the second argument is an {@code InputStream} then the stream must contain
+     * the number of bytes specified by scaleOrLength.  If the second argument is a
+     * {@code Reader} then the reader must contain the number of characters specified
+     * by scaleOrLength. If these conditions are not true the driver will generate a
+     * {@code SQLException} when the statement is executed.
+     *<p>
+     * The default implementation will throw {@code SQLFeatureNotSupportedException}
+     *
+     * @param columnIndex the first column is 1, the second is 2, ...
+     * @param x the new column value
+     * @param targetSqlType the SQL type to be sent to the database
+     * @param scaleOrLength for an object of {@code java.math.BigDecimal} ,
+     *          this is the number of digits after the decimal point. For
+     *          Java Object types {@code InputStream} and {@code Reader},
+     *          this is the length
+     *          of the data in the stream or reader.  For all other types,
+     *          this value will be ignored.
+     * @exception SQLException if the columnIndex is not valid;
+     * if a database access error occurs;
+     * the result set concurrency is {@code CONCUR_READ_ONLY}
+     * or this method is called on a closed result set
+     * @exception SQLFeatureNotSupportedException if the JDBC driver does not
+     * support this method; if the JDBC driver does not support this data type
+     * @see JDBCType
+     * @see SQLType
+     * @since 1.8
+     */
+     default void updateObject(int columnIndex, Object x,
+             SQLType targetSqlType, int scaleOrLength)  throws SQLException {
+        throw new SQLFeatureNotSupportedException("updateObject not implemented");
+    }
+
+    /**
+     * Updates the designated column with an {@code Object} value.
+     *
+     * The updater methods are used to update column values in the
+     * current row or the insert row.  The updater methods do not
+     * update the underlying database; instead the {@code updateRow} or
+     * {@code insertRow} methods are called to update the database.
+     *<p>
+     * If the second argument is an {@code InputStream} then the stream must
+     * contain number of bytes specified by scaleOrLength.  If the second
+     * argument is a {@code Reader} then the reader must contain the number
+     * of characters specified by scaleOrLength. If these conditions are not
+     * true the driver will generate a
+     * {@code SQLException} when the statement is executed.
+     *<p>
+     * The default implementation will throw {@code SQLFeatureNotSupportedException}
+     *
+     * @param columnLabel the label for the column specified with the SQL AS
+     * clause.  If the SQL AS clause was not specified, then the label is
+     * the name of the column
+     * @param x the new column value
+     * @param targetSqlType the SQL type to be sent to the database
+     * @param scaleOrLength for an object of {@code java.math.BigDecimal} ,
+     *          this is the number of digits after the decimal point. For
+     *          Java Object types {@code InputStream} and {@code Reader},
+     *          this is the length
+     *          of the data in the stream or reader.  For all other types,
+     *          this value will be ignored.
+     * @exception SQLException if the columnLabel is not valid;
+     * if a database access error occurs;
+     * the result set concurrency is {@code CONCUR_READ_ONLY}
+     * or this method is called on a closed result set
+     * @exception SQLFeatureNotSupportedException if the JDBC driver does not
+     * support this method; if the JDBC driver does not support this data type
+     * @see JDBCType
+     * @see SQLType
+     * @since 1.8
+     */
+    default void updateObject(String columnLabel, Object x,
+            SQLType targetSqlType, int scaleOrLength) throws SQLException {
+        throw new SQLFeatureNotSupportedException("updateObject not implemented");
+    }
+
+    /**
+     * Updates the designated column with an {@code Object} value.
+     *
+     * The updater methods are used to update column values in the
+     * current row or the insert row.  The updater methods do not
+     * update the underlying database; instead the {@code updateRow} or
+     * {@code insertRow} methods are called to update the database.
+     *<p>
+     * The default implementation will throw {@code SQLFeatureNotSupportedException}
+     *
+     * @param columnIndex the first column is 1, the second is 2, ...
+     * @param x the new column value
+     * @param targetSqlType the SQL type to be sent to the database
+     * @exception SQLException if the columnIndex is not valid;
+     * if a database access error occurs;
+     * the result set concurrency is {@code CONCUR_READ_ONLY}
+     * or this method is called on a closed result set
+     * @exception SQLFeatureNotSupportedException if the JDBC driver does not
+     * support this method; if the JDBC driver does not support this data type
+     * @see JDBCType
+     * @see SQLType
+     * @since 1.8
+     */
+    default void updateObject(int columnIndex, Object x, SQLType targetSqlType)
+            throws SQLException {
+        throw new SQLFeatureNotSupportedException("updateObject not implemented");
+    }
+
+    /**
+     * Updates the designated column with an {@code Object} value.
+     *
+     * The updater methods are used to update column values in the
+     * current row or the insert row.  The updater methods do not
+     * update the underlying database; instead the {@code updateRow} or
+     * {@code insertRow} methods are called to update the database.
+     *<p>
+     * The default implementation will throw {@code SQLFeatureNotSupportedException}
+     *
+     * @param columnLabel the label for the column specified with the SQL AS
+     * clause.  If the SQL AS clause was not specified, then the label is
+     * the name of the column
+     * @param x the new column value
+     * @param targetSqlType the SQL type to be sent to the database
+     * @exception SQLException if the columnLabel is not valid;
+     * if a database access error occurs;
+     * the result set concurrency is {@code CONCUR_READ_ONLY}
+     * or this method is called on a closed result set
+     * @exception SQLFeatureNotSupportedException if the JDBC driver does not
+     * support this method; if the JDBC driver does not support this data type
+     * @see JDBCType
+     * @see SQLType
+     * @since 1.8
+     */
+    default void updateObject(String columnLabel, Object x,
+            SQLType targetSqlType) throws SQLException {
+        throw new SQLFeatureNotSupportedException("updateObject not implemented");
+    }
 }

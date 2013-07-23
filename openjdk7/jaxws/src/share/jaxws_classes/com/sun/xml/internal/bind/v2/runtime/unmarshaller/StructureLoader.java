@@ -44,6 +44,7 @@ import com.sun.xml.internal.bind.v2.runtime.reflect.Accessor;
 import com.sun.xml.internal.bind.v2.runtime.reflect.TransducedAccessor;
 import com.sun.xml.internal.bind.v2.util.QNameMap;
 
+import java.util.Iterator;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
 
@@ -231,10 +232,21 @@ public final class StructureLoader extends Loader {
     public void childElement(UnmarshallingContext.State state, TagName arg) throws SAXException {
         ChildLoader child = childUnmarshallers.get(arg.uri,arg.local);
         if(child==null) {
-            child = catchAll;
-            if(child==null) {
-                super.childElement(state,arg);
-                return;
+            if ((beanInfo != null) && (beanInfo.getTypeNames() != null)) {
+                Iterator typeNamesIt = beanInfo.getTypeNames().iterator();
+                QName parentQName = null;
+                if ((typeNamesIt != null) && (typeNamesIt.hasNext()) && (catchAll == null)) {
+                    parentQName = (QName) typeNamesIt.next();
+                    String parentUri = parentQName.getNamespaceURI();
+                    child = childUnmarshallers.get(parentUri, arg.local);
+                }
+            }
+            if (child == null) {
+                child = catchAll;
+                if(child==null) {
+                    super.childElement(state,arg);
+                    return;
+                }
             }
         }
 

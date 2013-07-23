@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,14 +21,13 @@
  * questions.
  */
 
-// key: compiler.misc.incompatible.types.1
 // key: compiler.misc.infer.no.conforming.instance.exists
 // key: compiler.err.prob.found.req
 
 class IncompatibleTypes1<V> {
-    <T extends Integer & Runnable> IncompatibleTypes1<T> m() {
+    <T> IncompatibleTypes1<Integer> m() {
         return null;
     }
 
-    IncompatibleTypes1<? super String> o = m();
+    IncompatibleTypes1<? extends String> o = m();
 }

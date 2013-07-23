@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,17 +21,16 @@
  * questions.
  */
 
-//
-// SunJSSE does not support dynamic system properties, no way to re-use
-// system properties in samevm/agentvm mode.
-//
-
 /*
  * @test
  * @bug 6618387
  * @summary SSL client sessions do not close cleanly. A TCP reset occurs
  *      instead of a close_notify alert.
  * @run main/othervm CloseKeepAliveCached
+ *
+ *     SunJSSE does not support dynamic system properties, no way to re-use
+ *     system properties in samevm/agentvm mode.
+ *
  * @ignore
  *    After run the test manually, at the end of the debug output,
  *    if "MainThread, called close()" found, the test passed. Otherwise,

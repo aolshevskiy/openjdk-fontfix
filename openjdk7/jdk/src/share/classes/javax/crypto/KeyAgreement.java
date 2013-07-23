@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -93,7 +93,7 @@ public class KeyAgreement {
 
     // remaining services to try in provider selection
     // null once provider is selected
-    private Iterator serviceIterator;
+    private Iterator<Service> serviceIterator;
 
     private final Object lock;
 
@@ -112,7 +112,7 @@ public class KeyAgreement {
         lock = null;
     }
 
-    private KeyAgreement(Service s, Iterator t, String algorithm) {
+    private KeyAgreement(Service s, Iterator<Service> t, String algorithm) {
         firstService = s;
         serviceIterator = t;
         this.algorithm = algorithm;
@@ -149,7 +149,7 @@ public class KeyAgreement {
      * algorithm.
      * See the KeyAgreement section in the <a href=
      * "{@docRoot}/../technotes/guides/security/StandardNames.html#KeyAgreement">
-     * Java Cryptography Architecture Standard Algorithm Name Documentation
+     * Java Cryptography Architecture Standard Algorithm Name Documentation</a>
      * for information about standard algorithm names.
      *
      * @return the new <code>KeyAgreement</code> object.
@@ -165,11 +165,12 @@ public class KeyAgreement {
      */
     public static final KeyAgreement getInstance(String algorithm)
             throws NoSuchAlgorithmException {
-        List services = GetInstance.getServices("KeyAgreement", algorithm);
+        List<Service> services =
+                GetInstance.getServices("KeyAgreement", algorithm);
         // make sure there is at least one service from a signed provider
-        Iterator t = services.iterator();
+        Iterator<Service> t = services.iterator();
         while (t.hasNext()) {
-            Service s = (Service)t.next();
+            Service s = t.next();
             if (JceSecurity.canUseProvider(s.getProvider()) == false) {
                 continue;
             }
@@ -195,7 +196,7 @@ public class KeyAgreement {
      * algorithm.
      * See the KeyAgreement section in the <a href=
      * "{@docRoot}/../technotes/guides/security/StandardNames.html#KeyAgreement">
-     * Java Cryptography Architecture Standard Algorithm Name Documentation
+     * Java Cryptography Architecture Standard Algorithm Name Documentation</a>
      * for information about standard algorithm names.
      *
      * @param provider the name of the provider.
@@ -239,7 +240,7 @@ public class KeyAgreement {
      * algorithm.
      * See the KeyAgreement section in the <a href=
      * "{@docRoot}/../technotes/guides/security/StandardNames.html#KeyAgreement">
-     * Java Cryptography Architecture Standard Algorithm Name Documentation
+     * Java Cryptography Architecture Standard Algorithm Name Documentation</a>
      * for information about standard algorithm names.
      *
      * @param provider the provider.
@@ -301,7 +302,7 @@ public class KeyAgreement {
                     s = firstService;
                     firstService = null;
                 } else {
-                    s = (Service)serviceIterator.next();
+                    s = serviceIterator.next();
                 }
                 if (JceSecurity.canUseProvider(s.getProvider()) == false) {
                     continue;
@@ -358,7 +359,7 @@ public class KeyAgreement {
                     s = firstService;
                     firstService = null;
                 } else {
-                    s = (Service)serviceIterator.next();
+                    s = serviceIterator.next();
                 }
                 // if provider says it does not support this key, ignore it
                 if (s.supportsParameter(key) == false) {
@@ -417,7 +418,7 @@ public class KeyAgreement {
      *
      * <p> If this key agreement requires any random bytes, it will get
      * them using the
-     * {@link SecureRandom <code>SecureRandom</code>}
+     * {@link java.security.SecureRandom}
      * implementation of the highest-priority
      * installed provider as the source of randomness.
      * (If none of the installed providers supply an implementation of
@@ -475,7 +476,7 @@ public class KeyAgreement {
      *
      * <p> If this key agreement requires any random bytes, it will get
      * them using the
-     * {@link SecureRandom <code>SecureRandom</code>}
+     * {@link java.security.SecureRandom}
      * implementation of the highest-priority
      * installed provider as the source of randomness.
      * (If none of the installed providers supply an implementation of

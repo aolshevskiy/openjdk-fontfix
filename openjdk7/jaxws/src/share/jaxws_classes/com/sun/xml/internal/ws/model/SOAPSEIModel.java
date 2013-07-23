@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,10 +26,10 @@
 package com.sun.xml.internal.ws.model;
 
 import com.sun.xml.internal.ws.api.model.ParameterBinding;
+import com.sun.xml.internal.ws.binding.WebServiceFeatureList;
 
 import javax.jws.WebParam.Mode;
 import javax.xml.namespace.QName;
-import javax.xml.ws.WebServiceFeature;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
@@ -41,7 +41,7 @@ import java.util.Set;
  */
 public class SOAPSEIModel extends AbstractSEIModelImpl {
 
-    public SOAPSEIModel(WebServiceFeature[] features) {
+    public SOAPSEIModel(WebServiceFeatureList features) {
         super(features);
     }
 

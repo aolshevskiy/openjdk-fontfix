@@ -287,8 +287,8 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
         this.declaration = declaration;
         this.indentation = indentation;
         this.out = new OutputStreamWriter(out, cs.newEncoder());
-        valueToExpression = new IdentityHashMap<Object, ValueData>();
-        targetToStatementList = new IdentityHashMap<Object, List<Statement>>();
+        valueToExpression = new IdentityHashMap<>();
+        targetToStatementList = new IdentityHashMap<>();
         nameGenerator = new NameGenerator();
     }
 
@@ -334,7 +334,7 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
     private List<Statement> statementList(Object target) {
         List<Statement> list = targetToStatementList.get(target);
         if (list == null) {
-            list = new ArrayList<Statement>();
+            list = new ArrayList<>();
             targetToStatementList.put(target, list);
         }
         return list;
@@ -377,7 +377,7 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
             Object arg = args[i];
             mark(arg, true);
         }
-        mark(stm.getTarget(), false);
+        mark(stm.getTarget(), stm instanceof Expression);
     }
 
 
@@ -487,6 +487,12 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
         }
         indentation--;
 
+        Statement statement = getMissedStatement();
+        while (statement != null) {
+            outputStatement(statement, this, false);
+            statement = getMissedStatement();
+        }
+
         try {
             out.flush();
         }
@@ -501,6 +507,17 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
         nameGenerator.clear();
         valueToExpression.clear();
         targetToStatementList.clear();
+    }
+
+    Statement getMissedStatement() {
+        for (List<Statement> statements : this.targetToStatementList.values()) {
+            for (int i = 0; i < statements.size(); i++) {
+                if (Statement.class == statements.get(i).getClass()) {
+                    return statements.remove(i);
+                }
+            }
+        }
+        return null;
     }
 
 
@@ -597,14 +614,14 @@ public class XMLEncoder extends Encoder implements AutoCloseable {
                                                 "methodName") + " should not be null");
             }
 
-            if (target instanceof Field && methodName.equals("get")) {
+            if (isArgument && target instanceof Field && methodName.equals("get")) {
                 Field f = (Field)target;
                 writeln("<object class=" + quote(f.getDeclaringClass().getName()) +
                         " field=" + quote(f.getName()) + "/>");
                 return;
             }
 
-            Class primitiveType = primitiveTypeFor(value.getClass());
+            Class<?> primitiveType = primitiveTypeFor(value.getClass());
             if (primitiveType != null && target == value.getClass() &&
                 methodName.equals("new")) {
                 String primitiveTypeName = primitiveType.getName();

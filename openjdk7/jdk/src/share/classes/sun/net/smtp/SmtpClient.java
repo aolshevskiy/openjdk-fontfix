@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -134,7 +134,7 @@ public class SmtpClient extends TransferProtocolClient {
         try {
             message = new SmtpPrintStream(serverOutput, this);
         } catch (UnsupportedEncodingException e) {
-            throw new InternalError(encoding+" encoding not found");
+            throw new InternalError(encoding+" encoding not found", e);
         }
         return message;
     }

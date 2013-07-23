@@ -54,10 +54,10 @@ static const char *user_dir     = "/jdk";
 #endif
 
 #include <dlfcn.h>
-#ifdef __solaris__
-#include <thread.h>
-#else
+#ifdef __linux__
 #include <pthread.h>
+#else
+#include <thread.h>
 #endif
 
 #define JVM_DLL         "libjvm.so"

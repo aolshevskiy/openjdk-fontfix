@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,8 +25,9 @@
 
 package com.sun.tools.javac.code;
 
-import com.sun.tools.javac.util.*;
 import java.util.Iterator;
+
+import com.sun.tools.javac.util.*;
 
 /** A scope represents an area of visibility in a Java program. The
  *  Scope class is a container for symbols which provides
@@ -315,6 +316,7 @@ public class Scope {
     public Entry lookup(Name name) {
         return lookup(name, noFilter);
     }
+
     public Entry lookup(Name name, Filter<Symbol> sf) {
         Entry e = table[getIndex(name)];
         if (e == null || e == sentinel)
@@ -358,6 +360,10 @@ public class Scope {
                 return i;
             i = (i + x) & hashMask;
         }
+    }
+
+    public boolean anyMatch(Filter<Symbol> sf) {
+        return getElements(sf).iterator().hasNext();
     }
 
     public Iterable<Symbol> getElements() {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -119,7 +119,7 @@ public final class CollationElementIterator
      * on the predefined collation rules.  If the source string is empty,
      * NULLORDER will be returned on the calls to next().
      * @param sourceText the source string.
-     * @param order the collation object.
+     * @param owner the collation object.
      */
     CollationElementIterator(String sourceText, RuleBasedCollator owner) {
         this.owner = owner;
@@ -137,7 +137,7 @@ public final class CollationElementIterator
      * on the predefined collation rules.  If the source string is empty,
      * NULLORDER will be returned on the calls to next().
      * @param sourceText the source string.
-     * @param order the collation object.
+     * @param owner the collation object.
      */
     CollationElementIterator(CharacterIterator sourceText, RuleBasedCollator owner) {
         this.owner = owner;
@@ -412,6 +412,7 @@ public final class CollationElementIterator
      * @param newOffset The new character offset into the original text.
      * @since 1.2
      */
+    @SuppressWarnings("deprecation") // getBeginIndex, getEndIndex and setIndex are deprecated
     public void setOffset(int newOffset)
     {
         if (text != null) {
@@ -645,14 +646,14 @@ public final class CollationElementIterator
     {
         // First get the ordering of this single character,
         // which is always the first element in the list
-        Vector list = ordering.getContractValues(ch);
-        EntryPair pair = (EntryPair)list.firstElement();
+        Vector<EntryPair> list = ordering.getContractValues(ch);
+        EntryPair pair = list.firstElement();
         int order = pair.value;
 
         // find out the length of the longest contracting character sequence in the list.
         // There's logic in the builder code to make sure the longest sequence is always
         // the last.
-        pair = (EntryPair)list.lastElement();
+        pair = list.lastElement();
         int maxLength = pair.entryName.length();
 
         // (the Normalizer is cloned here so that the seeking we do in the next loop
@@ -684,7 +685,7 @@ public final class CollationElementIterator
         // to this sequence
         maxLength = 1;
         for (int i = list.size() - 1; i > 0; i--) {
-            pair = (EntryPair)list.elementAt(i);
+            pair = list.elementAt(i);
             if (!pair.fwd)
                 continue;
 
@@ -721,11 +722,11 @@ public final class CollationElementIterator
         // rather than off.  Notice that we still use append() and startsWith() when
         // working on the fragment.  This is because the entry pairs that are used
         // in reverse iteration have their names reversed already.
-        Vector list = ordering.getContractValues(ch);
-        EntryPair pair = (EntryPair)list.firstElement();
+        Vector<EntryPair> list = ordering.getContractValues(ch);
+        EntryPair pair = list.firstElement();
         int order = pair.value;
 
-        pair = (EntryPair)list.lastElement();
+        pair = list.lastElement();
         int maxLength = pair.entryName.length();
 
         NormalizerBase tempText = (NormalizerBase)text.clone();
@@ -747,7 +748,7 @@ public final class CollationElementIterator
 
         maxLength = 1;
         for (int i = list.size() - 1; i > 0; i--) {
-            pair = (EntryPair)list.elementAt(i);
+            pair = list.elementAt(i);
             if (pair.fwd)
                 continue;
 

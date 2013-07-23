@@ -1,3 +1,4 @@
+#!/bin/sh
 # @test MultipleJRE.sh
 # @bug 4811102 4953711 4955505 4956301 4991229 4998210 5018605 6387069 6733959
 # @build PrintVersion
@@ -37,6 +38,10 @@ then
   exit 1
 fi
 
+if [ "${COMPILEJAVA}" = "" ]; then
+  COMPILEJAVA="${TESTJAVA}"
+fi
+
 if [ "${TESTSRC}" = "" ]
 then
   echo "TESTSRC not set.  Test cannot execute.  Failed."
@@ -49,9 +54,9 @@ then
   exit 1
 fi
 
-JAVAEXE="$TESTJAVA/bin/java"
-JAVA="$TESTJAVA/bin/java -classpath $TESTCLASSES"
-JAR="$TESTJAVA/bin/jar"
+JAVAEXE="$TESTJAVA/bin/java ${TESTVMOPTS}"
+JAVA="$TESTJAVA/bin/java ${TESTVMOPTS} -classpath $TESTCLASSES"
+JAR="$COMPILEJAVA/bin/jar ${TESTTOOLVMOPTS}"
 OS=`uname -s`;
 
 #

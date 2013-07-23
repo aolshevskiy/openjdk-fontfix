@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 
 import java.text.*;
 import java.util.*;
-import sun.util.*;
+import sun.util.locale.provider.*;
 import sun.util.resources.*;
 
 public class DateFormatSymbolsProviderTest extends ProviderTest {
@@ -34,7 +34,8 @@ public class DateFormatSymbolsProviderTest extends ProviderTest {
     com.foo.DateFormatSymbolsProviderImpl dfsp = new com.foo.DateFormatSymbolsProviderImpl();
     List<Locale> availloc = Arrays.asList(DateFormatSymbols.getAvailableLocales());
     List<Locale> providerloc = Arrays.asList(dfsp.getAvailableLocales());
-    List<Locale> jreloc = Arrays.asList(LocaleData.getAvailableLocales());
+    List<Locale> jreloc = Arrays.asList(LocaleProviderAdapter.forJRE().getAvailableLocales());
+    List<Locale> jreimplloc = Arrays.asList(LocaleProviderAdapter.forJRE().getDateFormatSymbolsProvider().getAvailableLocales());
 
     public static void main(String[] s) {
         new DateFormatSymbolsProviderTest();
@@ -43,11 +44,12 @@ public class DateFormatSymbolsProviderTest extends ProviderTest {
     DateFormatSymbolsProviderTest() {
         availableLocalesTest();
         objectValidityTest();
+        hashCodeTest();
     }
 
     void availableLocalesTest() {
-        Set<Locale> localesFromAPI = new HashSet<Locale>(availloc);
-        Set<Locale> localesExpected = new HashSet<Locale>(jreloc);
+        Set<Locale> localesFromAPI = new HashSet<>(availloc);
+        Set<Locale> localesExpected = new HashSet<>(jreloc);
         localesExpected.addAll(providerloc);
         if (localesFromAPI.equals(localesExpected)) {
             System.out.println("availableLocalesTest passed.");
@@ -60,8 +62,8 @@ public class DateFormatSymbolsProviderTest extends ProviderTest {
 
         for (Locale target: availloc) {
             // pure JRE implementation
-            ResourceBundle rb = LocaleData.getDateFormatData(target);
-            boolean jreSupportsLocale = jreloc.contains(target);
+            ResourceBundle rb = ((ResourceBundleBasedAdapter)LocaleProviderAdapter.forJRE()).getLocaleData().getDateFormatData(target);
+            boolean jreSupportsLocale = jreimplloc.contains(target);
 
             // JRE string arrays
             String[][] jres = new String[6][];
@@ -119,6 +121,19 @@ public class DateFormatSymbolsProviderTest extends ProviderTest {
                         (result[i] != null ? result[i][j] : null);
                     checkValidity(target, jresStr, providersStr, resultStr, jreSupportsLocale);
                 }
+            }
+        }
+    }
+
+    // Bug 7200341.
+    void hashCodeTest() {
+        for (Locale target: availloc) {
+            // look for provider's object
+            DateFormatSymbols dfs = DateFormatSymbols.getInstance(target);
+            if (dfs.getClass().getSimpleName().equals("FooDateFormatSymbols")) {
+                // call its hashCode(). success if no ArrayIndexOutOfBoundsException is thrown.
+                dfs.hashCode();
+                break;
             }
         }
     }

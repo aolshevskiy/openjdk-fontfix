@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,14 +30,18 @@ import com.sun.istack.internal.Nullable;
 import com.sun.xml.internal.ws.api.BindingID;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.WSBinding;
-import com.sun.xml.internal.ws.api.client.WSPortInfo;
+import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
 import com.sun.xml.internal.ws.api.addressing.WSEndpointReference;
+import com.sun.xml.internal.ws.api.client.WSPortInfo;
+import com.sun.xml.internal.ws.api.message.AddressingUtils;
 import com.sun.xml.internal.ws.api.message.Attachment;
 import com.sun.xml.internal.ws.api.message.AttachmentSet;
 import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.pipe.Fiber;
 import com.sun.xml.internal.ws.api.pipe.Tube;
+import com.sun.xml.internal.ws.api.server.Container;
+import com.sun.xml.internal.ws.api.server.ContainerResolver;
 import com.sun.xml.internal.ws.binding.BindingImpl;
 import com.sun.xml.internal.ws.client.*;
 import com.sun.xml.internal.ws.encoding.soap.DeserializationException;
@@ -70,9 +74,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 
 /**
@@ -87,14 +91,16 @@ import java.util.concurrent.TimeUnit;
  */
 public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
 
+    private static final Logger LOGGER = Logger.getLogger(DispatchImpl.class.getName());
+
     final Service.Mode mode;
-    final QName portname;
     final SOAPVersion soapVersion;
+    final boolean allowFaultResponseMsg;
     static final long AWAIT_TERMINATION_TIME = 800L;
 
     /**
      *
-     * @param port    dispatch instance is asssociated with this wsdl port qName
+     * @param port    dispatch instance is associated with this wsdl port qName
      * @param mode    Service.mode associated with this Dispatch instance - Service.mode.MESSAGE or Service.mode.PAYLOAD
      * @param owner   Service that created the Dispatch
      * @param pipe    Master pipe for the pipeline
@@ -102,23 +108,57 @@ public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
      */
     @Deprecated
     protected DispatchImpl(QName port, Service.Mode mode, WSServiceDelegate owner, Tube pipe, BindingImpl binding, @Nullable WSEndpointReference epr) {
-        super(owner, pipe, binding, (owner.getWsdlService() != null)? owner.getWsdlService().get(port) : null , owner.getEndpointAddress(port), epr);
-        this.portname = port;
+        super(port, owner, pipe, binding, (owner.getWsdlService() != null)? owner.getWsdlService().get(port) : null , owner.getEndpointAddress(port), epr);
         this.mode = mode;
         this.soapVersion = binding.getSOAPVersion();
+        this.allowFaultResponseMsg = false;
     }
 
     /**
-     *
-     * @param portInfo dispatch instance is asssociated with this portInfo
+     * @param portInfo dispatch instance is associated with this portInfo
      * @param mode     Service.mode associated with this Dispatch instance - Service.mode.MESSAGE or Service.mode.PAYLOAD
      * @param binding  Binding of this Dispatch instance, current one of SOAP/HTTP or XML/HTTP
      */
     protected DispatchImpl(WSPortInfo portInfo, Service.Mode mode, BindingImpl binding, @Nullable WSEndpointReference epr) {
-        super(portInfo, binding, portInfo.getEndpointAddress(), epr);
-        this.portname = portInfo.getPortName();
+        this(portInfo, mode, binding, epr, false);
+    }
+
+    /**
+     * @param portInfo dispatch instance is associated with this portInfo
+     * @param mode     Service.mode associated with this Dispatch instance - Service.mode.MESSAGE or Service.mode.PAYLOAD
+     * @param binding  Binding of this Dispatch instance, current one of SOAP/HTTP or XML/HTTP
+     * @param allowFaultResponseMsg A packet containing a SOAP fault message is allowed as the response to a request on this dispatch instance.
+     */
+    protected DispatchImpl(WSPortInfo portInfo, Service.Mode mode, BindingImpl binding, @Nullable WSEndpointReference epr, boolean allowFaultResponseMsg) {
+        this(portInfo, mode, binding, null, epr, allowFaultResponseMsg);
+    }
+
+    /**
+     * @param portInfo dispatch instance is associated with this portInfo
+     * @param mode     Service.mode associated with this Dispatch instance - Service.mode.MESSAGE or Service.mode.PAYLOAD
+     * @param binding  Binding of this Dispatch instance, current one of SOAP/HTTP or XML/HTTP
+     * @param pipe    Master pipe for the pipeline
+     * @param allowFaultResponseMsg A packet containing a SOAP fault message is allowed as the response to a request on this dispatch instance.
+     */
+    protected DispatchImpl(WSPortInfo portInfo, Service.Mode mode, BindingImpl binding, Tube pipe, @Nullable WSEndpointReference epr, boolean allowFaultResponseMsg) {
+        super(portInfo, binding, pipe, portInfo.getEndpointAddress(), epr);
         this.mode = mode;
         this.soapVersion = binding.getSOAPVersion();
+        this.allowFaultResponseMsg = allowFaultResponseMsg;
+    }
+    /**
+     *
+     * @param portportInfo dispatch instance is associated with this wsdl port qName
+     * @param mode    Service.mode associated with this Dispatch instance - Service.mode.MESSAGE or Service.mode.PAYLOAD
+     * @param pipe    Master pipe for the pipeline
+     * @param binding Binding of this Dispatch instance, current one of SOAP/HTTP or XML/HTTP
+     * @param allowFaultResponseMsg A packet containing a SOAP fault message is allowed as the response to a request on this dispatch instance.
+     */
+    protected DispatchImpl(WSPortInfo portInfo, Service.Mode mode, Tube pipe, BindingImpl binding, @Nullable WSEndpointReference epr, boolean allowFaultResponseMsg) {
+        super(portInfo, binding, pipe, portInfo.getEndpointAddress(), epr);
+        this.mode = mode;
+        this.soapVersion = binding.getSOAPVersion();
+        this.allowFaultResponseMsg = allowFaultResponseMsg;
     }
 
     /**
@@ -135,29 +175,60 @@ public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
     abstract T toReturnValue(Packet response);
 
     public final Response<T> invokeAsync(T param) {
-        AsyncInvoker invoker = new DispatchAsyncInvoker(param);
-        AsyncResponseImpl<T> ft = new AsyncResponseImpl<T>(invoker,null);
-        invoker.setReceiver(ft);
-        ft.run();
-        return ft;
+        Container old = ContainerResolver.getDefault().enterContainer(owner.getContainer());
+        try {
+            if (LOGGER.isLoggable(Level.FINE)) {
+              dumpParam(param, "invokeAsync(T)");
+            }
+            AsyncInvoker invoker = new DispatchAsyncInvoker(param);
+            AsyncResponseImpl<T> ft = new AsyncResponseImpl<T>(invoker,null);
+            invoker.setReceiver(ft);
+            ft.run();
+            return ft;
+        } finally {
+            ContainerResolver.getDefault().exitContainer(old);
+        }
     }
 
-    public final Future<?> invokeAsync(T param, AsyncHandler<T> asyncHandler) {
-        AsyncInvoker invoker = new DispatchAsyncInvoker(param);
-        AsyncResponseImpl<T> ft = new AsyncResponseImpl<T>(invoker,asyncHandler);
-        invoker.setReceiver(ft);
+    private void dumpParam(T param, String method) {
+      if (param instanceof Packet) {
+        Packet message = (Packet)param;
 
-        // temp needed so that unit tests run and complete otherwise they may
-        //not. Need a way to put this in the test harness or other way to do this
-        //todo: as above
-//        ExecutorService exec = (ExecutorService) owner.getExecutor();
-//        try {
-//            exec.awaitTermination(AWAIT_TERMINATION_TIME, TimeUnit.MICROSECONDS);
-//        } catch (InterruptedException e) {
-//            throw new WebServiceException(e);
-//        }
-        ft.run();
-        return ft;
+        String action;
+        String msgId;
+        if (LOGGER.isLoggable(Level.FINE)) {
+          AddressingVersion av = DispatchImpl.this.getBinding().getAddressingVersion();
+          SOAPVersion sv = DispatchImpl.this.getBinding().getSOAPVersion();
+          action =
+            av != null && message.getMessage() != null ?
+              AddressingUtils.getAction(message.getMessage().getHeaders(), av, sv) : null;
+          msgId =
+            av != null && message.getMessage() != null ?
+              AddressingUtils.getMessageID(message.getMessage().getHeaders(), av, sv) : null;
+          LOGGER.fine("In DispatchImpl." + method + " for message with action: " + action + " and msg ID: " + msgId + " msg: " + message.getMessage());
+
+          if (message.getMessage() == null) {
+            LOGGER.fine("Dispatching null message for action: " + action + " and msg ID: " + msgId);
+          }
+        }
+      }
+    }
+    public final Future<?> invokeAsync(T param, AsyncHandler<T> asyncHandler) {
+        Container old = ContainerResolver.getDefault().enterContainer(owner.getContainer());
+        try {
+            if (LOGGER.isLoggable(Level.FINE)) {
+              dumpParam(param, "invokeAsync(T, AsyncHandler<T>)");
+            }
+            AsyncInvoker invoker = new DispatchAsyncInvoker(param);
+            AsyncResponseImpl<T> ft = new AsyncResponseImpl<T>(invoker,asyncHandler);
+            invoker.setReceiver(ft);
+            invoker.setNonNullAsyncHandlerGiven(asyncHandler != null);
+
+            ft.run();
+            return ft;
+        } finally {
+            ContainerResolver.getDefault().exitContainer(old);
+        }
     }
 
     /**
@@ -167,57 +238,85 @@ public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
      * why it takes a {@link RequestContext} and {@link ResponseContextReceiver} as a parameter.
      */
     public final T doInvoke(T in, RequestContext rc, ResponseContextReceiver receiver){
-        Packet response;
+        Packet response = null;
         try {
-            checkNullAllowed(in, rc, binding, mode);
+                try {
+                    checkNullAllowed(in, rc, binding, mode);
 
-            Packet message = createPacket(in);
-            resolveEndpointAddress(message, rc);
-            setProperties(message,true);
-            response = process(message,rc,receiver);
-            Message msg = response.getMessage();
+                    Packet message = createPacket(in);
+                    message.setState(Packet.State.ClientRequest);
+                    resolveEndpointAddress(message, rc);
+                    setProperties(message,true);
+                    response = process(message,rc,receiver);
+                    Message msg = response.getMessage();
 
-            if(msg != null && msg.isFault()) {
-                SOAPFaultBuilder faultBuilder = SOAPFaultBuilder.create(msg);
-                // passing null means there is no checked excpetion we're looking for all
-                // it will get back to us is a protocol exception
-                throw (SOAPFaultException)faultBuilder.createException(null);
-            }
-        } catch (JAXBException e) {
-            //TODO: i18nify
-            throw new DeserializationException(DispatchMessages.INVALID_RESPONSE_DESERIALIZATION(),e);
-        } catch(WebServiceException e){
-            //it could be a WebServiceException or a ProtocolException
-            throw e;
-        } catch(Throwable e){
-            // it could be a RuntimeException resulting due to some internal bug or
-            // its some other exception resulting from user error, wrap it in
-            // WebServiceException
-            throw new WebServiceException(e);
+        // REVIEW: eliminate allowFaultResponseMsg, but make that behavior default for MessageDispatch, PacketDispatch
+                    if(msg != null && msg.isFault() &&
+                 !allowFaultResponseMsg) {
+                        SOAPFaultBuilder faultBuilder = SOAPFaultBuilder.create(msg);
+                        // passing null means there is no checked excpetion we're looking for all
+                        // it will get back to us is a protocol exception
+                        throw (SOAPFaultException)faultBuilder.createException(null);
+                    }
+                } catch (JAXBException e) {
+                    //TODO: i18nify
+                    throw new DeserializationException(DispatchMessages.INVALID_RESPONSE_DESERIALIZATION(),e);
+                } catch(WebServiceException e){
+                    //it could be a WebServiceException or a ProtocolException
+                    throw e;
+                } catch(Throwable e){
+                    // it could be a RuntimeException resulting due to some internal bug or
+                    // its some other exception resulting from user error, wrap it in
+                    // WebServiceException
+                    throw new WebServiceException(e);
+                }
+
+                return toReturnValue(response);
+        } finally {
+        // REVIEW: Move to AsyncTransportProvider
+                if (response != null && response.transportBackChannel != null)
+                        response.transportBackChannel.close();
         }
-
-        return toReturnValue(response);
     }
 
     public final T invoke(T in) {
-        return doInvoke(in,requestContext,this);
+        Container old = ContainerResolver.getDefault().enterContainer(owner.getContainer());
+        try {
+            if (LOGGER.isLoggable(Level.FINE)) {
+              dumpParam(in, "invoke(T)");
+            }
+
+            return doInvoke(in,requestContext,this);
+        } finally {
+            ContainerResolver.getDefault().exitContainer(old);
+        }
     }
 
     public final void invokeOneWay(T in) {
+        Container old = ContainerResolver.getDefault().enterContainer(owner.getContainer());
         try {
-            checkNullAllowed(in, requestContext, binding, mode);
+            if (LOGGER.isLoggable(Level.FINE)) {
+              dumpParam(in, "invokeOneWay(T)");
+            }
 
-            Packet request = createPacket(in);
-            setProperties(request,false);
-            Packet response = process(request,requestContext,this);
-        } catch(WebServiceException e){
-            //it could be a WebServiceException or a ProtocolException
-            throw e;
-        } catch(Throwable e){
-            // it could be a RuntimeException resulting due to some internal bug or
-            // its some other exception resulting from user error, wrap it in
-            // WebServiceException
-            throw new WebServiceException(e);
+            try {
+                checkNullAllowed(in, requestContext, binding, mode);
+
+                Packet request = createPacket(in);
+                request.setState(Packet.State.ClientRequest);
+                setProperties(request,false);
+                process(request,requestContext,this);
+            } catch(WebServiceException e){
+                //it could be a WebServiceException or a ProtocolException
+                throw e;
+            } catch(Throwable e){
+                // it could be a RuntimeException resulting due to some internal bug or
+                // its some other exception resulting from user error, wrap it in
+                // WebServiceException
+                throw new WebServiceException(e);
+            }
+        } finally {
+            ContainerResolver.getDefault().exitContainer(old);
         }
     }
 
@@ -272,41 +371,60 @@ public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
             throw new WebServiceException(DispatchMessages.INVALID_DATASOURCE_DISPATCH_MSGMODE(mode.name(), Service.Mode.MESSAGE.toString()));
     }
 
-    protected final @NotNull QName getPortName() {
+    public final @NotNull QName getPortName() {
         return portname;
     }
 
+    void resolveEndpointAddress(@NotNull final Packet message, @NotNull final RequestContext requestContext) {
+        final boolean p = message.packetTakesPriorityOverRequestContext;
 
-    void resolveEndpointAddress(@NotNull Packet message, @NotNull RequestContext requestContext) {
         //resolve endpoint look for query parameters, pathInfo
-        String endpoint = (String) requestContext.get(BindingProvider.ENDPOINT_ADDRESS_PROPERTY);
-        if (endpoint == null)
+        String endpoint;
+        if (p && message.endpointAddress != null) {
             endpoint = message.endpointAddress.toString();
+        } else {
+            endpoint = (String) requestContext.get(BindingProvider.ENDPOINT_ADDRESS_PROPERTY);
+        }
+        // This is existing before packetTakesPriorityOverRequestContext so leaving in place.
+        if (endpoint == null) {
+            if (message.endpointAddress == null) throw new WebServiceException(DispatchMessages.INVALID_NULLARG_URI());
+            endpoint = message.endpointAddress.toString();
+        }
 
         String pathInfo = null;
         String queryString = null;
-        if (requestContext.get(MessageContext.PATH_INFO) != null)
+        if (p && message.invocationProperties.get(MessageContext.PATH_INFO) != null) {
+            pathInfo = (String) message.invocationProperties.get(MessageContext.PATH_INFO);
+        } else if (requestContext.get(MessageContext.PATH_INFO) != null) {
             pathInfo = (String) requestContext.get(MessageContext.PATH_INFO);
+        }
 
-        if (requestContext.get(MessageContext.QUERY_STRING) != null)
+        if (p && message.invocationProperties.get(MessageContext.QUERY_STRING) != null) {
+            queryString = (String) message.invocationProperties.get(MessageContext.QUERY_STRING);
+        } else if (requestContext.get(MessageContext.QUERY_STRING) != null) {
             queryString = (String) requestContext.get(MessageContext.QUERY_STRING);
+        }
 
-
-        String resolvedEndpoint = null;
         if (pathInfo != null || queryString != null) {
             pathInfo = checkPath(pathInfo);
             queryString = checkQuery(queryString);
             if (endpoint != null) {
                 try {
                     final URI endpointURI = new URI(endpoint);
-                    resolvedEndpoint = resolveURI(endpointURI, pathInfo, queryString);
+                    endpoint = resolveURI(endpointURI, pathInfo, queryString);
                 } catch (URISyntaxException e) {
                     throw new WebServiceException(DispatchMessages.INVALID_URI(endpoint));
                 }
             }
-            requestContext.put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, resolvedEndpoint);
-            //message.endpointAddress = EndpointAddress.create(resolvedEndpoint);
         }
+        // These two lines used to be inside the above if.  It is outside so:
+        // - in cases where there is no setting of address on a Packet before invocation or no pathInfo/queryString
+        //   this will just put back what it found in the requestContext - basically a noop.
+        // - but when info is in the Packet this will update so it will get used later.
+        // Remember - we are operating on a copied RequestContext at this point - not the sticky one in the Stub.
+        requestContext.put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
+        // This is not necessary because a later step will copy the resolvedEndpoint put above into message.
+        //message.endpointAddress = EndpointAddress.create(endpoint);
     }
 
     protected @NotNull String resolveURI(@NotNull URI endpointURI, @Nullable String pathInfo, @Nullable String queryString) {
@@ -413,6 +531,9 @@ public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
         }
 
         public T call() throws Exception {
+            if (LOGGER.isLoggable(Level.FINE)) {
+              dumpParam(param, "call()");
+            }
             return doInvoke(param,rc,receiver);
         }
 
@@ -436,14 +557,45 @@ public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
 
         public void do_run () {
             checkNullAllowed(param, rc, binding, mode);
-            Packet message = createPacket(param);
+            final Packet message = createPacket(param);
+            message.setState(Packet.State.ClientRequest);
+            message.nonNullAsyncHandlerGiven = this.nonNullAsyncHandlerGiven;
             resolveEndpointAddress(message, rc);
             setProperties(message,true);
+
+            String action = null;
+            String msgId = null;
+            if (LOGGER.isLoggable(Level.FINE)) {
+              AddressingVersion av = DispatchImpl.this.getBinding().getAddressingVersion();
+              SOAPVersion sv = DispatchImpl.this.getBinding().getSOAPVersion();
+              action =
+                av != null && message.getMessage() != null ?
+                  AddressingUtils.getAction(message.getMessage().getHeaders(), av, sv) : null;
+              msgId =
+                av != null&& message.getMessage() != null ?
+                  AddressingUtils.getMessageID(message.getMessage().getHeaders(), av, sv) : null;
+              LOGGER.fine("In DispatchAsyncInvoker.do_run for async message with action: " + action + " and msg ID: " + msgId);
+            }
+
+            final String actionUse = action;
+            final String msgIdUse = msgId;
+
             Fiber.CompletionCallback callback = new Fiber.CompletionCallback() {
                 public void onCompletion(@NotNull Packet response) {
+
+                    if (LOGGER.isLoggable(Level.FINE)) {
+                      LOGGER.fine("Done with processAsync in DispatchAsyncInvoker.do_run, and setting response for async message with action: " + actionUse + " and msg ID: " + msgIdUse);
+                    }
+
                     Message msg = response.getMessage();
+
+                    if (LOGGER.isLoggable(Level.FINE)) {
+                      LOGGER.fine("Done with processAsync in DispatchAsyncInvoker.do_run, and setting response for async message with action: " + actionUse + " and msg ID: " + msgIdUse + " msg: " + msg);
+                    }
+
                     try {
-                        if(msg != null && msg.isFault()) {
+                        if(msg != null && msg.isFault() &&
+                           !allowFaultResponseMsg) {
                             SOAPFaultBuilder faultBuilder = SOAPFaultBuilder.create(msg);
                             // passing null means there is no checked excpetion we're looking for all
                             // it will get back to us is a protocol exception
@@ -465,6 +617,9 @@ public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
                     }
                 }
                 public void onCompletion(@NotNull Throwable error) {
+                    if (LOGGER.isLoggable(Level.FINE)) {
+                      LOGGER.fine("Done with processAsync in DispatchAsyncInvoker.do_run, and setting response for async message with action: " + actionUse + " and msg ID: " + msgIdUse + " Throwable: " + error.toString());
+                    }
                     if (error instanceof WebServiceException) {
                         responseImpl.set(null, error);
 
@@ -475,7 +630,7 @@ public abstract class DispatchImpl<T> extends Stub implements Dispatch<T> {
                     }
                 }
             };
-            processAsync(message,rc, callback);
+            processAsync(responseImpl,message,rc, callback);
         }
     }
 

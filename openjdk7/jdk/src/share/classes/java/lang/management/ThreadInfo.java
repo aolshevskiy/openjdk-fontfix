@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,13 +33,13 @@ import static java.lang.Thread.State.*;
 /**
  * Thread information. <tt>ThreadInfo</tt> contains the information
  * about a thread including:
- * <h4>General thread information</h4>
+ * <h3>General thread information</h3>
  * <ul>
  *   <li>Thread ID.</li>
  *   <li>Name of the thread.</li>
  * </ul>
  *
- * <h4>Execution information</h4>
+ * <h3>Execution information</h3>
  * <ul>
  *   <li>Thread state.</li>
  *   <li>The object upon which the thread is blocked due to:
@@ -147,8 +147,9 @@ public class ThreadInfo {
      * @param waitedCount   Number of times waited on a lock
      * @param waitedTime    Approx time waited on a lock
      * @param stackTrace    Thread stack trace
-     * @param lockedMonitors List of locked monitors
-     * @param lockedSynchronizers List of locked synchronizers
+     * @param monitors      List of locked monitors
+     * @param stackDepths   List of stack depths
+     * @param synchronizers List of locked synchronizers
      */
     private ThreadInfo(Thread t, int state, Object lockObj, Thread lockOwner,
                        long blockedCount, long blockedTime,
@@ -651,7 +652,7 @@ public class ThreadInfo {
      * The given <tt>CompositeData</tt> must contain the following attributes
      * unless otherwise specified below:
      * <blockquote>
-     * <table border>
+     * <table border summary="The attributes and their types the given CompositeData contains">
      * <tr>
      *   <th align=left>Attribute Name</th>
      *   <th align=left>Type</th>
@@ -696,9 +697,7 @@ public class ThreadInfo {
      *   <td>lockInfo</td>
      *   <td><tt>javax.management.openmbean.CompositeData</tt>
      *       - the mapped type for {@link LockInfo} as specified in the
-     *       <a href="../../../javax/management/MXBean.html#mapping-rules">
-     *       type mapping rules</a> of
-     *       {@linkplain javax.management.MXBean MXBeans}.
+     *         {@link LockInfo#from} method.
      *       <p>
      *       If <tt>cd</tt> does not contain this attribute,
      *       the <tt>LockInfo</tt> object will be constructed from
@@ -723,7 +722,7 @@ public class ThreadInfo {
      *       Each element is a <tt>CompositeData</tt> representing
      *       StackTraceElement containing the following attributes:
      *       <blockquote>
-     *       <table cellspacing=1 cellpadding=0>
+     *       <table cellspacing=1 cellpadding=0 summary="The attributes and their types the given CompositeData contains">
      *       <tr>
      *         <th align=left>Attribute Name</th>
      *         <th align=left>Type</th>
@@ -766,10 +765,7 @@ public class ThreadInfo {
      *   <td>lockedSynchronizers</td>
      *   <td><tt>javax.management.openmbean.CompositeData[]</tt>
      *       whose element type is the mapped type for
-     *       {@link LockInfo} as specified in the
-     *       <a href="../../../javax/management/MXBean.html#mapping-rules">
-     *       type mapping rules</a> of
-     *       {@linkplain javax.management.MXBean MXBeans}.
+     *       {@link LockInfo} as specified in the {@link LockInfo#from} method.
      *       <p>
      *       If <tt>cd</tt> does not contain this attribute,
      *       this attribute will be set to an empty array. </td>
@@ -830,7 +826,6 @@ public class ThreadInfo {
      * @since 1.6
      */
     public LockInfo[] getLockedSynchronizers() {
-       // represents an <a href="LockInfo.html#OwnableSynchronizer">
         return lockedSynchronizers;
     }
 

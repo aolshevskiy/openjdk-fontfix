@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2012, Oracle and/or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -466,7 +466,10 @@ public class ZipFileSystem extends FileSystem {
             if (eSrc.type == Entry.NEW || eSrc.type == Entry.FILECH)
             {
                 u.type = eSrc.type;    // make it the same type
-                if (!deletesrc) {      // if it's not "rename", just take the data
+                if (deletesrc) {       // if it's a "rename", take the data
+                    u.bytes = eSrc.bytes;
+                    u.file = eSrc.file;
+                } else {               // if it's not "rename", copy the data
                     if (eSrc.bytes != null)
                         u.bytes = Arrays.copyOf(eSrc.bytes, eSrc.bytes.length);
                     else if (eSrc.file != null) {
@@ -651,7 +654,11 @@ public class ZipFileSystem extends FileSystem {
                     }
 
                     public int read(ByteBuffer dst) throws IOException {
-                        return rbc.read(dst);
+                        int n = rbc.read(dst);
+                        if (n > 0) {
+                            read += n;
+                        }
+                        return n;
                     }
 
                     public SeekableByteChannel truncate(long size)
@@ -1078,13 +1085,13 @@ public class ZipFileSystem extends FileSystem {
     }
 
     // Creates a new empty temporary file in the same directory as the
-    // specified file.  A variant of File.createTempFile.
+    // specified file.  A variant of Files.createTempFile.
     private Path createTempFileInSameDirectoryAs(Path path)
         throws IOException
     {
         Path parent = path.toAbsolutePath().getParent();
-        String dir = (parent == null)? "." : parent.toString();
-        Path tmpPath = File.createTempFile("zipfstmp", null, new File(dir)).toPath();
+        Path dir = (parent == null) ? path.getFileSystem().getPath(".") : parent;
+        Path tmpPath = Files.createTempFile(dir, "zipfstmp", null);
         tmppaths.add(tmpPath);
         return tmpPath;
     }
@@ -1114,7 +1121,7 @@ public class ZipFileSystem extends FileSystem {
             if (old != null) {
                 removeFromTree(old);
             }
-            if (e.type == Entry.NEW || e.type == Entry.FILECH) {
+            if (e.type == Entry.NEW || e.type == Entry.FILECH || e.type == Entry.COPY) {
                 IndexNode parent = inodes.get(LOOKUPKEY.as(getParent(e.name)));
                 e.sibling = parent.child;
                 parent.child = e;
@@ -1609,7 +1616,7 @@ public class ZipFileSystem extends FileSystem {
         synchronized (inflaters) {
             int size = inflaters.size();
             if (size > 0) {
-                Inflater inf = (Inflater)inflaters.remove(size - 1);
+                Inflater inf = inflaters.remove(size - 1);
                 return inf;
             } else {
                 return new Inflater(true);
@@ -1638,7 +1645,7 @@ public class ZipFileSystem extends FileSystem {
         synchronized (deflaters) {
             int size = deflaters.size();
             if (size > 0) {
-                Deflater def = (Deflater)deflaters.remove(size - 1);
+                Deflater def = deflaters.remove(size - 1);
                 return def;
             } else {
                 return new Deflater(Deflater.DEFAULT_COMPRESSION, true);
@@ -1811,7 +1818,7 @@ public class ZipFileSystem extends FileSystem {
 
         Entry(byte[] name) {
             name(name);
-            this.mtime  = System.currentTimeMillis();
+            this.mtime  = this.ctime = this.atime = System.currentTimeMillis();
             this.crc    = 0;
             this.size   = 0;
             this.csize  = 0;
@@ -1905,17 +1912,18 @@ public class ZipFileSystem extends FileSystem {
         {
             int written  = CENHDR;
             int version0 = version();
-
             long csize0  = csize;
             long size0   = size;
             long locoff0 = locoff;
             int elen64   = 0;                // extra for ZIP64
             int elenNTFS = 0;                // extra for NTFS (a/c/mtime)
             int elenEXTT = 0;                // extra for Extended Timestamp
+            boolean foundExtraTime = false;  // if time stamp NTFS, EXTT present
 
             // confirm size/length
             int nlen = (name != null) ? name.length : 0;
             int elen = (extra != null) ? extra.length : 0;
+            int eoff = 0;
             int clen = (comment != null) ? comment.length : 0;
             if (csize >= ZIP64_MINVAL) {
                 csize0 = ZIP64_MINVAL;
@@ -1929,14 +1937,23 @@ public class ZipFileSystem extends FileSystem {
                 locoff0 = ZIP64_MINVAL;
                 elen64 += 8;                 // offset(8)
             }
-            if (elen64 != 0)
+            if (elen64 != 0) {
                 elen64 += 4;                 // header and data sz 4 bytes
-
-            if (atime != -1) {
-                if (isWindows)               // use NTFS
+            }
+            while (eoff + 4 < elen) {
+                int tag = SH(extra, eoff);
+                int sz = SH(extra, eoff + 2);
+                if (tag == EXTID_EXTT || tag == EXTID_NTFS) {
+                    foundExtraTime = true;
+                }
+                eoff += (4 + sz);
+            }
+            if (!foundExtraTime) {
+                if (isWindows) {             // use NTFS
                     elenNTFS = 36;           // total 36 bytes
-                else                         // Extended Timestamp otherwise
+                } else {                     // Extended Timestamp otherwise
                     elenEXTT = 9;            // only mtime in cen
+                }
             }
             writeInt(os, CENSIG);            // CEN header signature
             if (elen64 != 0) {
@@ -1977,7 +1994,6 @@ public class ZipFileSystem extends FileSystem {
                     writeLong(os, locoff);
             }
             if (elenNTFS != 0) {
-                // System.out.println("writing NTFS:" + elenNTFS);
                 writeShort(os, EXTID_NTFS);
                 writeShort(os, elenNTFS - 4);
                 writeInt(os, 0);            // reserved
@@ -2085,11 +2101,13 @@ public class ZipFileSystem extends FileSystem {
         {
             writeInt(os, LOCSIG);               // LOC header signature
             int version = version();
-
             int nlen = (name != null) ? name.length : 0;
             int elen = (extra != null) ? extra.length : 0;
+            boolean foundExtraTime = false;     // if extra timestamp present
+            int eoff = 0;
             int elen64 = 0;
             int elenEXTT = 0;
+            int elenNTFS = 0;
             if ((flag & FLAG_DATADESCR) != 0) {
                 writeShort(os, version());      // version needed to extract
                 writeShort(os, flag);           // general purpose bit flag
@@ -2121,14 +2139,27 @@ public class ZipFileSystem extends FileSystem {
                     writeInt(os, size);         // uncompressed size
                 }
             }
-            if (atime != -1 && !isWindows) {    // on unix use "ext time"
-                if (ctime == -1)
-                    elenEXTT = 13;
-                else
-                    elenEXTT = 17;
+            while (eoff + 4 < elen) {
+                int tag = SH(extra, eoff);
+                int sz = SH(extra, eoff + 2);
+                if (tag == EXTID_EXTT || tag == EXTID_NTFS) {
+                    foundExtraTime = true;
+                }
+                eoff += (4 + sz);
+            }
+            if (!foundExtraTime) {
+                if (isWindows) {
+                    elenNTFS = 36;              // NTFS, total 36 bytes
+                } else {                        // on unix use "ext time"
+                    elenEXTT = 9;
+                    if (atime != -1)
+                        elenEXTT += 4;
+                    if (ctime != -1)
+                        elenEXTT += 4;
+                }
             }
             writeShort(os, name.length);
-            writeShort(os, elen + elen64 + elenEXTT);
+            writeShort(os, elen + elen64 + elenNTFS + elenEXTT);
             writeBytes(os, name);
             if (elen64 != 0) {
                 writeShort(os, EXTID_ZIP64);
@@ -2136,22 +2167,35 @@ public class ZipFileSystem extends FileSystem {
                 writeLong(os, size);
                 writeLong(os, csize);
             }
+            if (elenNTFS != 0) {
+                writeShort(os, EXTID_NTFS);
+                writeShort(os, elenNTFS - 4);
+                writeInt(os, 0);            // reserved
+                writeShort(os, 0x0001);     // NTFS attr tag
+                writeShort(os, 24);
+                writeLong(os, javaToWinTime(mtime));
+                writeLong(os, javaToWinTime(atime));
+                writeLong(os, javaToWinTime(ctime));
+            }
             if (elenEXTT != 0) {
                 writeShort(os, EXTID_EXTT);
                 writeShort(os, elenEXTT - 4);// size for the folowing data block
-                if (ctime == -1)
-                    os.write(0x3);           // mtime and atime
-                else
-                    os.write(0x7);           // mtime, atime and ctime
+                int fbyte = 0x1;
+                if (atime != -1)           // mtime and atime
+                    fbyte |= 0x2;
+                if (ctime != -1)           // mtime, atime and ctime
+                    fbyte |= 0x4;
+                os.write(fbyte);           // flags byte
                 writeInt(os, javaToUnixTime(mtime));
-                writeInt(os, javaToUnixTime(atime));
+                if (atime != -1)
+                    writeInt(os, javaToUnixTime(atime));
                 if (ctime != -1)
                     writeInt(os, javaToUnixTime(ctime));
             }
             if (extra != null) {
                 writeBytes(os, extra);
             }
-            return LOCHDR + name.length + elen + elen64 + elenEXTT;
+            return LOCHDR + name.length + elen + elen64 + elenNTFS + elenEXTT;
         }
 
         // Data Descriptior
@@ -2322,12 +2366,12 @@ public class ZipFileSystem extends FileSystem {
     private void removeFromTree(IndexNode inode) {
         IndexNode parent = inodes.get(LOOKUPKEY.as(getParent(inode.name)));
         IndexNode child = parent.child;
-        if (child == inode) {
+        if (child.equals(inode)) {
             parent.child = child.sibling;
         } else {
             IndexNode last = child;
             while ((child = child.sibling) != null) {
-                if (child == inode) {
+                if (child.equals(inode)) {
                     last.sibling = child.sibling;
                     break;
                 } else {

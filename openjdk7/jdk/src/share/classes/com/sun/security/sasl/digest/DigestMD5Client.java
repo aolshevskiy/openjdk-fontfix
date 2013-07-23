@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,21 +25,16 @@
 
 package com.sun.security.sasl.digest;
 
-import java.security.AccessController;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.io.ByteArrayOutputStream;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.StringTokenizer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Arrays;
 
-import java.util.logging.Logger;
 import java.util.logging.Level;
 
 import javax.security.sasl.*;
@@ -153,7 +148,7 @@ final class DigestMD5Client extends DigestMD5Base implements SaslClient {
       * @throws SaslException if no authentication ID or password is supplied
       */
     DigestMD5Client(String authzid, String protocol, String serverName,
-        Map props, CallbackHandler cbh) throws SaslException {
+        Map<String, ?> props, CallbackHandler cbh) throws SaslException {
 
         super(props, MY_CLASS_NAME, 2, protocol + "/" + serverName, cbh);
 
@@ -353,13 +348,22 @@ final class DigestMD5Client extends DigestMD5Base implements SaslClient {
                     0, false);
                 cbh.handle(new Callback[] {ccb, ncb, pcb});
 
-                /* Acquire realm from RealmChoiceCallback*/
-                negotiatedRealm = realmTokens[ccb.getSelectedIndexes()[0]];
+                // Acquire realm from RealmChoiceCallback
+                int[] selected = ccb.getSelectedIndexes();
+                if (selected == null
+                        || selected[0] < 0
+                        || selected[0] >= realmTokens.length) {
+                    throw new SaslException("DIGEST-MD5: Invalid realm chosen");
+                }
+                negotiatedRealm = realmTokens[selected[0]];
             }
 
             passwd = pcb.getPassword();
             pcb.clearPassword();
             username = ncb.getName();
+
+        } catch (SaslException se) {
+            throw se;
 
         } catch (UnsupportedCallbackException e) {
             throw new SaslException("DIGEST-MD5: Cannot perform callback to " +

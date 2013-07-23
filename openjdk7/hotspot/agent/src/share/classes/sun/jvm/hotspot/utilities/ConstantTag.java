@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,10 +47,10 @@ public class ConstantTag {
   private static final int JVM_CONSTANT_Invalid                 = 0;   // For bad value initialization
   private static final int JVM_CONSTANT_UnresolvedClass         = 100; // Temporary tag until actual use
   private static final int JVM_CONSTANT_ClassIndex              = 101; // Temporary tag while constructing constant pool
-  private static final int JVM_CONSTANT_UnresolvedString        = 102; // Temporary tag until actual use
-  private static final int JVM_CONSTANT_StringIndex             = 103; // Temporary tag while constructing constant pool
-  private static final int JVM_CONSTANT_UnresolvedClassInError  = 104; // Resolution failed
-  private static final int JVM_CONSTANT_Object                  = 105; // Required for BoundMethodHandle arguments.
+  private static final int JVM_CONSTANT_StringIndex             = 102; // Temporary tag while constructing constant pool
+  private static final int JVM_CONSTANT_UnresolvedClassInError  = 103; // Resolution failed
+  private static final int JVM_CONSTANT_MethodHandleInError     = 104; // Error tag due to resolution error
+  private static final int JVM_CONSTANT_MethodTypeInError       = 105; // Error tag due to resolution error
 
   // JVM_CONSTANT_MethodHandle subtypes //FIXME: connect these to data structure
   private static int JVM_REF_getField                = 1;
@@ -93,10 +93,7 @@ public class ConstantTag {
   }
   public boolean isUnresolveKlassInError()  { return tag == JVM_CONSTANT_UnresolvedClassInError; }
   public boolean isKlassIndex()             { return tag == JVM_CONSTANT_ClassIndex; }
-  public boolean isUnresolvedString()       { return tag == JVM_CONSTANT_UnresolvedString; }
   public boolean isStringIndex()            { return tag == JVM_CONSTANT_StringIndex; }
-
-  public boolean isObject()                 { return tag == JVM_CONSTANT_Object; }
 
   public boolean isKlassReference()   { return isKlassIndex() || isUnresolvedKlass(); }
   public boolean isFieldOrMethod()    { return isField() || isMethod() || isInterfaceMethod(); }
@@ -117,15 +114,19 @@ public class ConstantTag {
     case JVM_CONSTANT_String :
     case JVM_CONSTANT_UnresolvedClass :
     case JVM_CONSTANT_UnresolvedClassInError :
+    case JVM_CONSTANT_MethodHandleInError :
+    case JVM_CONSTANT_MethodTypeInError :
     case JVM_CONSTANT_ClassIndex :
-    case JVM_CONSTANT_UnresolvedString :
     case JVM_CONSTANT_StringIndex :
     case JVM_CONSTANT_MethodHandle :
     case JVM_CONSTANT_MethodType :
-    case JVM_CONSTANT_Object :
       return BasicType.T_OBJECT;
     default:
       throw new InternalError("unexpected tag: " + tag);
     }
   }
+
+  public String toString() {
+    return "ConstantTag:" + Integer.toString(tag);
+}
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -64,7 +64,7 @@ public class SunCommandLineLauncher extends AbstractLauncher implements Launchin
          * transport or the socket transport
          */
         try {
-            Class c = Class.forName("com.sun.tools.jdi.SharedMemoryTransportService");
+            Class<?> c = Class.forName("com.sun.tools.jdi.SharedMemoryTransportService");
             transportService = (TransportService)c.newInstance();
             transport = new Transport() {
                 public String name() {
@@ -213,7 +213,7 @@ public class SunCommandLineLauncher extends AbstractLauncher implements Launchin
                 exePath = exe;
             }
             // Quote only if necessary in case the quote arg value is bogus
-            if (hasWhitespace(exe)) {
+            if (hasWhitespace(exePath)) {
                 exePath = quote + exePath + quote;
             }
 

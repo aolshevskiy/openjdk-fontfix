@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2000, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -139,6 +139,20 @@ public class Handler extends URLStreamHandler {
         }
         if (nogood)
             throw new RuntimeException("No email address");
-        setURL(u, protocol, host, port, file, null);
+        setURLHandler(u, protocol, host, port, file, null);
+    }
+
+    /**
+     * This method is used to suppress the deprecated warning
+     *
+     * @param   u the URL to receive the result of parsing the spec
+     * @param   spec the URL string to parse
+     * @param   start the character position to start parsing at.  This is
+     *          just past the ':'.
+     * @param   limit the character position to stop parsing at.
+     */
+    @SuppressWarnings("deprecation")
+    private void setURLHandler(URL u, String protocol, String host, int port, String file, String ref) {
+        setURL(u,protocol,host,port,file,null);
     }
 }

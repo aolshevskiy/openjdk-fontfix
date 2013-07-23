@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -78,7 +78,6 @@ public abstract class ServiceInterceptor {
         return Collections.emptyList();
     }
 
-
     /**
      * A callback to notify the event of creation of proxy object for SEI endpoint. The
      * callback could set some properties on the {@link BindingProvider}.
@@ -88,7 +87,6 @@ public abstract class ServiceInterceptor {
      */
     public void postCreateProxy(@NotNull WSBindingProvider bp,@NotNull Class<?> serviceEndpointInterface) {
     }
-
 
     /**
      * A callback to notify that a {@link Dispatch} object is created. The callback

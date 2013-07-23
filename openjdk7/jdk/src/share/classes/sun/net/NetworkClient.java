@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -139,7 +139,7 @@ public class NetworkClient {
                                         serverSocket.getOutputStream()),
                                         true, encoding);
         } catch (UnsupportedEncodingException e) {
-            throw new InternalError(encoding +"encoding not found");
+            throw new InternalError(encoding +"encoding not found", e);
         }
         serverInput = new BufferedInputStream(serverSocket.getInputStream());
     }
@@ -200,7 +200,13 @@ public class NetworkClient {
     protected InetAddress getLocalAddress() throws IOException {
         if (serverSocket == null)
             throw new IOException("not connected");
-        return serverSocket.getLocalAddress();
+        return  AccessController.doPrivileged(
+                        new PrivilegedAction<InetAddress>() {
+                            public InetAddress run() {
+                                return serverSocket.getLocalAddress();
+
+                            }
+                        });
     }
 
     /** Close an open connection to the server. */

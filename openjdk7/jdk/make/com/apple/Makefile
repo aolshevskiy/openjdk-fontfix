@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ BUILDDIR = ../..
 PRODUCT = sun
 include $(BUILDDIR)/common/Defs.gmk
 
-# MMM: disable for now, depends on Max AWT (undisabled)
 SUBDIRS = osx osxui
 
 include $(BUILDDIR)/common/Subdirs.gmk

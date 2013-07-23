@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -118,7 +118,7 @@ public class ThreadGroupReferenceImpl extends ObjectReferenceImpl
                                                   .process(vm, this);
                 if (local != null) {
                     local.kids = kids;
-                    if ((vm.traceFlags & vm.TRACE_OBJREFS) != 0) {
+                    if ((vm.traceFlags & VirtualMachine.TRACE_OBJREFS) != 0) {
                         vm.printTrace(description() +
                                       " temporarily caching children ");
                     }

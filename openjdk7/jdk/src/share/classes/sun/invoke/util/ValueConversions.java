@@ -1225,13 +1225,9 @@ public class ValueConversions {
 
     // handy shared exception makers (they simplify the common case code)
     private static InternalError newInternalError(String message, Throwable cause) {
-        InternalError e = new InternalError(message);
-        e.initCause(cause);
-        return e;
+        return new InternalError(message, cause);
     }
     private static InternalError newInternalError(Throwable cause) {
-        InternalError e = new InternalError();
-        e.initCause(cause);
-        return e;
+        return new InternalError(cause);
     }
 }

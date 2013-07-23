@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -149,36 +149,51 @@ class Compile : public Phase {
   };
   struct AliasCacheEntry { const TypePtr* _adr_type; int _index; };  // simple duple type
   enum {
-    trapHistLength = methodDataOopDesc::_trap_hist_limit
+    trapHistLength = MethodData::_trap_hist_limit
   };
 
   // Constant entry of the constant table.
   class Constant {
   private:
     BasicType _type;
-    jvalue    _value;
+    union {
+      jvalue    _value;
+      Metadata* _metadata;
+    } _v;
     int       _offset;         // offset of this constant (in bytes) relative to the constant table base.
     float     _freq;
     bool      _can_be_reused;  // true (default) if the value can be shared with other users.
 
   public:
-    Constant() : _type(T_ILLEGAL), _offset(-1), _freq(0.0f), _can_be_reused(true) { _value.l = 0; }
+    Constant() : _type(T_ILLEGAL), _offset(-1), _freq(0.0f), _can_be_reused(true) { _v._value.l = 0; }
     Constant(BasicType type, jvalue value, float freq = 0.0f, bool can_be_reused = true) :
       _type(type),
-      _value(value),
       _offset(-1),
       _freq(freq),
       _can_be_reused(can_be_reused)
-    {}
+    {
+      assert(type != T_METADATA, "wrong constructor");
+      _v._value = value;
+    }
+    Constant(Metadata* metadata, bool can_be_reused = true) :
+      _type(T_METADATA),
+      _offset(-1),
+      _freq(0.0f),
+      _can_be_reused(can_be_reused)
+    {
+      _v._metadata = metadata;
+    }
 
     bool operator==(const Constant& other);
 
     BasicType type()      const    { return _type; }
 
-    jlong   get_jlong()   const    { return _value.j; }
-    jfloat  get_jfloat()  const    { return _value.f; }
-    jdouble get_jdouble() const    { return _value.d; }
-    jobject get_jobject() const    { return _value.l; }
+    jlong   get_jlong()   const    { return _v._value.j; }
+    jfloat  get_jfloat()  const    { return _v._value.f; }
+    jdouble get_jdouble() const    { return _v._value.d; }
+    jobject get_jobject() const    { return _v._value.l; }
+
+    Metadata* get_metadata() const { return _v._metadata; }
 
     int         offset()  const    { return _offset; }
     void    set_offset(int offset) {        _offset = offset; }
@@ -227,6 +242,7 @@ class Compile : public Phase {
 
     void     add(Constant& con);
     Constant add(MachConstantNode* n, BasicType type, jvalue value);
+    Constant add(Metadata* metadata);
     Constant add(MachConstantNode* n, MachOper* oper);
     Constant add(MachConstantNode* n, jfloat f) {
       jvalue value; value.f = f;
@@ -248,6 +264,7 @@ class Compile : public Phase {
   const bool            _save_argument_registers; // save/restore arg regs for trampolines
   const bool            _subsume_loads;         // Load can be matched as part of a larger op.
   const bool            _do_escape_analysis;    // Do escape analysis.
+  const bool            _eliminate_boxing;      // Do boxing elimination.
   ciMethod*             _method;                // The method being compiled.
   int                   _entry_bci;             // entry bci for osr methods.
   const TypeFunc*       _tf;                    // My kind of signature
@@ -273,6 +290,7 @@ class Compile : public Phase {
   bool                  _has_split_ifs;         // True if the method _may_ have some split-if
   bool                  _has_unsafe_access;     // True if the method _may_ produce faults in unsafe loads or stores.
   bool                  _has_stringbuilder;     // True StringBuffers or StringBuilders are allocated
+  bool                  _has_boxed_value;       // True if a boxed object is allocated
   int                   _max_vector_size;       // Maximum size of generated vectors
   uint                  _trap_hist[trapHistLength];  // Cumulative traps
   bool                  _trap_can_recompile;    // Have we emitted a recompiling trap?
@@ -281,7 +299,7 @@ class Compile : public Phase {
   bool                  _do_scheduling;         // True if we intend to do scheduling
   bool                  _do_freq_based_layout;  // True if we intend to do frequency based block layout
   bool                  _do_count_invocations;  // True if we generate code to count invocations
-  bool                  _do_method_data_update; // True if we generate code to update methodDataOops
+  bool                  _do_method_data_update; // True if we generate code to update MethodData*s
   int                   _AliasLevel;            // Locally-adjusted version of AliasLevel flag.
   bool                  _print_assembly;        // True if we should dump assembly code for this compilation
 #ifndef PRODUCT
@@ -361,6 +379,8 @@ class Compile : public Phase {
   GrowableArray<CallGenerator*> _late_inlines;        // List of CallGenerators to be revisited after
                                                       // main parsing has finished.
   GrowableArray<CallGenerator*> _string_late_inlines; // same but for string operations
+
+  GrowableArray<CallGenerator*> _boxing_late_inlines; // same but for boxing operations
 
   int                           _late_inlines_pos;    // Where in the queue should the next late inlining candidate go (emulate depth first inlining)
   uint                          _number_of_mh_late_inlines; // number of method handle late inlining still pending
@@ -473,8 +493,12 @@ class Compile : public Phase {
   // instructions that subsume a load may result in an unschedulable
   // instruction sequence.
   bool              subsume_loads() const       { return _subsume_loads; }
-  // Do escape analysis.
+  /** Do escape analysis. */
   bool              do_escape_analysis() const  { return _do_escape_analysis; }
+  /** Do boxing elimination. */
+  bool              eliminate_boxing() const    { return _eliminate_boxing; }
+  /** Do aggressive boxing elimination. */
+  bool              aggressive_unboxing() const { return _eliminate_boxing && AggressiveUnboxing; }
   bool              save_argument_registers() const { return _save_argument_registers; }
 
 
@@ -514,6 +538,8 @@ class Compile : public Phase {
   void          set_has_unsafe_access(bool z)   { _has_unsafe_access = z; }
   bool              has_stringbuilder() const   { return _has_stringbuilder; }
   void          set_has_stringbuilder(bool z)   { _has_stringbuilder = z; }
+  bool              has_boxed_value() const     { return _has_boxed_value; }
+  void          set_has_boxed_value(bool z)     { _has_boxed_value = z; }
   int               max_vector_size() const     { return _max_vector_size; }
   void          set_max_vector_size(int s)      { _max_vector_size = s; }
   void          set_trap_count(uint r, uint c)  { assert(r < trapHistLength, "oob");        _trap_hist[r] = c; }
@@ -592,12 +618,12 @@ class Compile : public Phase {
 #endif
   }
 
-  int           macro_count()                   { return _macro_nodes->length(); }
-  int           predicate_count()               { return _predicate_opaqs->length();}
-  int           expensive_count()               { return _expensive_nodes->length(); }
-  Node*         macro_node(int idx)             { return _macro_nodes->at(idx); }
-  Node*         predicate_opaque1_node(int idx) { return _predicate_opaqs->at(idx);}
-  Node*         expensive_node(int idx)         { return _expensive_nodes->at(idx); }
+  int           macro_count()             const { return _macro_nodes->length(); }
+  int           predicate_count()         const { return _predicate_opaqs->length();}
+  int           expensive_count()         const { return _expensive_nodes->length(); }
+  Node*         macro_node(int idx)       const { return _macro_nodes->at(idx); }
+  Node*         predicate_opaque1_node(int idx) const { return _predicate_opaqs->at(idx);}
+  Node*         expensive_node(int idx)   const { return _expensive_nodes->at(idx); }
   ConnectionGraph* congraph()                   { return _congraph;}
   void set_congraph(ConnectionGraph* congraph)  { _congraph = congraph;}
   void add_macro_node(Node * n) {
@@ -779,7 +805,12 @@ class Compile : public Phase {
   // Decide how to build a call.
   // The profile factor is a discount to apply to this site's interp. profile.
   CallGenerator*    call_generator(ciMethod* call_method, int vtable_index, bool call_does_dispatch, JVMState* jvms, bool allow_inline, float profile_factor, bool allow_intrinsics = true, bool delayed_forbidden = false);
-  bool should_delay_inlining(ciMethod* call_method, JVMState* jvms);
+  bool should_delay_inlining(ciMethod* call_method, JVMState* jvms) {
+    return should_delay_string_inlining(call_method, jvms) ||
+           should_delay_boxing_inlining(call_method, jvms);
+  }
+  bool should_delay_string_inlining(ciMethod* call_method, JVMState* jvms);
+  bool should_delay_boxing_inlining(ciMethod* call_method, JVMState* jvms);
 
   // Helper functions to identify inlining potential at call-site
   ciMethod* optimize_virtual_call(ciMethod* caller, int bci, ciInstanceKlass* klass,
@@ -835,6 +866,10 @@ class Compile : public Phase {
     _string_late_inlines.push(cg);
   }
 
+  void              add_boxing_late_inline(CallGenerator* cg) {
+    _boxing_late_inlines.push(cg);
+  }
+
   void remove_useless_late_inlines(GrowableArray<CallGenerator*>* inlines, Unique_Node_List &useful);
 
   void dump_inlining();
@@ -854,6 +889,7 @@ class Compile : public Phase {
   void inline_incrementally_one(PhaseIterGVN& igvn);
   void inline_incrementally(PhaseIterGVN& igvn);
   void inline_string_calls(bool parse_time);
+  void inline_boxing_calls(PhaseIterGVN& igvn);
 
   // Matching, CFG layout, allocation, code generation
   PhaseCFG*         cfg()                       { return _cfg; }
@@ -926,7 +962,8 @@ class Compile : public Phase {
   // replacement, entry_bci indicates the bytecode for which to compile a
   // continuation.
   Compile(ciEnv* ci_env, C2Compiler* compiler, ciMethod* target,
-          int entry_bci, bool subsume_loads, bool do_escape_analysis);
+          int entry_bci, bool subsume_loads, bool do_escape_analysis,
+          bool eliminate_boxing);
 
   // Second major entry point.  From the TypeFunc signature, generate code
   // to pass arguments from the Java calling convention to the C calling
@@ -1088,9 +1125,6 @@ class Compile : public Phase {
   // graph is strongly connected from root in both directions.
   void verify_graph_edges(bool no_dead_code = false) PRODUCT_RETURN;
 
-  // Print bytecodes, including the scope inlining tree
-  void print_codes();
-
   // End-of-run dumps.
   static void print_statistics() PRODUCT_RETURN;
 
@@ -1103,6 +1137,9 @@ class Compile : public Phase {
 
   // Definitions of pd methods
   static void pd_compiler2_init();
+
+  // Auxiliary method for randomized fuzzing/stressing
+  static bool randomized_select(int count);
 };
 
 #endif // SHARE_VM_OPTO_COMPILE_HPP

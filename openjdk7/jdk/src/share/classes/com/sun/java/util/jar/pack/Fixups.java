@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@ import java.util.AbstractCollection;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.Objects;
 
 /**
  * Collection of relocatable constant pool references.
@@ -42,7 +43,7 @@ import java.util.Iterator;
  *
  * @author John Rose
  */
-final class Fixups extends AbstractCollection {
+final class Fixups extends AbstractCollection<Fixups.Fixup> {
     byte[] bytes;    // the subject of the relocations
     int head;        // desc locating first reloc
     int tail;        // desc locating last reloc
@@ -66,19 +67,20 @@ final class Fixups extends AbstractCollection {
         // If there are no bytes, all descs are kept in bigDescs.
         this((byte[])null);
     }
-    Fixups(byte[] bytes, Collection fixups) {
+    Fixups(byte[] bytes, Collection<Fixup> fixups) {
         this(bytes);
         addAll(fixups);
     }
-    Fixups(Collection fixups) {
+    Fixups(Collection<Fixup> fixups) {
         this((byte[])null);
         addAll(fixups);
     }
 
     private static final int MINBIGSIZE = 1;
     // cleverly share empty bigDescs:
-    private static int[] noBigDescs = {MINBIGSIZE};
+    private static final int[] noBigDescs = {MINBIGSIZE};
 
+    @Override
     public int size() {
         return size;
     }
@@ -105,11 +107,11 @@ final class Fixups extends AbstractCollection {
         }
     }
 
+    @Override
     public void clear() {
         if (bytes != null) {
             // Clean the bytes:
-            for (Iterator i = iterator(); i.hasNext(); ) {
-                Fixup fx = (Fixup) i.next();
+            for (Fixup fx : this) {
                 //System.out.println("clean "+fx);
                 storeIndex(fx.location(), fx.format(), 0);
             }
@@ -124,15 +126,14 @@ final class Fixups extends AbstractCollection {
         return bytes;
     }
 
-    @SuppressWarnings("unchecked")
     public void setBytes(byte[] newBytes) {
         if (bytes == newBytes)  return;
-        ArrayList old = null;
-        assert((old = new ArrayList(this)) != null);
+        ArrayList<Fixup> old = null;
+        assert((old = new ArrayList<>(this)) != null);
         if (bytes == null || newBytes == null) {
             // One or the other representations is deficient.
             // Construct a checkpoint.
-            ArrayList save = new ArrayList(this);
+            ArrayList<Fixup> save = new ArrayList<>(this);
             clear();
             bytes = newBytes;
             addAll(save);
@@ -140,19 +141,19 @@ final class Fixups extends AbstractCollection {
             // assume newBytes is some sort of bitwise copy of the old bytes
             bytes = newBytes;
         }
-        assert(old.equals(new ArrayList(this)));
+        assert(old.equals(new ArrayList<>(this)));
     }
 
-    static final int LOC_SHIFT = 1;
-    static final int FMT_MASK = 0x1;
-    static final byte UNUSED_BYTE = 0;
-    static final byte OVERFLOW_BYTE = -1;
+    private static final int LOC_SHIFT = 1;
+    private static final int FMT_MASK = 0x1;
+    private static final byte UNUSED_BYTE = 0;
+    private static final byte OVERFLOW_BYTE = -1;
     // fill pointer of bigDescs array is in element [0]
-    static final int BIGSIZE = 0;
+    private static final int BIGSIZE = 0;
 
     // Format values:
-    public static final int U2_FORMAT = 0;
-    public static final int U1_FORMAT = 1;
+    private static final int U2_FORMAT = 0;
+    private static final int U1_FORMAT = 1;
 
     // Special values for the static methods.
     private static final int SPECIAL_LOC = 0;
@@ -234,9 +235,17 @@ final class Fixups extends AbstractCollection {
         }
     }
 
+    void addU1(int pc, Entry ref) {
+        add(pc, U1_FORMAT, ref);
+    }
+
+    void addU2(int pc, Entry ref) {
+        add(pc, U2_FORMAT, ref);
+    }
+
     /** Simple and necessary tuple to present each fixup. */
     public static
-    class Fixup implements Comparable {
+    class Fixup implements Comparable<Fixup> {
         int desc;         // location and format of reloc
         Entry entry;      // which entry to plug into the bytes
         Fixup(int desc, Entry entry) {
@@ -250,31 +259,41 @@ final class Fixups extends AbstractCollection {
         public int location() { return descLoc(desc); }
         public int format() { return descFmt(desc); }
         public Entry entry() { return entry; }
+        @Override
         public int compareTo(Fixup that) {
             // Ordering depends only on location.
             return this.location() - that.location();
         }
-        public int compareTo(Object that) {
-            return compareTo((Fixup)that);
-        }
+        @Override
         public boolean equals(Object x) {
             if (!(x instanceof Fixup))  return false;
             Fixup that = (Fixup) x;
             return this.desc == that.desc && this.entry == that.entry;
         }
+        @Override
+        public int hashCode() {
+            int hash = 7;
+            hash = 59 * hash + this.desc;
+            hash = 59 * hash + Objects.hashCode(this.entry);
+            return hash;
+        }
+        @Override
         public String toString() {
             return "@"+location()+(format()==U1_FORMAT?".1":"")+"="+entry;
         }
     }
 
     private
-    class Itr implements Iterator {
+    class Itr implements Iterator<Fixup> {
         int index = 0;               // index into entries
         int bigIndex = BIGSIZE+1;    // index into bigDescs
         int next = head;             // desc pointing to next fixup
+        @Override
         public boolean hasNext() { return index < size; }
+        @Override
         public void remove() { throw new UnsupportedOperationException(); }
-        public Object next() {
+        @Override
+        public Fixup next() {
             int thisIndex = index;
             return new Fixup(nextDesc(), entries[thisIndex]);
         }
@@ -298,21 +317,21 @@ final class Fixups extends AbstractCollection {
         }
     }
 
-    public Iterator iterator() {
+    @Override
+    public Iterator<Fixup> iterator() {
         return new Itr();
     }
     public void add(int location, int format, Entry entry) {
         addDesc(makeDesc(location, format), entry);
     }
+    @Override
     public boolean add(Fixup f) {
         addDesc(f.desc, f.entry);
         return true;
     }
-    public boolean add(Object fixup) {
-        return add((Fixup) fixup);
-    }
-    @SuppressWarnings("unchecked")
-    public boolean addAll(Collection c) {
+
+    @Override
+    public boolean addAll(Collection<? extends Fixup> c) {
         if (c instanceof Fixups) {
             // Use knowledge of Itr structure to avoid building little structs.
             Fixups that = (Fixups) c;
@@ -375,7 +394,13 @@ final class Fixups extends AbstractCollection {
     }
 
     /// Static methods that optimize the use of this class.
-    public static
+    static Object addRefWithBytes(Object f, byte[] bytes, Entry e) {
+        return add(f, bytes, 0, U2_FORMAT, e);
+    }
+    static Object addRefWithLoc(Object f, int loc, Entry entry) {
+        return add(f, null, loc, U2_FORMAT, entry);
+    }
+    private static
     Object add(Object prevFixups,
                byte[] bytes, int loc, int fmt,
                Entry e) {
@@ -453,8 +478,7 @@ final class Fixups extends AbstractCollection {
     void finishRefs(ConstantPool.Index ix) {
         if (isEmpty())
             return;
-        for (Iterator i = iterator(); i.hasNext(); ) {
-            Fixup fx = (Fixup) i.next();
+        for (Fixup fx : this) {
             int index = ix.indexOf(fx.entry);
             //System.out.println("finish "+fx+" = "+index);
             // Note that the iterator has already fetched the

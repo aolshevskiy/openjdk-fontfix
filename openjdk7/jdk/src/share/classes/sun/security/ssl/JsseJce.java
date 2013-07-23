@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@ import java.math.BigInteger;
 
 import java.security.*;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.*;
 
 import javax.crypto.*;
@@ -42,8 +41,7 @@ import java.security.Provider;
 import sun.security.jca.Providers;
 import sun.security.jca.ProviderList;
 
-import sun.security.ec.ECParameters;
-import sun.security.ec.NamedCurve;
+import sun.security.util.ECUtil;
 
 import static sun.security.ssl.SunJSSE.cryptoProvider;
 
@@ -54,8 +52,6 @@ import static sun.security.ssl.SunJSSE.cryptoProvider;
  * @author  Andreas Sterbenz
  */
 final class JsseJce {
-
-    private final static Debug debug = Debug.getInstance("ssl");
 
     private final static ProviderList fipsProviderList;
 
@@ -72,6 +68,7 @@ final class JsseJce {
         try {
             AccessController.doPrivileged(
                 new PrivilegedExceptionAction<Void>() {
+                    @Override
                     public Void run() throws Exception {
                         // Test for Kerberos using the bootstrap class loader
                         Class.forName("sun.security.krb5.PrincipalName", true,
@@ -110,9 +107,12 @@ final class JsseJce {
     }
 
     private static final class SunCertificates extends Provider {
+        private static final long serialVersionUID = -3284138292032213752L;
+
         SunCertificates(final Provider p) {
             super("SunCertificates", 1.0d, "SunJSSE internal");
             AccessController.doPrivileged(new PrivilegedAction<Object>() {
+                @Override
                 public Object run() {
                     // copy certificate related services from the Sun provider
                     for (Map.Entry<Object,Object> entry : p.entrySet()) {
@@ -153,6 +153,11 @@ final class JsseJce {
      * without padding.
      */
     final static String CIPHER_AES = "AES/CBC/NoPadding";
+    /**
+     * JCE transformation string for AES in GCM mode
+     * without padding.
+     */
+    final static String CIPHER_AES_GCM = "AES/GCM/NoPadding";
     /**
      * JCA identifier string for DSA, i.e. a DSA with SHA-1.
      */
@@ -372,25 +377,25 @@ final class JsseJce {
             KeyFactory factory = JsseJce.getKeyFactory("RSA");
             return factory.getKeySpec(key, RSAPublicKeySpec.class);
         } catch (Exception e) {
-            throw (RuntimeException)new RuntimeException().initCause(e);
+            throw new RuntimeException(e);
         }
     }
 
     static ECParameterSpec getECParameterSpec(String namedCurveOid) {
-        return NamedCurve.getECParameterSpec(namedCurveOid);
+        return ECUtil.getECParameterSpec(cryptoProvider, namedCurveOid);
     }
 
     static String getNamedCurveOid(ECParameterSpec params) {
-        return ECParameters.getCurveName(params);
+        return ECUtil.getCurveName(cryptoProvider, params);
     }
 
     static ECPoint decodePoint(byte[] encoded, EllipticCurve curve)
             throws java.io.IOException {
-        return ECParameters.decodePoint(encoded, curve);
+        return ECUtil.decodePoint(encoded, curve);
     }
 
     static byte[] encodePoint(ECPoint point, EllipticCurve curve) {
-        return ECParameters.encodePoint(point, curve);
+        return ECUtil.encodePoint(point, curve);
     }
 
     // In FIPS mode, set thread local providers; otherwise a no-op.

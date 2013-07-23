@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,7 +37,7 @@ public class HttpTransaction {
 
     String command;
     URI requesturi;
-    HttpServer.Server server;
+    TestHttpServer.Server server;
     MessageHeader reqheaders, reqtrailers;
     String reqbody;
     byte[] rspbody;
@@ -46,7 +46,7 @@ public class HttpTransaction {
     int rspbodylen;
     boolean rspchunked;
 
-    HttpTransaction (HttpServer.Server server, String command,
+    HttpTransaction (TestHttpServer.Server server, String command,
                         URI requesturi, MessageHeader headers,
                         String body, MessageHeader trailers, SelectionKey  key) {
         this.command = command;
@@ -290,7 +290,7 @@ public class HttpTransaction {
      * @param rTag the response string to send with the response code
      */
     public void sendResponse (int rCode, String rTag) throws IOException {
-        OutputStream os = new HttpServer.NioOutputStream(channel());
+        OutputStream os = new TestHttpServer.NioOutputStream(channel());
         PrintStream ps = new PrintStream (os);
         ps.print ("HTTP/1.1 " + rCode + " " + rTag + "\r\n");
         if (rspheaders != null) {
@@ -314,7 +314,7 @@ public class HttpTransaction {
     /* sends one byte less than intended */
 
     public void sendPartialResponse (int rCode, String rTag)throws IOException {
-        OutputStream os = new HttpServer.NioOutputStream(channel());
+        OutputStream os = new TestHttpServer.NioOutputStream(channel());
         PrintStream ps = new PrintStream (os);
         ps.print ("HTTP/1.1 " + rCode + " " + rTag + "\r\n");
         ps.flush();

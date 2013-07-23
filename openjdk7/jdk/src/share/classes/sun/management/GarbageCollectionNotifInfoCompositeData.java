@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -69,11 +69,7 @@ public class GarbageCollectionNotifInfoCompositeData extends LazyCompositeData {
                         Field f = cl.getDeclaredField("builder");
                         f.setAccessible(true);
                         return (GcInfoBuilder)f.get(gcNotifInfo.getGcInfo());
-                    } catch(ClassNotFoundException e) {
-                        return null;
-                    } catch(NoSuchFieldException e) {
-                        return null;
-                    } catch(IllegalAccessException e) {
+                    } catch(ClassNotFoundException | NoSuchFieldException | IllegalAccessException e) {
                         return null;
                     }
                 }
@@ -82,7 +78,7 @@ public class GarbageCollectionNotifInfoCompositeData extends LazyCompositeData {
         synchronized(compositeTypeByBuilder) {
             gict = compositeTypeByBuilder.get(builder);
             if(gict == null) {
-                OpenType[] gcNotifInfoItemTypes = new OpenType[] {
+                OpenType<?>[] gcNotifInfoItemTypes = new OpenType<?>[] {
                     SimpleType.STRING,
                     SimpleType.STRING,
                     SimpleType.STRING,
@@ -141,7 +137,7 @@ public class GarbageCollectionNotifInfoCompositeData extends LazyCompositeData {
         GC_INFO
     };
     private static HashMap<GcInfoBuilder,CompositeType> compositeTypeByBuilder =
-        new HashMap<GcInfoBuilder,CompositeType>();
+        new HashMap<>();
 
     public static String getGcName(CompositeData cd) {
         String gcname = getString(cd, GC_NAME);
@@ -195,7 +191,7 @@ public class GarbageCollectionNotifInfoCompositeData extends LazyCompositeData {
     private static synchronized CompositeType getBaseGcNotifInfoCompositeType() {
         if (baseGcNotifInfoCompositeType == null) {
             try {
-                OpenType[] baseGcNotifInfoItemTypes = new OpenType[] {
+                OpenType<?>[] baseGcNotifInfoItemTypes = new OpenType<?>[] {
                     SimpleType.STRING,
                     SimpleType.STRING,
                     SimpleType.STRING,

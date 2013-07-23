@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package com.sun.tools.internal.jxc;
 
+import com.sun.tools.internal.jxc.ap.Options;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
@@ -43,14 +44,15 @@ import javax.xml.transform.Result;
 import javax.xml.transform.stream.StreamResult;
 import javax.xml.validation.ValidatorHandler;
 
-import com.sun.mirror.apt.AnnotationProcessorEnvironment;
-import com.sun.mirror.declaration.TypeDeclaration;
+import javax.annotation.processing.ProcessingEnvironment;
+import javax.lang.model.element.TypeElement;
 import com.sun.tools.internal.jxc.gen.config.Config;
 import com.sun.tools.internal.jxc.gen.config.Schema;
 import com.sun.tools.internal.xjc.SchemaCache;
 import com.sun.tools.internal.xjc.api.Reference;
 import com.sun.tools.internal.xjc.util.ForkContentHandler;
 
+import com.sun.xml.internal.bind.v2.util.XmlFactory;
 import org.xml.sax.ErrorHandler;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
@@ -58,10 +60,10 @@ import org.xml.sax.XMLReader;
 
 
 /**
- * This reads the config files passed by the user to apt
+ * This reads the config files passed by the user to annotation processing
  * and obtains a list of classes that need to be included
  * for a particular config from the set of classes passed
- * by the user to apt.
+ * by the user to annotation processing.
  *
  * @author Bhakti Mehta (bhakti.mehta@sun.com)
  */
@@ -71,7 +73,7 @@ public final class ConfigReader  {
      * The set of classes to be passed to XJC
      *
      */
-    private final Set<Reference> classesToBeIncluded = new HashSet<Reference>();;
+    private final Set<Reference> classesToBeIncluded = new HashSet<Reference>();
 
 
     /**
@@ -79,7 +81,7 @@ public final class ConfigReader  {
      */
     private final SchemaOutputResolver schemaOutputResolver;
 
-    private final AnnotationProcessorEnvironment env;
+    private final ProcessingEnvironment env;
 
     /**
      *
@@ -92,9 +94,9 @@ public final class ConfigReader  {
      * @throws IOException
      *     If any IO errors occur.
      */
-    public ConfigReader( AnnotationProcessorEnvironment env, Collection <? extends TypeDeclaration> classes, File xmlFile, ErrorHandler errorHandler)throws SAXException,IOException{
+    public ConfigReader(ProcessingEnvironment env, Collection<? extends TypeElement> classes, File xmlFile, ErrorHandler errorHandler) throws SAXException, IOException {
         this.env = env;
-        Config config = parseAndGetConfig(xmlFile,errorHandler);
+        Config config = parseAndGetConfig(xmlFile, errorHandler, env.getOptions().containsKey(Options.DISABLE_XML_SECURITY));
         checkAllClasses(config,classes);
         String path =   xmlFile.getAbsolutePath();
         String xmlPath = path.substring(0,path.lastIndexOf(File.separatorChar));
@@ -104,7 +106,7 @@ public final class ConfigReader  {
 
 
     /**
-     * This creates creates a regular expression
+     * This creates a regular expression
      * for the user pattern , matches the input classes
      * passed by the user and returns the final
      * list of classes that need to be included for a config file
@@ -115,15 +117,15 @@ public final class ConfigReader  {
         return classesToBeIncluded;
     }
 
-    private void checkAllClasses(Config config ,Collection<? extends TypeDeclaration> rootClasses){
+    private void checkAllClasses(Config config, Collection<? extends TypeElement> rootClasses) {
 
         List<Pattern> includeRegexList = config.getClasses().getIncludes();
         List<Pattern>  excludeRegexList = config.getClasses().getExcludes();
 
         OUTER:
-        for (TypeDeclaration typeDecl : rootClasses) {
+        for (TypeElement typeDecl : rootClasses) {
 
-            String qualifiedName = typeDecl.getQualifiedName();
+            String qualifiedName = typeDecl.getQualifiedName().toString();
 
             for (Pattern pattern : excludeRegexList) {
                 boolean match = checkPatternMatch(qualifiedName, pattern);
@@ -150,14 +152,14 @@ public final class ConfigReader  {
 
     private SchemaOutputResolver createSchemaOutputResolver(Config config, String xmlpath) {
         File baseDir = new File(xmlpath, config.getBaseDir().getPath());
-        SchemaOutputResolverImpl schemaOutputResolver = new SchemaOutputResolverImpl (baseDir);
+        SchemaOutputResolverImpl outResolver = new SchemaOutputResolverImpl (baseDir);
 
         for( Schema schema : (List<Schema>)config.getSchema() ) {
             String namespace = schema.getNamespace();
             File location = schema.getLocation();
-            schemaOutputResolver.addSchemaInfo(namespace,location);
+            outResolver.addSchemaInfo(namespace,location);
         }
-        return schemaOutputResolver;
+        return outResolver;
     }
 
     /**
@@ -186,15 +188,14 @@ public final class ConfigReader  {
      * Parses an xml config file and returns a Config object.
      *
      * @param xmlFile
-     *        The xml config file which is passed by the user to apt
+     *        The xml config file which is passed by the user to annotation processing
      * @return
      *        A non null Config object
      */
-    private Config parseAndGetConfig (File xmlFile, ErrorHandler errorHandler) throws SAXException, IOException {
+    private Config parseAndGetConfig (File xmlFile, ErrorHandler errorHandler, boolean disableSecureProcessing) throws SAXException, IOException {
         XMLReader reader;
         try {
-            SAXParserFactory factory = SAXParserFactory.newInstance();
-            factory.setNamespaceAware(true);
+            SAXParserFactory factory = XmlFactory.createParserFactory(disableSecureProcessing);
             reader = factory.newSAXParser().getXMLReader();
         } catch (ParserConfigurationException e) {
             // in practice this will never happen

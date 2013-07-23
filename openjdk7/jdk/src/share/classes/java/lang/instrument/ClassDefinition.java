@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,12 +40,12 @@ public final class ClassDefinition {
     /**
      *  The class to redefine
      */
-    private final   Class   mClass;
+    private final Class<?> mClass;
 
     /**
      *  The replacement class file bytes
      */
-    private final   byte[]  mClassFile;
+    private final byte[]   mClassFile;
 
     /**
      *  Creates a new <code>ClassDefinition</code> binding using the supplied

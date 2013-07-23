@@ -39,7 +39,6 @@
 #include "awt_p.h"
 #include "awt_Component.h"
 #include "awt_MenuComponent.h"
-#include "awt_KeyboardFocusManager.h"
 #include "awt_Font.h"
 
 #include "sun_awt_X11_XToolkit.h"
@@ -74,19 +73,17 @@ struct ComponentIDs componentIDs;
 
 struct MenuComponentIDs menuComponentIDs;
 
-struct KeyboardFocusManagerIDs keyboardFocusManagerIDs;
-
 #ifndef HEADLESS
 
 extern Display* awt_init_Display(JNIEnv *env, jobject this);
 
-extern struct MFontPeerIDs mFontPeerIDs;
+struct XFontPeerIDs xFontPeerIDs;
 
 JNIEXPORT void JNICALL
 Java_sun_awt_X11_XFontPeer_initIDs
   (JNIEnv *env, jclass cls)
 {
-    mFontPeerIDs.xfsname =
+    xFontPeerIDs.xfsname =
       (*env)->GetFieldID(env, cls, "xfsname", "Ljava/lang/String;");
 }
 #endif /* !HEADLESS */
@@ -688,8 +685,7 @@ performPoll(JNIEnv *env, jlong nextTaskTime) {
     if (result == 0) {
         /* poll() timed out -- update timeout value */
         update_poll_timeout(TIMEOUT_TIMEDOUT);
-        PRINT2("%s(): TIMEOUT_TIMEDOUT curPollTimeout = %d \n",
-              performPoll, curPollTimeout);
+        PRINT2("performPoll(): TIMEOUT_TIMEDOUT curPollTimeout = %d \n", curPollTimeout);
     }
     if (pollFds[1].revents) {
         int count;
@@ -698,14 +694,12 @@ performPoll(JNIEnv *env, jlong nextTaskTime) {
         do {
             count = read(AWT_READPIPE, read_buf, AWT_POLL_BUFSIZE );
         } while (count == AWT_POLL_BUFSIZE );
-        PRINT2("%s():  data on the AWT pipe: curPollTimeout = %d \n",
-               performPoll, curPollTimeout);
+        PRINT2("performPoll():  data on the AWT pipe: curPollTimeout = %d \n", curPollTimeout);
     }
     if (pollFds[0].revents) {
         // Events in X pipe
         update_poll_timeout(TIMEOUT_EVENTS);
-        PRINT2("%s(): TIMEOUT_EVENTS curPollTimeout = %ld \n",
-               performPoll, curPollTimeout);
+        PRINT2("performPoll(): TIMEOUT_EVENTS curPollTimeout = %ld \n", curPollTimeout);
     }
     return;
 

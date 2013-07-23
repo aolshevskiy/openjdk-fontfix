@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,7 @@ import java.nio.ByteBuffer;
  * lazily using a pull parser, so the part may not have all the data. {@link #read}
  * and {@link #readOnce} may trigger the actual parsing the message. In fact,
  * parsing of an attachment part may be triggered by calling {@link #read} methods
- * on some other attachemnt parts. All this happens behind the scenes so the
+ * on some other attachment parts. All this happens behind the scenes so the
  * application developer need not worry about these details.
  *
  * @author Jitendra Kotamraju
@@ -84,13 +84,18 @@ final class DataHead {
         } else {
             try {
                 OutputStream os = new FileOutputStream(f);
-                InputStream in = readOnce();
-                byte[] buf = new byte[8192];
-                int len;
-                while((len=in.read(buf)) != -1) {
-                    os.write(buf, 0, len);
+                try {
+                    InputStream in = readOnce();
+                    byte[] buf = new byte[8192];
+                    int len;
+                    while((len=in.read(buf)) != -1) {
+                        os.write(buf, 0, len);
+                    }
+                } finally {
+                    if (os != null) {
+                        os.close();
+                    }
                 }
-                os.close();
             } catch(IOException ioe) {
                 throw new MIMEParsingException(ioe);
             }
@@ -98,8 +103,8 @@ final class DataHead {
     }
 
     void close() {
+        head = tail = null;
         if (dataFile != null) {
-            head = tail = null;
             dataFile.close();
         }
     }
@@ -141,6 +146,7 @@ final class DataHead {
      *
      * @return true if readOnce() is not called before
      */
+    @SuppressWarnings("ThrowableInitCause")
     private boolean unconsumed() {
         if (consumedAt != null) {
             AssertionError error = new AssertionError("readOnce() is already called before. See the nested exception from where it's called.");
@@ -185,6 +191,7 @@ final class DataHead {
         int offset;
         int len;
         byte[] buf;
+        boolean closed;
 
         public ReadMultiStream() {
             this.current = head;
@@ -194,7 +201,9 @@ final class DataHead {
 
         @Override
         public int read(byte b[], int off, int sz) throws IOException {
-            if(!fetch())    return -1;
+            if (!fetch()) {
+                return -1;
+            }
 
             sz = Math.min(sz, len-offset);
             System.arraycopy(buf,offset,b,off,sz);
@@ -202,6 +211,7 @@ final class DataHead {
             return sz;
         }
 
+        @Override
         public int read() throws IOException {
             if (!fetch()) {
                 return -1;
@@ -215,12 +225,17 @@ final class DataHead {
 
         /**
          * Gets to the next chunk if we are done with the current one.
-         * @return
+         * @return true if any data available
+         * @throws IOException when i/o error
          */
-        private boolean fetch() {
-            if (current == null) {
-                throw new IllegalStateException("Stream already closed");
+        private boolean fetch() throws IOException {
+            if (closed) {
+                throw new IOException("Stream already closed");
             }
+            if (current == null) {
+                return false;
+            }
+
             while(offset==len) {
                 while(!part.parsed && current.next == null) {
                     part.msg.makeProgress();
@@ -238,9 +253,11 @@ final class DataHead {
             return true;
         }
 
+        @Override
         public void close() throws IOException {
             super.close();
             current = null;
+            closed = true;
         }
     }
 

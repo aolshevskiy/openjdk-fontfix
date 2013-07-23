@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,6 @@ import java.nio.channels.*;
 import java.nio.channels.spi.*;
 import java.util.*;
 import sun.net.ResourceManager;
-
 
 /**
  * An implementation of DatagramChannels.
@@ -86,14 +85,20 @@ class DatagramChannelImpl
     private int state = ST_UNINITIALIZED;
 
     // Binding
-    private SocketAddress localAddress;
-    private SocketAddress remoteAddress;
+    private InetSocketAddress localAddress;
+    private InetSocketAddress remoteAddress;
 
     // Our socket adaptor, if any
     private DatagramSocket socket;
 
     // Multicast support
     private MembershipRegistry registry;
+
+    // set true when socket is bound and SO_REUSEADDRESS is emulated
+    private boolean reuseAddressEmulated;
+
+    // set true/false when socket is already bound and SO_REUSEADDR is emulated
+    private boolean isReuseAddress;
 
     // -- End of fields protected by stateLock
 
@@ -163,7 +168,8 @@ class DatagramChannelImpl
         synchronized (stateLock) {
             if (!isOpen())
                 throw new ClosedChannelException();
-            return localAddress;
+            // Perform security check before returning address
+            return Net.getRevealedLocalAddress(localAddress);
         }
     }
 
@@ -223,6 +229,12 @@ class DatagramChannelImpl
                 }
                 return this;
             }
+            if (name == StandardSocketOptions.SO_REUSEADDR &&
+                    Net.useExclusiveBind() && localAddress != null)
+            {
+                reuseAddressEmulated = true;
+                this.isReuseAddress = (Boolean)value;
+            }
 
             // remaining options don't need any special handling
             Net.setSocketOption(fd, Net.UNSPEC, name, value);
@@ -279,6 +291,12 @@ class DatagramChannelImpl
                         throw new IOException("Unable to map index to interface");
                     return (T) ni;
                 }
+            }
+
+            if (name == StandardSocketOptions.SO_REUSEADDR &&
+                    reuseAddressEmulated)
+            {
+                return (T)Boolean.valueOf(isReuseAddress);
             }
 
             // no special handling
@@ -704,6 +722,7 @@ class DatagramChannelImpl
         }
     }
 
+    @Override
     public DatagramChannel connect(SocketAddress sa) throws IOException {
         int localPort = 0;
 
@@ -725,7 +744,7 @@ class DatagramChannelImpl
 
                     // Connection succeeded; disallow further invocation
                     state = ST_CONNECTED;
-                    remoteAddress = sa;
+                    remoteAddress = isa;
                     sender = isa;
                     cachedSenderInetAddress = isa.getAddress();
                     cachedSenderPort = isa.getPort();
@@ -744,7 +763,7 @@ class DatagramChannelImpl
                 synchronized (stateLock) {
                     if (!isConnected() || !isOpen())
                         return this;
-                    InetSocketAddress isa = (InetSocketAddress)remoteAddress;
+                    InetSocketAddress isa = remoteAddress;
                     SecurityManager sm = System.getSecurityManager();
                     if (sm != null)
                         sm.checkConnect(isa.getAddress().getHostAddress(),
@@ -1055,6 +1074,28 @@ class DatagramChannelImpl
 
     public boolean translateAndSetReadyOps(int ops, SelectionKeyImpl sk) {
         return translateReadyOps(ops, 0, sk);
+    }
+
+    // package-private
+    int poll(int events, long timeout) throws IOException {
+        assert Thread.holdsLock(blockingLock()) && !isBlocking();
+
+        synchronized (readLock) {
+            int n = 0;
+            try {
+                begin();
+                synchronized (stateLock) {
+                    if (!isOpen())
+                        return 0;
+                    readerThread = NativeThread.current();
+                }
+                n = Net.poll(fd, events, timeout);
+            } finally {
+                readerThread = 0;
+                end(n > 0);
+            }
+            return n;
+        }
     }
 
     /**

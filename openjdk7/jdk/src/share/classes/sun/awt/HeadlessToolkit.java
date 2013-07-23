@@ -393,6 +393,7 @@ public class HeadlessToolkit extends Toolkit
     /*
      * Fonts
      */
+    @SuppressWarnings("deprecation")
     public FontPeer getFontPeer(String name, int style) {
         if (componentFactory != null) {
             return componentFactory.getFontPeer(name, style);
@@ -400,10 +401,12 @@ public class HeadlessToolkit extends Toolkit
         return null;
     }
 
+    @SuppressWarnings("deprecation")
     public FontMetrics getFontMetrics(Font font) {
         return tk.getFontMetrics(font);
     }
 
+    @SuppressWarnings("deprecation")
     public String[] getFontList() {
         return tk.getFontList();
     }

@@ -23,12 +23,12 @@
 
 /*
  * @test
- * @bug 4866847 7155693
- * @summary NullPointerException from CodeSource.matchLocation
+ * @bug 4866847 7152564 7155693
+ * @summary various CodeSource.implies tests
  */
 
 import java.security.CodeSource;
-import java.net.*;
+import java.net.URL;
 
 public class Implies {
     public static void main(String[] args) throws Exception {
@@ -42,6 +42,11 @@ public class Implies {
         // protocol check should ignore case
         testImplies(thisURL, thatURL, true);
 
+        thisURL = new URL("http", "localhost", 80, "dir/-");
+        thatURL = new URL("HTTP", "localhost", "dir/file");
+        // port check should match default port of thatURL
+        testImplies(thisURL, thatURL, true);
+
         System.out.println("test passed");
     }
 
@@ -52,7 +57,6 @@ public class Implies {
             new CodeSource(thisURL, (java.security.cert.Certificate[]) null);
         CodeSource thatCs =
             new CodeSource(thatURL, (java.security.cert.Certificate[]) null);
-
         if (thisCs.implies(thatCs) != result) {
             throw new SecurityException("test failed");
         }

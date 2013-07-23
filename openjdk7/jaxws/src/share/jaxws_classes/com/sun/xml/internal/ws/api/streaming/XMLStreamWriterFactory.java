@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,10 @@ package com.sun.xml.internal.ws.api.streaming;
 
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
+import com.sun.xml.internal.ws.encoding.HasEncoding;
+import com.sun.xml.internal.ws.encoding.SOAPBindingCodec;
 import com.sun.xml.internal.ws.streaming.XMLReaderException;
+import com.sun.xml.internal.ws.util.xml.XMLStreamWriterFilter;
 
 import javax.xml.stream.XMLOutputFactory;
 import javax.xml.stream.XMLStreamException;
@@ -39,6 +42,7 @@ import java.io.OutputStream;
 import java.io.StringWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -50,6 +54,7 @@ import java.util.logging.Logger;
  *
  * @author Kohsuke Kawaguchi
  */
+@SuppressWarnings("StaticNonFinalUsedInInitialization")
 public abstract class XMLStreamWriterFactory {
 
     private static final Logger LOGGER = Logger.getLogger(XMLStreamWriterFactory.class.getName());
@@ -77,8 +82,19 @@ public abstract class XMLStreamWriterFactory {
 
         // this system property can be used to disable the pooling altogether,
         // in case someone hits an issue with pooling in the production system.
-        if(!Boolean.getBoolean(XMLStreamWriterFactory.class.getName()+".noPool"))
-            f = Zephyr.newInstance(xof);
+        if (!Boolean.getBoolean(XMLStreamWriterFactory.class.getName()+".noPool")) {
+            try {
+                Class<?> clazz = xof.createXMLStreamWriter(new StringWriter()).getClass();
+                if (clazz.getName().startsWith("com.sun.xml.internal.stream.")) {
+                    f =  new Zephyr(xof,clazz);
+                }
+            } catch (XMLStreamException ex) {
+                Logger.getLogger(XMLStreamWriterFactory.class.getName()).log(Level.INFO, null, ex);
+            } catch (NoSuchMethodException ex) {
+                Logger.getLogger(XMLStreamWriterFactory.class.getName()).log(Level.INFO, null, ex);
+            }
+        }
+
         if(f==null) {
             // is this Woodstox?
             if(xof.getClass().getName().equals("com.ctc.wstx.stax.WstxOutputFactory"))
@@ -88,7 +104,9 @@ public abstract class XMLStreamWriterFactory {
             f = new Default(xof);
 
         theInstance = f;
-        LOGGER.fine("XMLStreamWriterFactory instance is = "+theInstance);
+        if (LOGGER.isLoggable(Level.FINE)) {
+            LOGGER.log(Level.FINE, "XMLStreamWriterFactory instance is = {0}", f);
+        }
     }
 
     /**
@@ -162,6 +180,7 @@ public abstract class XMLStreamWriterFactory {
      * @param f
      *      must not be null.
      */
+    @SuppressWarnings({"null", "ConstantConditions"})
     public static void set(@NotNull XMLStreamWriterFactory f) {
         if(f==null) throw new IllegalArgumentException();
         theInstance = f;
@@ -217,18 +236,22 @@ public abstract class XMLStreamWriterFactory {
             this.xof = xof;
         }
 
+        @Override
         public XMLStreamWriter doCreate(OutputStream out) {
             return doCreate(out,"UTF-8");
         }
 
+        @Override
         public synchronized XMLStreamWriter doCreate(OutputStream out, String encoding) {
             try {
-                return xof.createXMLStreamWriter(out,encoding);
+                XMLStreamWriter writer = xof.createXMLStreamWriter(out,encoding);
+                return new HasEncodingWriter(writer, encoding);
             } catch (XMLStreamException e) {
                 throw new XMLReaderException("stax.cantCreate",e);
             }
         }
 
+        @Override
         public void doRecycle(XMLStreamWriter r) {
             // no recycling
         }
@@ -280,10 +303,12 @@ public abstract class XMLStreamWriterFactory {
             return sr;
         }
 
+        @Override
         public XMLStreamWriter doCreate(OutputStream out) {
             return doCreate(out,"UTF-8");
         }
 
+        @Override
         public XMLStreamWriter doCreate(OutputStream out, String encoding) {
             XMLStreamWriter xsw = fetch();
             if(xsw!=null) {
@@ -291,23 +316,27 @@ public abstract class XMLStreamWriterFactory {
                 try {
                     resetMethod.invoke(xsw);
                     setOutputMethod.invoke(xsw,new StreamResult(out),encoding);
-                    return xsw;
                 } catch (IllegalAccessException e) {
                     throw new XMLReaderException("stax.cantCreate",e);
                 } catch (InvocationTargetException e) {
                     throw new XMLReaderException("stax.cantCreate",e);
                 }
+            } else {
+                // create a new instance
+                try {
+                    xsw = xof.createXMLStreamWriter(out,encoding);
+                } catch (XMLStreamException e) {
+                    throw new XMLReaderException("stax.cantCreate",e);
+                }
             }
-
-            // create a new instance
-            try {
-                return xof.createXMLStreamWriter(out,encoding);
-            } catch (XMLStreamException e) {
-                throw new XMLReaderException("stax.cantCreate",e);
-            }
+            return new HasEncodingWriter(xsw, encoding);
         }
 
+        @Override
         public void doRecycle(XMLStreamWriter r) {
+            if (r instanceof HasEncodingWriter) {
+                r = ((HasEncodingWriter)r).getWriter();
+            }
             if(zephyrClass.isInstance(r)) {
                 // this flushes the underlying stream, so it might cause chunking issue
                 try {
@@ -333,21 +362,43 @@ public abstract class XMLStreamWriterFactory {
             this.xof = xof;
         }
 
+        @Override
         public XMLStreamWriter doCreate(OutputStream out) {
-            return doCreate(out,"UTF-8");
+            return doCreate(out, SOAPBindingCodec.UTF8_ENCODING);
         }
 
+        @Override
         public XMLStreamWriter doCreate(OutputStream out, String encoding) {
             try {
-                return xof.createXMLStreamWriter(out,encoding);
+                XMLStreamWriter writer = xof.createXMLStreamWriter(out,encoding);
+                return new HasEncodingWriter(writer, encoding);
             } catch (XMLStreamException e) {
                 throw new XMLReaderException("stax.cantCreate",e);
             }
         }
 
+        @Override
         public void doRecycle(XMLStreamWriter r) {
             // no recycling
         }
 
+    }
+
+    private static class HasEncodingWriter extends XMLStreamWriterFilter implements HasEncoding {
+        private final String encoding;
+
+        HasEncodingWriter(XMLStreamWriter writer, String encoding) {
+            super(writer);
+            this.encoding = encoding;
+        }
+
+        @Override
+        public String getEncoding() {
+            return encoding;
+        }
+
+        XMLStreamWriter getWriter() {
+            return writer;
+        }
     }
 }

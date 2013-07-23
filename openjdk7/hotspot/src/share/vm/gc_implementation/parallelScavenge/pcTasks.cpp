@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -54,14 +54,22 @@ void ThreadRootsMarkingTask::do_it(GCTaskManager* manager, uint which) {
     PrintGCDetails && TraceParallelOldGCTasks, true, NULL));
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
+
   PSParallelCompact::MarkAndPushClosure mark_and_push_closure(cm);
+  CLDToOopClosure mark_and_push_from_clds(&mark_and_push_closure, true);
   CodeBlobToOopClosure mark_and_push_in_blobs(&mark_and_push_closure, /*do_marking=*/ true);
 
   if (_java_thread != NULL)
-    _java_thread->oops_do(&mark_and_push_closure, &mark_and_push_in_blobs);
+    _java_thread->oops_do(
+        &mark_and_push_closure,
+        &mark_and_push_from_clds,
+        &mark_and_push_in_blobs);
 
   if (_vm_thread != NULL)
-    _vm_thread->oops_do(&mark_and_push_closure, &mark_and_push_in_blobs);
+    _vm_thread->oops_do(
+        &mark_and_push_closure,
+        &mark_and_push_from_clds,
+        &mark_and_push_in_blobs);
 
   // Do the real work
   cm->follow_marking_stacks();
@@ -76,6 +84,7 @@ void MarkFromRootsTask::do_it(GCTaskManager* manager, uint which) {
   ParCompactionManager* cm =
     ParCompactionManager::gc_thread_compaction_manager(which);
   PSParallelCompact::MarkAndPushClosure mark_and_push_closure(cm);
+  PSParallelCompact::FollowKlassClosure follow_klass_closure(&mark_and_push_closure);
 
   switch (_root_type) {
     case universe:
@@ -90,7 +99,8 @@ void MarkFromRootsTask::do_it(GCTaskManager* manager, uint which) {
     {
       ResourceMark rm;
       CodeBlobToOopClosure each_active_code_blob(&mark_and_push_closure, /*do_marking=*/ true);
-      Threads::oops_do(&mark_and_push_closure, &each_active_code_blob);
+      CLDToOopClosure mark_and_push_from_cld(&mark_and_push_closure);
+      Threads::oops_do(&mark_and_push_closure, &mark_and_push_from_cld, &each_active_code_blob);
     }
     break;
 
@@ -112,6 +122,10 @@ void MarkFromRootsTask::do_it(GCTaskManager* manager, uint which) {
 
     case system_dictionary:
       SystemDictionary::always_strong_oops_do(&mark_and_push_closure);
+      break;
+
+    case class_loader_data:
+      ClassLoaderDataGraph::always_strong_oops_do(&mark_and_push_closure, &follow_klass_closure, true);
       break;
 
     case code_cache:
@@ -204,7 +218,7 @@ void StealMarkingTask::do_it(GCTaskManager* manager, uint which) {
   int random_seed = 17;
   do {
     while (ParCompactionManager::steal_objarray(which, &random_seed, task)) {
-      objArrayKlass* const k = (objArrayKlass*)task.obj()->blueprint();
+      ObjArrayKlass* k = (ObjArrayKlass*)task.obj()->klass();
       k->oop_follow_contents(cm, task.obj(), task.index());
       cm->follow_marking_stacks();
     }

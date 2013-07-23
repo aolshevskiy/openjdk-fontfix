@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,11 +27,13 @@
  * @summary Additional functionality test of task and JSR 269
  * @author  Peter von der Ah\u00e9
  * @library ./lib
+ * @build ToolTester
  * @run main TestJavacTaskScanner TestJavacTaskScanner.java
  */
 
 import com.sun.tools.javac.api.JavacTaskImpl;
 import com.sun.tools.javac.parser.*;
+import com.sun.tools.javac.parser.Tokens.Token;
 import com.sun.tools.javac.util.*;
 import java.io.*;
 import java.net.*;
@@ -92,8 +94,8 @@ public class TestJavacTaskScanner extends ToolTester {
         System.out.println("#allMembers: " + numAllMembers);
 
         check(numTokens, "#Tokens", 1222);
-        check(numParseTypeElements, "#parseTypeElements", 136);
-        check(numAllMembers, "#allMembers", 67);
+        check(numParseTypeElements, "#parseTypeElements", 158);
+        check(numAllMembers, "#allMembers", 52);
     }
 
     void check(int value, String name, int expected) {
@@ -109,7 +111,8 @@ public class TestJavacTaskScanner extends ToolTester {
         DeclaredType type = (DeclaredType)task.parseType("List<String>", clazz);
         for (Element member : elements.getAllMembers((TypeElement)type.asElement())) {
             TypeMirror mt = types.asMemberOf(type, member);
-            System.out.format("%s : %s -> %s%n", member.getSimpleName(), member.asType(), mt);
+            System.out.format("type#%d: %s : %s -> %s%n",
+                numParseTypeElements, member.getSimpleName(), member.asType(), mt);
             numParseTypeElements++;
         }
     }
@@ -121,7 +124,8 @@ public class TestJavacTaskScanner extends ToolTester {
 
     private void testGetAllMembers(TypeElement clazz) {
         for (Element member : elements.getAllMembers(clazz)) {
-            System.out.format("%s : %s%n", member.getSimpleName(), member.asType());
+            System.out.format("elem#%d: %s : %s%n",
+                numAllMembers, member.getSimpleName(), member.asType());
             numAllMembers++;
         }
     }
@@ -159,7 +163,7 @@ public class TestJavacTaskScanner extends ToolTester {
         StandardJavaFileManager fm = tool.getStandardFileManager(dl, null, encoding);
         try {
             fm.setLocation(SOURCE_PATH,  Arrays.asList(test_src));
-            fm.setLocation(CLASS_PATH,   Arrays.asList(test_classes, javac_classes));
+            fm.setLocation(CLASS_PATH,   join(test_class_path, Arrays.asList(javac_classes)));
             fm.setLocation(CLASS_OUTPUT, Arrays.asList(test_classes));
         } catch (IOException e) {
             throw new AssertionError(e);
@@ -178,7 +182,6 @@ class MyScanner extends Scanner {
 
         @Override
         public Scanner newScanner(CharSequence input, boolean keepDocComments) {
-            assert !keepDocComments;
             if (input instanceof CharBuffer) {
                 return new MyScanner(this, (CharBuffer)input, test);
             } else {
@@ -189,7 +192,6 @@ class MyScanner extends Scanner {
 
         @Override
         public Scanner newScanner(char[] input, int inputLength, boolean keepDocComments) {
-            assert !keepDocComments;
             return new MyScanner(this, input, inputLength, test);
         }
 
@@ -206,7 +208,8 @@ class MyScanner extends Scanner {
 
     public void nextToken() {
         super.nextToken();
-        System.err.format("Saw token %s (%s)%n", token(), name());
+        Token tk = token();
+        System.err.format("Saw token %s %n", tk.kind);
         test.numTokens++;
     }
 

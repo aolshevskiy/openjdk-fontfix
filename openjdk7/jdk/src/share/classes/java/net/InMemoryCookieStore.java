@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -207,6 +207,9 @@ class InMemoryCookieStore implements CookieStore {
     public boolean removeAll() {
         lock.lock();
         try {
+            if (cookieJar.isEmpty()) {
+                return false;
+            }
             cookieJar.clear();
             domainIndex.clear();
             uriIndex.clear();

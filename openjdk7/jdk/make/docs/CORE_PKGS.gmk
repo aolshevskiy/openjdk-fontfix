@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,6 @@ EXCLUDE_PKGS =             \
   java.awt.peer            \
   java.awt.dnd.peer        \
   sun.*                    \
-  sunw.*                   \
   com.sun.*                \
   org.apache.*             \
   org.jcp.*		   \
@@ -64,7 +63,7 @@ ACTIVE_JSR_PKGS= \
   javax.management.*  \
   javax.script  \
   javax.sql.*  \
-  javax.tools  \
+  javax.tools.*  \
   javax.xml.*  \
   org.w3c.*  \
   org.xml.sax
@@ -128,15 +127,22 @@ CORE_PKGS =                                      \
   java.sql                                       \
   java.text                                      \
   java.text.spi                                  \
+  java.time                                      \
+  java.time.chrono                               \
+  java.time.format                               \
+  java.time.temporal                             \
+  java.time.zone                                 \
   java.util                                      \
   java.util.concurrent                           \
   java.util.concurrent.atomic                    \
   java.util.concurrent.locks                     \
+  java.util.function                             \
   java.util.jar                                  \
   java.util.logging                              \
   java.util.prefs                                \
   java.util.regex                                \
   java.util.spi                                  \
+  java.util.stream                               \
   java.util.zip                                  \
   javax.accessibility                            \
   javax.activation                               \
@@ -218,6 +224,7 @@ CORE_PKGS =                                      \
   javax.swing.plaf.nimbus                        \
   javax.swing.plaf.synth                         \
   javax.tools                                    \
+  javax.tools.annotation                         \
   javax.transaction                              \
   javax.transaction.xa                           \
   javax.xml.parsers                              \

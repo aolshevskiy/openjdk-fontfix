@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,10 +26,12 @@
 package java.util;
 
 import java.text.DateFormat;
+import java.time.LocalDate;
 import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.io.ObjectInputStream;
 import java.lang.ref.SoftReference;
+import java.time.Instant;
 import sun.util.calendar.BaseCalendar;
 import sun.util.calendar.CalendarDate;
 import sun.util.calendar.CalendarSystem;
@@ -770,7 +772,7 @@ public class Date
      */
     @Deprecated
     public int getDay() {
-        return normalize().getDayOfWeek() - gcal.SUNDAY;
+        return normalize().getDayOfWeek() - BaseCalendar.SUNDAY;
     }
 
     /**
@@ -982,8 +984,9 @@ public class Date
      * exclusive OR of the two halves of the primitive <tt>long</tt>
      * value returned by the {@link Date#getTime}
      * method. That is, the hash code is the value of the expression:
-     * <blockquote><pre>
-     * (int)(this.getTime()^(this.getTime() >>> 32))</pre></blockquote>
+     * <blockquote><pre>{@code
+     * (int)(this.getTime()^(this.getTime() >>> 32))
+     * }</pre></blockquote>
      *
      * @return  a hash code value for this object.
      */
@@ -1027,7 +1030,7 @@ public class Date
         BaseCalendar.Date date = normalize();
         StringBuilder sb = new StringBuilder(28);
         int index = date.getDayOfWeek();
-        if (index == gcal.SUNDAY) {
+        if (index == BaseCalendar.SUNDAY) {
             index = 8;
         }
         convertToAbbr(sb, wtb[index]).append(' ');                        // EEE
@@ -1039,7 +1042,7 @@ public class Date
         CalendarUtils.sprintf0d(sb, date.getSeconds(), 2).append(' '); // ss
         TimeZone zi = date.getZone();
         if (zi != null) {
-            sb.append(zi.getDisplayName(date.isDaylightTime(), zi.SHORT, Locale.US)); // zzz
+            sb.append(zi.getDisplayName(date.isDaylightTime(), TimeZone.SHORT, Locale.US)); // zzz
         } else {
             sb.append("GMT");
         }
@@ -1083,7 +1086,7 @@ public class Date
     /**
      * Creates a string representation of this <tt>Date</tt> object of
      * the form:
-     * <blockquote<pre>
+     * <blockquote><pre>
      * d mon yyyy hh:mm:ss GMT</pre></blockquote>
      * where:<ul>
      * <li><i>d</i> is the day of the month (<tt>1</tt> through <tt>31</tt>),
@@ -1237,7 +1240,7 @@ public class Date
             }
             GregorianCalendar gc = new GregorianCalendar(tz);
             gc.clear();
-            gc.set(gc.MILLISECOND, ms);
+            gc.set(GregorianCalendar.MILLISECOND, ms);
             gc.set(y, m-1, d, hh, mm, ss);
             fastTime = gc.getTimeInMillis();
             BaseCalendar cal = getCalendarSystem(fastTime);
@@ -1327,5 +1330,47 @@ public class Date
          throws IOException, ClassNotFoundException
     {
         fastTime = s.readLong();
+    }
+
+    /**
+     * Obtains an instance of {@code Date} from an {@code Instant} object.
+     * <p>
+     * {@code Instant} uses a precision of nanoseconds, whereas {@code Date}
+     * uses a precision of milliseconds.  The conversion will trancate any
+     * excess precision information as though the amount in nanoseconds was
+     * subject to integer division by one million.
+     * <p>
+     * {@code Instant} can store points on the time-line further in the future
+     * and further in the past than {@code Date}. In this scenario, this method
+     * will throw an exception.
+     *
+     * @param instant  the instant to convert
+     * @return a {@code Date} representing the same point on the time-line as
+     *  the provided instant
+     * @exception NullPointerException if {@code instant} is null.
+     * @exception IllegalArgumentException if the instant is too large to
+     *  represent as a {@code Date}
+     * @since 1.8
+     */
+    public static Date from(Instant instant) {
+        try {
+            return new Date(instant.toEpochMilli());
+        } catch (ArithmeticException ex) {
+            throw new IllegalArgumentException(ex);
+        }
+    }
+
+    /**
+     * Converts this {@code Date} object to an {@code Instant}.
+     * <p>
+     * The conversion creates an {@code Instant} that represents the same
+     * point on the time-line as this {@code Date}.
+     *
+     * @return an instant representing the same point on the time-line as
+     *  this {@code Date} object
+     * @since 1.8
+     */
+    public Instant toInstant() {
+        return Instant.ofEpochMilli(getTime());
     }
 }

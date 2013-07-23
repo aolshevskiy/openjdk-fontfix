@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,23 +31,16 @@
   nonstatic_field(CompactibleFreeListSpace,    _collector,                                    CMSCollector*)                         \
   nonstatic_field(CompactibleFreeListSpace,    _bt,                                           BlockOffsetArrayNonContigSpace)        \
                                                                                                                                      \
-  nonstatic_field(CMSPermGen,                  _gen,                                          ConcurrentMarkSweepGeneration*)        \
-  nonstatic_field(CMSBitMap,                   _bmStartWord,                                  HeapWord*)                             \
   nonstatic_field(CMSBitMap,                   _bmWordSize,                                   size_t)                                \
-  nonstatic_field(CMSBitMap,                   _shifter,                                      const int)                            \
-  nonstatic_field(CMSBitMap,                      _bm,                                           BitMap)                            \
-  nonstatic_field(CMSBitMap,                   _virtual_space,                                VirtualSpace)                         \
+  nonstatic_field(CMSBitMap,                   _shifter,                                      const int)                             \
+  nonstatic_field(CMSBitMap,                      _bm,                                           BitMap)                             \
+  nonstatic_field(CMSBitMap,                   _virtual_space,                                VirtualSpace)                          \
   nonstatic_field(CMSCollector,                _markBitMap,                                   CMSBitMap)                             \
   nonstatic_field(ConcurrentMarkSweepGeneration, _cmsSpace,                                   CompactibleFreeListSpace*)             \
      static_field(ConcurrentMarkSweepThread,   _collector,                                    CMSCollector*)                         \
-  volatile_nonstatic_field(FreeChunk,          _size,                                         size_t)                                \
-  nonstatic_field(FreeChunk,                   _next,                                         FreeChunk*)                            \
-  nonstatic_field(FreeChunk,                   _prev,                                         FreeChunk*)                            \
   nonstatic_field(LinearAllocBlock,            _word_size,                                    size_t)                                \
-  nonstatic_field(FreeList<FreeChunk>,         _size,                                         size_t)                                \
-  nonstatic_field(FreeList<FreeChunk>,         _count,                                        ssize_t)                               \
-  nonstatic_field(BinaryTreeDictionary<FreeChunk>,_total_size,                                 size_t)                                \
-  nonstatic_field(CompactibleFreeListSpace,    _dictionary,                                   FreeBlockDictionary<FreeChunk>*)       \
+  nonstatic_field(AFLBinaryTreeDictionary,     _total_size,                                   size_t)                                \
+  nonstatic_field(CompactibleFreeListSpace,    _dictionary,                                   AFLBinaryTreeDictionary*)              \
   nonstatic_field(CompactibleFreeListSpace,    _indexedFreeList[0],                           FreeList<FreeChunk>)                   \
   nonstatic_field(CompactibleFreeListSpace,    _smallLinearAllocBlock,                        LinearAllocBlock)
 
@@ -57,29 +50,22 @@
                                                                           \
            declare_type(ConcurrentMarkSweepGeneration,CardGeneration)     \
            declare_type(CompactibleFreeListSpace,     CompactibleSpace)   \
-           declare_type(CMSPermGenGen,                ConcurrentMarkSweepGeneration) \
-           declare_type(CMSPermGen,                   PermGen)            \
            declare_type(ConcurrentMarkSweepThread,    NamedThread)        \
            declare_type(SurrogateLockerThread, JavaThread)                \
   declare_toplevel_type(CMSCollector)                                     \
   declare_toplevel_type(CMSBitMap)                                        \
   declare_toplevel_type(FreeChunk)                                        \
+  declare_toplevel_type(Metablock)                                        \
   declare_toplevel_type(ConcurrentMarkSweepThread*)                       \
   declare_toplevel_type(ConcurrentMarkSweepGeneration*)                   \
   declare_toplevel_type(SurrogateLockerThread*)                           \
   declare_toplevel_type(CompactibleFreeListSpace*)                        \
   declare_toplevel_type(CMSCollector*)                                    \
-  declare_toplevel_type(FreeChunk*)                                       \
-  declare_toplevel_type(BinaryTreeDictionary<FreeChunk>*)                 \
-  declare_toplevel_type(FreeBlockDictionary<FreeChunk>*)                  \
-  declare_toplevel_type(FreeList<FreeChunk>*)                             \
-  declare_toplevel_type(FreeList<FreeChunk>)                              \
+  declare_toplevel_type(AFLBinaryTreeDictionary)                          \
   declare_toplevel_type(LinearAllocBlock)                                 \
-  declare_toplevel_type(FreeBlockDictionary<FreeChunk>)                   \
-            declare_type(BinaryTreeDictionary<FreeChunk>, FreeBlockDictionary<FreeChunk>)
+  declare_toplevel_type(FreeBlockDictionary<FreeChunk>)
 
 #define VM_INT_CONSTANTS_CMS(declare_constant)                            \
   declare_constant(Generation::ConcurrentMarkSweep)                       \
-  declare_constant(PermGen::ConcurrentMarkSweep)
 
 #endif // SHARE_VM_GC_IMPLEMENTATION_CONCURRENTMARKSWEEP_VMSTRUCTS_CMS_HPP

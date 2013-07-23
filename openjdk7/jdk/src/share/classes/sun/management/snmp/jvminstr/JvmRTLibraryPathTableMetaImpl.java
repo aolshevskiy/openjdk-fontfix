@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -70,6 +70,7 @@ import sun.management.snmp.util.JvmContextFactory;
   */
 public class JvmRTLibraryPathTableMetaImpl extends JvmRTLibraryPathTableMeta {
 
+    static final long serialVersionUID = 6713252710712502068L;
     private SnmpTableCache cache;
 
      /**
@@ -77,6 +78,7 @@ public class JvmRTLibraryPathTableMetaImpl extends JvmRTLibraryPathTableMeta {
      * JvmRTLibraryPathTable.
      **/
     private static class JvmRTLibraryPathTableCache extends SnmpTableCache {
+        static final long serialVersionUID = 2035304445719393195L;
         private JvmRTLibraryPathTableMetaImpl meta;
 
         JvmRTLibraryPathTableCache(JvmRTLibraryPathTableMetaImpl meta,
@@ -89,7 +91,7 @@ public class JvmRTLibraryPathTableMetaImpl extends JvmRTLibraryPathTableMeta {
          * Call <code>getTableDatas(JvmContextFactory.getUserData())</code>.
          **/
         public SnmpTableHandler getTableHandler() {
-            final Map userData = JvmContextFactory.getUserData();
+            final Map<Object,Object> userData = JvmContextFactory.getUserData();
             return getTableDatas(userData);
         }
 

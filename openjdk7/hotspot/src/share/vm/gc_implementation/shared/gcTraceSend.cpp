@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,9 +28,9 @@
 #include "gc_implementation/shared/gcTrace.hpp"
 #include "gc_implementation/shared/gcWhen.hpp"
 #include "gc_implementation/shared/copyFailedInfo.hpp"
-#include "trace/traceBackend.hpp"
 #include "trace/tracing.hpp"
-#ifndef SERIALGC
+#include "trace/traceBackend.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/g1/evacuationInfo.hpp"
 #include "gc_implementation/g1/g1YCTypes.hpp"
 #endif
@@ -123,26 +123,7 @@ void OldGCTracer::send_concurrent_mode_failure_event() {
   }
 }
 
-void GCTracer::send_object_count_after_gc_event(klassOop klass, jlong count, julong total_size) const {
-  EventObjectCountAfterGC e;
-  if (e.should_commit()) {
-    e.set_gcId(_shared_gc_info.id());
-    e.set_class(klass);
-    e.set_count(count);
-    e.set_totalSize(total_size);
-    e.commit();
-  }
-}
-
-bool GCTracer::should_send_object_count_after_gc_event() const {
-#if INCLUDE_TRACE
-  return Tracing::is_event_enabled(EventObjectCountAfterGC::eventId);
-#else
-  return false;
-#endif
-}
-
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 void G1NewTracer::send_g1_young_gc_event() {
   EventGCG1GarbageCollection e(UNTIMED);
   if (e.should_commit()) {
@@ -221,10 +202,18 @@ class GCHeapSummaryEventSender : public GCHeapSummaryVisitor {
   void visit(const PSHeapSummary* ps_heap_summary) const {
     visit((GCHeapSummary*)ps_heap_summary);
 
+    const VirtualSpaceSummary& old_summary = ps_heap_summary->old();
+    const SpaceSummary& old_space = ps_heap_summary->old_space();
+    const VirtualSpaceSummary& young_summary = ps_heap_summary->young();
+    const SpaceSummary& eden_space = ps_heap_summary->eden();
+    const SpaceSummary& from_space = ps_heap_summary->from();
+    const SpaceSummary& to_space = ps_heap_summary->to();
+
     EventPSHeapSummary e;
     if (e.should_commit()) {
       e.set_gcId(_id);
       e.set_when((u1)_when);
+
       e.set_oldSpace(to_trace_struct(ps_heap_summary->old()));
       e.set_oldObjectSpace(to_trace_struct(ps_heap_summary->old_space()));
       e.set_youngSpace(to_trace_struct(ps_heap_summary->young()));
@@ -241,16 +230,24 @@ void GCTracer::send_gc_heap_summary_event(GCWhen::Type when, const GCHeapSummary
   heap_summary.accept(&visitor);
 }
 
-void GCTracer::send_perm_gen_summary_event(GCWhen::Type when, const PermGenSummary& perm_gen_summary) const {
-  const VirtualSpaceSummary& perm_space = perm_gen_summary.perm_space();
-  const SpaceSummary& object_space = perm_gen_summary.object_space();
+static TraceStructMetaspaceSizes to_trace_struct(const MetaspaceSizes& sizes) {
+  TraceStructMetaspaceSizes meta_sizes;
 
-  EventPermGenSummary e;
+  meta_sizes.set_capacity(sizes.capacity());
+  meta_sizes.set_used(sizes.used());
+  meta_sizes.set_reserved(sizes.reserved());
+
+  return meta_sizes;
+}
+
+void GCTracer::send_meta_space_summary_event(GCWhen::Type when, const MetaspaceSummary& meta_space_summary) const {
+  EventMetaspaceSummary e;
   if (e.should_commit()) {
     e.set_gcId(_shared_gc_info.id());
     e.set_when((u1) when);
-    e.set_permSpace(to_trace_struct(perm_space));
-    e.set_objectSpace(to_trace_struct(object_space));
+    e.set_metaspace(to_trace_struct(meta_space_summary.meta_space()));
+    e.set_dataSpace(to_trace_struct(meta_space_summary.data_space()));
+    e.set_classSpace(to_trace_struct(meta_space_summary.class_space()));
     e.commit();
   }
 }

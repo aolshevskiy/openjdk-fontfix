@@ -71,6 +71,7 @@ import java.text.MessageFormat;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
+import java.nio.file.Files;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.UnsupportedCharsetException;
 import sun.tools.native2ascii.A2NFilter;

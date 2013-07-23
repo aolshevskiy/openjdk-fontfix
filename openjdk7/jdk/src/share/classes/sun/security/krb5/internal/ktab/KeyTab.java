@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,6 +46,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.StringTokenizer;
 import java.util.Vector;
+import sun.security.jgss.krb5.ServiceCreds;
 
 /**
  * This class represents key table. The key table functions deal with storing
@@ -77,7 +78,7 @@ public class KeyTab implements KeyTabConstants {
 
     private final String tabName;
     private long lastModified;
-    private int kt_vno;
+    private int kt_vno = KRB5_KT_VNO;
 
     private Vector<KeyTabEntry> entries = new Vector<>();
 
@@ -186,8 +187,8 @@ public class KeyTab implements KeyTabConstants {
         } else {
             String kname = null;
             try {
-                String keytab_names = Config.getInstance().getDefault
-                    ("default_keytab_name", "libdefaults");
+                String keytab_names = Config.getInstance().get
+                        ("libdefaults", "default_keytab_name");
                 if (keytab_names != null) {
                     StringTokenizer st = new StringTokenizer(keytab_names, " ");
                     while (st.hasMoreTokens()) {
@@ -268,9 +269,17 @@ public class KeyTab implements KeyTabConstants {
     }
 
     /**
+     * Returns a principal name in this keytab. Used by
+     * {@link ServiceCreds#getKKeys()}.
+     */
+    public PrincipalName getOneName() {
+        int size = entries.size();
+        return size > 0 ? entries.elementAt(size-1).service : null;
+    }
+
+    /**
      * Reads all keys for a service from the keytab file that have
-     * etypes that have been configured for use. If there are multiple
-     * keys with same etype, the one with the highest kvno is returned.
+     * etypes that have been configured for use.
      * @param service the PrincipalName of the requested service
      * @return an array containing all the service keys, never null
      */
@@ -279,6 +288,9 @@ public class KeyTab implements KeyTabConstants {
         EncryptionKey key;
         int size = entries.size();
         ArrayList<EncryptionKey> keys = new ArrayList<>(size);
+        if (DEBUG) {
+            System.out.println("Looking for keys for: " + service);
+        }
         for (int i = size-1; i >= 0; i--) {
             entry = entries.elementAt(i);
             if (entry.service.match(service)) {
@@ -300,35 +312,12 @@ public class KeyTab implements KeyTabConstants {
         size = keys.size();
         EncryptionKey[] retVal = keys.toArray(new EncryptionKey[size]);
 
-        // Sort keys according to default_tkt_enctypes
-        if (DEBUG) {
-            System.out.println("Ordering keys wrt default_tkt_enctypes list");
-        }
-
-        final int[] etypes = EType.getDefaults("default_tkt_enctypes");
-
-        // Sort the keys, k1 is preferred than k2 if:
-        // 1. k1's etype appears earlier in etypes than k2's
-        // 2. If same, k1's KVNO is higher
+        // Sort the keys by kvno. Sometimes we must choose a single key (say,
+        // generate encrypted timestamp in AS-REQ). A key with a higher KVNO
+        // sounds like a newer one.
         Arrays.sort(retVal, new Comparator<EncryptionKey>() {
             @Override
             public int compare(EncryptionKey o1, EncryptionKey o2) {
-                if (etypes != null) {
-                    int o1EType = o1.getEType();
-                    int o2EType = o2.getEType();
-                    if (o1EType != o2EType) {
-                        for (int i=0; i<etypes.length; i++) {
-                            if (etypes[i] == o1EType) {
-                                return -1;
-                            } else if (etypes[i] == o2EType) {
-                                return 1;
-                            }
-                        }
-                        // Neither o1EType nor o2EType in default_tkt_enctypes,
-                        // therefore won't be used in AS-REQ. We do not care
-                        // about their order, use kvno is OK.
-                    }
-                }
                 return o2.getKeyVersionNumber().intValue()
                         - o1.getKeyVersionNumber().intValue();
             }
@@ -379,9 +368,15 @@ public class KeyTab implements KeyTabConstants {
      */
     public void addEntry(PrincipalName service, char[] psswd,
             int kvno, boolean append) throws KrbException {
+        addEntry(service, service.getSalt(), psswd, kvno, append);
+    }
+
+    // Called by KDC test
+    public void addEntry(PrincipalName service, String salt, char[] psswd,
+            int kvno, boolean append) throws KrbException {
 
         EncryptionKey[] encKeys = EncryptionKey.acquireSecretKeys(
-            psswd, service.getSalt());
+            psswd, salt);
 
         // There should be only one maximum KVNO value for all etypes, so that
         // all added keys can have the same KVNO.

@@ -41,15 +41,20 @@
 #include "runtime/stubRoutines.hpp"
 #include "runtime/threadLocalStorage.hpp"
 #include "runtime/unhandledOops.hpp"
+#include "utilities/macros.hpp"
+
+#if INCLUDE_NMT
 #include "services/memRecorder.hpp"
+#endif // INCLUDE_NMT
+
 #include "trace/traceBackend.hpp"
 #include "trace/traceMacros.hpp"
 #include "utilities/exceptions.hpp"
 #include "utilities/top.hpp"
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/g1/dirtyCardQueue.hpp"
 #include "gc_implementation/g1/satbQueue.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 #ifdef ZERO
 #ifdef TARGET_ARCH_zero
 # include "stack_zero.hpp"
@@ -107,7 +112,7 @@ class Thread: public ThreadShadow {
   void*       _real_malloc_address;
  public:
   void* operator new(size_t size) { return allocate(size, true); }
-  void* operator new(size_t size, std::nothrow_t& nothrow_constant) { return allocate(size, false); }
+  void* operator new(size_t size, const std::nothrow_t& nothrow_constant) { return allocate(size, false); }
   void  operator delete(void* p);
 
  protected:
@@ -418,6 +423,9 @@ class Thread: public ThreadShadow {
   HandleArea* handle_area() const                { return _handle_area; }
   void set_handle_area(HandleArea* area)         { _handle_area = area; }
 
+  GrowableArray<Metadata*>* metadata_handles() const          { return _metadata_handles; }
+  void set_metadata_handles(GrowableArray<Metadata*>* handles){ _metadata_handles = handles; }
+
   // Thread-Local Allocation Buffer (TLAB) support
   ThreadLocalAllocBuffer& tlab()                 { return _tlab; }
   void initialize_tlab() {
@@ -473,8 +481,10 @@ class Thread: public ThreadShadow {
 
   // GC support
   // Apply "f->do_oop" to all root oops in "this".
+  // Apply "cld_f->do_cld" to CLDs that are otherwise not kept alive.
+  //   Used by JavaThread::oops_do.
   // Apply "cf->do_code_blob" (if !NULL) to all code blobs active in frames
-  virtual void oops_do(OopClosure* f, CodeBlobClosure* cf);
+  virtual void oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf);
 
   // Handles the parallel case for the method below.
 private:
@@ -500,6 +510,9 @@ public:
   // Sweeper support
   void nmethods_do(CodeBlobClosure* cf);
 
+  // jvmtiRedefineClasses support
+  void metadata_do(void f(Metadata*));
+
   // Used by fast lock support
   virtual bool is_lock_owned(address adr) const;
 
@@ -520,6 +533,7 @@ public:
 
   // Thread local handle area for allocation of handles within the VM
   HandleArea* _handle_area;
+  GrowableArray<Metadata*>* _metadata_handles;
 
   // Support for stack overflow handling, get_thread, etc.
   address          _stack_base;
@@ -624,9 +638,6 @@ public:
   jint _hashStateZ ;
   void * _schedctl ;
 
-  intptr_t _ScratchA, _ScratchB ;              // Scratch locations for fast-path sync code
-  static ByteSize ScratchA_offset()            { return byte_offset_of(Thread, _ScratchA ); }
-  static ByteSize ScratchB_offset()            { return byte_offset_of(Thread, _ScratchB ); }
 
   volatile jint rng [4] ;                      // RNG for spin loop
 
@@ -798,18 +809,18 @@ class JavaThread: public Thread {
   GrowableArray<jvmtiDeferredLocalVariableSet*>* _deferred_locals_updates;
 
   // Handshake value for fixing 6243940. We need a place for the i2c
-  // adapter to store the callee methodOop. This value is NEVER live
+  // adapter to store the callee Method*. This value is NEVER live
   // across a gc point so it does NOT have to be gc'd
   // The handshake is open ended since we can't be certain that it will
   // be NULLed. This is because we rarely ever see the race and end up
   // in handle_wrong_method which is the backend of the handshake. See
   // code in i2c adapters and handle_wrong_method.
 
-  methodOop     _callee_target;
+  Method*       _callee_target;
 
-  // Oop results of VM runtime calls
-  oop           _vm_result;    // Used to pass back an oop result into Java code, GC-preserved
-  oop           _vm_result_2;  // Used to pass back an oop result into Java code, GC-preserved
+  // Used to pass back results to the interpreter or generated code running Java code.
+  oop           _vm_result;    // oop result is GC-preserved
+  Metadata*     _vm_result_2;  // non-oop result
 
   // See ReduceInitialCardMarks: this holds the precise space interval of
   // the most recent slow path allocation for which compiled code has
@@ -916,7 +927,7 @@ class JavaThread: public Thread {
   }   _jmp_ring[ jump_ring_buffer_size ];
 #endif /* PRODUCT */
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   // Support for G1 barriers
 
   ObjPtrQueue _satb_mark_queue;          // Thread-local log for SATB barrier.
@@ -928,7 +939,7 @@ class JavaThread: public Thread {
   static DirtyCardQueueSet _dirty_card_queue_set;
 
   void flush_barrier_queues();
-#endif // !SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   friend class VMThread;
   friend class ThreadWaitTransition;
@@ -1039,6 +1050,7 @@ class JavaThread: public Thread {
   bool do_not_unlock_if_synchronized()             { return _do_not_unlock_if_synchronized; }
   void set_do_not_unlock_if_synchronized(bool val) { _do_not_unlock_if_synchronized = val; }
 
+#if INCLUDE_NMT
   // native memory tracking
   inline MemRecorder* get_recorder() const          { return (MemRecorder*)_recorder; }
   inline void         set_recorder(MemRecorder* rc) { _recorder = rc; }
@@ -1046,6 +1058,7 @@ class JavaThread: public Thread {
  private:
   // per-thread memory recorder
   MemRecorder* volatile _recorder;
+#endif // INCLUDE_NMT
 
   // Suspend/resume support for JavaThread
  private:
@@ -1226,15 +1239,15 @@ class JavaThread: public Thread {
   void set_deopt_nmethod(nmethod* nm)            { _deopt_nmethod = nm;   }
   nmethod* deopt_nmethod()                       { return _deopt_nmethod; }
 
-  methodOop  callee_target() const               { return _callee_target; }
-  void set_callee_target  (methodOop x)          { _callee_target   = x; }
+  Method*    callee_target() const               { return _callee_target; }
+  void set_callee_target  (Method* x)          { _callee_target   = x; }
 
   // Oop results of vm runtime calls
   oop  vm_result() const                         { return _vm_result; }
   void set_vm_result  (oop x)                    { _vm_result   = x; }
 
-  oop  vm_result_2() const                       { return _vm_result_2; }
-  void set_vm_result_2  (oop x)                  { _vm_result_2   = x; }
+  Metadata*    vm_result_2() const               { return _vm_result_2; }
+  void set_vm_result_2  (Metadata* x)          { _vm_result_2   = x; }
 
   MemRegion deferred_card_mark() const           { return _deferred_card_mark; }
   void set_deferred_card_mark(MemRegion mr)      { _deferred_card_mark = mr;   }
@@ -1331,10 +1344,10 @@ class JavaThread: public Thread {
     return byte_offset_of(JavaThread, _should_post_on_exceptions_flag);
   }
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   static ByteSize satb_mark_queue_offset()       { return byte_offset_of(JavaThread, _satb_mark_queue); }
   static ByteSize dirty_card_queue_offset()      { return byte_offset_of(JavaThread, _dirty_card_queue); }
-#endif // !SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   // Returns the jni environment for this thread
   JNIEnv* jni_environment()                      { return &_jni_environment; }
@@ -1393,10 +1406,13 @@ class JavaThread: public Thread {
   void frames_do(void f(frame*, const RegisterMap*));
 
   // Memory operations
-  void oops_do(OopClosure* f, CodeBlobClosure* cf);
+  void oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf);
 
   // Sweeper operations
   void nmethods_do(CodeBlobClosure* cf);
+
+  // RedefineClasses Support
+  void metadata_do(void f(Metadata*));
 
   // Memory management operations
   void gc_epilogue();
@@ -1428,7 +1444,7 @@ public:
 
   // Returns method at 'depth' java or native frames down the stack
   // Used for security checks
-  klassOop security_get_caller_class(int depth);
+  Klass* security_get_caller_class(int depth);
 
   // Print stack trace in external format
   void print_stack_on(outputStream* st);
@@ -1620,7 +1636,7 @@ public:
     _stack_size_at_create = value;
   }
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   // SATB marking queue support
   ObjPtrQueue& satb_mark_queue() { return _satb_mark_queue; }
   static SATBMarkQueueSet& satb_mark_queue_set() {
@@ -1632,7 +1648,7 @@ public:
   static DirtyCardQueueSet& dirty_card_queue_set() {
     return _dirty_card_queue_set;
   }
-#endif // !SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   // This method initializes the SATB and dirty card queues before a
   // JavaThread is added to the Java thread list. Right now, we don't
@@ -1651,11 +1667,11 @@ public:
   // might happen between the JavaThread constructor being called and the
   // thread being added to the Java thread list (an example of this is
   // when the structure for the DestroyJavaVM thread is created).
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   void initialize_queues();
-#else // !SERIALGC
+#else  // INCLUDE_ALL_GCS
   void initialize_queues() { }
-#endif // !SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   // Machine dependent stuff
 #ifdef TARGET_OS_ARCH_linux_x86
@@ -1814,7 +1830,7 @@ class CompilerThread : public JavaThread {
   // GC support
   // Apply "f->do_oop" to all root oops in "this".
   // Apply "cf->do_code_blob" (if !NULL) to all code blobs active in frames
-  void oops_do(OopClosure* f, CodeBlobClosure* cf);
+  void oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf);
 
 #ifndef PRODUCT
 private:
@@ -1849,6 +1865,9 @@ class Threads: AllStatic {
   static int         _number_of_threads;
   static int         _number_of_non_daemon_threads;
   static int         _return_code;
+#ifdef ASSERT
+  static bool        _vm_complete;
+#endif
 
  public:
   // Thread management
@@ -1878,9 +1897,9 @@ class Threads: AllStatic {
 
   // Apply "f->do_oop" to all root oops in all threads.
   // This version may only be called by sequential code.
-  static void oops_do(OopClosure* f, CodeBlobClosure* cf);
+  static void oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf);
   // This version may be called by sequential or parallel code.
-  static void possibly_parallel_oops_do(OopClosure* f, CodeBlobClosure* cf);
+  static void possibly_parallel_oops_do(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf);
   // This creates a list of GCTasks, one per thread.
   static void create_thread_roots_tasks(GCTaskQueue* q);
   // This creates a list of GCTasks, one per thread, for marking objects.
@@ -1896,8 +1915,14 @@ class Threads: AllStatic {
   // Sweeper
   static void nmethods_do(CodeBlobClosure* cf);
 
+  // RedefineClasses support
+  static void metadata_do(void f(Metadata*));
+
   static void gc_epilogue();
   static void gc_prologue();
+#ifdef ASSERT
+  static bool is_vm_complete() { return _vm_complete; }
+#endif
 
   // Verification
   static void verify();

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2006, 2012, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2006, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -19,7 +19,7 @@
 # Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
 # or visit www.oracle.com if you need additional information or have any
 # questions.
-#  
+#
 #
 
 # The common definitions for hotspot linux builds.
@@ -29,8 +29,14 @@
 SLASH_JAVA ?= /java
 
 # Need PLATFORM (os-arch combo names) for jdk and hotspot, plus libarch name
-ARCH:=$(shell uname -m)
-PATH_SEP = :
+
+# ARCH can be set explicitly in spec.gmk
+ifndef ARCH
+  ARCH := $(shell uname -m)
+endif
+
+PATH_SEP ?= :
+
 ifeq ($(LP64), 1)
   ARCH_DATA_MODEL ?= 64
 else
@@ -72,8 +78,8 @@ ifeq ($(ARCH), sparc64)
   HS_ARCH            = sparc
 endif
 
-# x86_64
-ifeq ($(ARCH), x86_64) 
+# amd64/x86_64
+ifneq (,$(findstring $(ARCH), amd64 x86_64))
   ifeq ($(ARCH_DATA_MODEL), 64)
     ARCH_DATA_MODEL = 64
     MAKE_ARGS       += LP64=1
@@ -86,12 +92,12 @@ ifeq ($(ARCH), x86_64)
     VM_PLATFORM     = linux_i486
     HS_ARCH         = x86
     # We have to reset ARCH to i686 since SRCARCH relies on it
-    ARCH            = i686   
+    ARCH            = i686
   endif
 endif
 
-# i686
-ifeq ($(ARCH), i686)
+# i686/i586 ie 32-bit x86
+ifneq (,$(findstring $(ARCH), i686 i586))
   ARCH_DATA_MODEL  = 32
   PLATFORM         = linux-i586
   VM_PLATFORM      = linux_i486
@@ -234,9 +240,6 @@ JDK_INCLUDE_SUBDIR=linux
 # Library suffix
 LIBRARY_SUFFIX=so
 
-# FIXUP: The subdirectory for a debug build is NOT the same on all platforms
-VM_DEBUG=jvmg
-
 EXPORT_LIST += $(EXPORT_DOCS_DIR)/platform/jvmti/jvmti.html
 
 # client and server subdirectories have symbolic links to ../libjsig.so
@@ -250,6 +253,7 @@ ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
 endif
 EXPORT_SERVER_DIR = $(EXPORT_JRE_LIB_ARCH_DIR)/server
 EXPORT_CLIENT_DIR = $(EXPORT_JRE_LIB_ARCH_DIR)/client
+EXPORT_MINIMAL_DIR = $(EXPORT_JRE_LIB_ARCH_DIR)/minimal
 
 ifeq ($(findstring true, $(JVM_VARIANT_SERVER) $(JVM_VARIANT_ZERO) $(JVM_VARIANT_ZEROSHARK)), true)
   EXPORT_LIST += $(EXPORT_SERVER_DIR)/Xusage.txt
@@ -272,15 +276,28 @@ ifeq ($(JVM_VARIANT_CLIENT),true)
     else
       EXPORT_LIST += $(EXPORT_CLIENT_DIR)/libjvm.debuginfo
     endif
-  endif 
+  endif
+endif
+
+ifeq ($(JVM_VARIANT_MINIMAL1),true)
+  EXPORT_LIST += $(EXPORT_MINIMAL_DIR)/Xusage.txt
+  EXPORT_LIST += $(EXPORT_MINIMAL_DIR)/libjvm.$(LIBRARY_SUFFIX)
+
+  ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
+    ifeq ($(ZIP_DEBUGINFO_FILES),1)
+	EXPORT_LIST += $(EXPORT_MINIMAL_DIR)/libjvm.diz
+    else
+	EXPORT_LIST += $(EXPORT_MINIMAL_DIR)/libjvm.debuginfo
+    endif
+  endif
 endif
 
 # Serviceability Binaries
 # No SA Support for PPC, IA64, ARM or zero
 ADD_SA_BINARIES/x86   = $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.$(LIBRARY_SUFFIX) \
-                        $(EXPORT_LIB_DIR)/sa-jdi.jar 
+                        $(EXPORT_LIB_DIR)/sa-jdi.jar
 ADD_SA_BINARIES/sparc = $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.$(LIBRARY_SUFFIX) \
-                        $(EXPORT_LIB_DIR)/sa-jdi.jar 
+                        $(EXPORT_LIB_DIR)/sa-jdi.jar
 ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
   ifeq ($(ZIP_DEBUGINFO_FILES),1)
     ADD_SA_BINARIES/x86   += $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.diz
@@ -290,10 +307,10 @@ ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
     ADD_SA_BINARIES/sparc += $(EXPORT_JRE_LIB_ARCH_DIR)/libsaproc.debuginfo
   endif
 endif
-ADD_SA_BINARIES/ppc   = 
-ADD_SA_BINARIES/ia64  = 
-ADD_SA_BINARIES/arm   = 
-ADD_SA_BINARIES/zero  = 
+ADD_SA_BINARIES/ppc   =
+ADD_SA_BINARIES/ia64  =
+ADD_SA_BINARIES/arm   =
+ADD_SA_BINARIES/zero  =
 
 -include $(HS_ALT_MAKE)/linux/makefiles/defs.make
 

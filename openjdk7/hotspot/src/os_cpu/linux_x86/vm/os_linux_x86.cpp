@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
  */
 
 // no precompiled headers
-#include "assembler_x86.inline.hpp"
+#include "asm/macroAssembler.hpp"
 #include "classfile/classLoader.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/vmSymbols.hpp"
@@ -33,7 +33,6 @@
 #include "jvm_linux.h"
 #include "memory/allocation.inline.hpp"
 #include "mutex_linux.inline.hpp"
-#include "nativeInst_x86.hpp"
 #include "os_share_linux.hpp"
 #include "prims/jniFastGetField.hpp"
 #include "prims/jvm.h"
@@ -48,8 +47,8 @@
 #include "runtime/osThread.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/timer.hpp"
-#include "thread_linux.inline.hpp"
 #include "utilities/events.hpp"
 #include "utilities/vmError.hpp"
 
@@ -94,6 +93,10 @@ address os::current_stack_pointer() {
   register void *esp;
   __asm__("mov %%"SPELL_REG_SP", %0":"=r"(esp));
   return (address) ((char*)esp + sizeof(long)*2);
+#elif defined(__clang__)
+  intptr_t* esp;
+  __asm__ __volatile__ ("mov %%"SPELL_REG_SP", %0":"=r"(esp):);
+  return (address) esp;
 #else
   register void *esp __asm__ (SPELL_REG_SP);
   return (address) esp;
@@ -176,6 +179,9 @@ intptr_t* _get_previous_fp() {
 #ifdef SPARC_WORKS
   register intptr_t **ebp;
   __asm__("mov %%"SPELL_REG_FP", %0":"=r"(ebp));
+#elif defined(__clang__)
+  intptr_t **ebp;
+  __asm__ __volatile__ ("mov %%"SPELL_REG_FP", %0":"=r"(ebp):);
 #else
   register intptr_t **ebp __asm__ (SPELL_REG_FP);
 #endif
@@ -190,7 +196,7 @@ frame os::current_frame() {
                 CAST_FROM_FN_PTR(address, os::current_frame));
   if (os::is_first_C_frame(&myframe)) {
     // stack is not walkable
-    return frame(NULL, NULL, NULL);
+    return frame();
   } else {
     return os::get_sender_for_C_frame(&myframe);
   }
@@ -202,13 +208,6 @@ frame os::current_frame() {
 enum {
   trap_page_fault = 0xE
 };
-
-extern "C" void Fetch32PFI () ;
-extern "C" void Fetch32Resume () ;
-#ifdef AMD64
-extern "C" void FetchNPFI () ;
-extern "C" void FetchNResume () ;
-#endif // AMD64
 
 extern "C" JNIEXPORT int
 JVM_handle_linux_signal(int sig,
@@ -272,14 +271,18 @@ JVM_handle_linux_signal(int sig,
   if (info != NULL && uc != NULL && thread != NULL) {
     pc = (address) os::Linux::ucontext_get_pc(uc);
 
-    if (pc == (address) Fetch32PFI) {
-       uc->uc_mcontext.gregs[REG_PC] = intptr_t(Fetch32Resume) ;
-       return 1 ;
+    if (StubRoutines::is_safefetch_fault(pc)) {
+      uc->uc_mcontext.gregs[REG_PC] = intptr_t(StubRoutines::continuation_for_safefetch_fault(pc));
+      return 1;
     }
-#ifdef AMD64
-    if (pc == (address) FetchNPFI) {
-       uc->uc_mcontext.gregs[REG_PC] = intptr_t (FetchNResume) ;
-       return 1 ;
+
+#ifndef AMD64
+    // Halt if SI_KERNEL before more crashes get misdiagnosed as Java bugs
+    // This can happen in any running code (currently more frequently in
+    // interpreter code but has been seen in compiled code)
+    if (sig == SIGSEGV && info->si_addr == 0 && info->si_code == SI_KERNEL) {
+      fatal("An irrecoverable SI_KERNEL SIGSEGV has occurred due "
+            "to unstable signal handling in this distribution.");
     }
 #endif // AMD64
 
@@ -341,7 +344,7 @@ JVM_handle_linux_signal(int sig,
         // here if the underlying file has been truncated.
         // Do not crash the VM in such a case.
         CodeBlob* cb = CodeCache::find_blob_unsafe(pc);
-        nmethod* nm = cb->is_nmethod() ? (nmethod*)cb : NULL;
+        nmethod* nm = (cb != NULL && cb->is_nmethod()) ? (nmethod*)cb : NULL;
         if (nm != NULL && nm->has_unsafe_access()) {
           stub = StubRoutines::handler_for_unsafe_access();
         }
@@ -711,7 +714,7 @@ static void current_stack_region(address * bottom, size_t * size) {
      // JVM needs to know exact stack location, abort if it fails
      if (rslt != 0) {
        if (rslt == ENOMEM) {
-         vm_exit_out_of_memory(0, "pthread_getattr_np");
+         vm_exit_out_of_memory(0, OOM_MMAP_ERROR, "pthread_getattr_np");
        } else {
          fatal(err_msg("pthread_getattr_np failed with errno = %d", rslt));
        }

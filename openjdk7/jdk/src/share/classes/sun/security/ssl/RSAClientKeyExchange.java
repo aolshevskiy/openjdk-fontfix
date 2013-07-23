@@ -28,10 +28,8 @@ package sun.security.ssl;
 
 import java.io.*;
 import java.security.*;
-import java.security.interfaces.*;
 
 import javax.crypto.*;
-import javax.crypto.spec.*;
 
 import javax.net.ssl.*;
 
@@ -247,7 +245,7 @@ final class RSAClientKeyExchange extends HandshakeMessage {
         }
 
         if (debug != null && Debug.isOn("handshake") &&
-                    failoverException != null) {
+                        failoverException != null) {
             System.out.println("Error decrypting premaster secret:");
             failoverException.printStackTrace(System.out);
         }

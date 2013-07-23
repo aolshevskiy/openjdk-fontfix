@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2008, 2009, 2010 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -75,7 +75,7 @@ void SharkStack::initialize(Value* method) {
   _method_slot_offset = offset++;
   if (setup_sp_and_method) {
     builder()->CreateStore(
-      method, slot_addr(method_slot_offset(), SharkType::methodOop_type()));
+      method, slot_addr(method_slot_offset(), SharkType::Method_type()));
   }
 
   // Unextended SP
@@ -163,7 +163,7 @@ Value* SharkStack::CreatePopFrame(int result_slots) {
 }
 
 Value* SharkStack::slot_addr(int         offset,
-                             const Type* type,
+                             Type* type,
                              const char* name) const {
   bool needs_cast = type && type != SharkType::intptr_type();
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@ package com.sun.xml.internal.ws.client.dispatch;
 
 import com.sun.xml.internal.ws.api.addressing.WSEndpointReference;
 import com.sun.xml.internal.ws.api.message.Packet;
+import com.sun.xml.internal.ws.api.message.saaj.SAAJFactory;
 import com.sun.xml.internal.ws.api.pipe.Tube;
 import com.sun.xml.internal.ws.api.client.WSPortInfo;
 import com.sun.xml.internal.ws.binding.BindingImpl;
@@ -73,7 +74,7 @@ public class SOAPMessageDispatch extends com.sun.xml.internal.ws.client.dispatch
             MimeHeader mh = (MimeHeader) iter.next();
             ch.add(mh.getName(), mh.getValue());
         }
-        Packet packet = new Packet(new SAAJMessage(arg));
+        Packet packet = new Packet(SAAJFactory.create(arg));
         packet.invocationProperties.put(MessageContext.HTTP_REQUEST_HEADERS, ch);
         return packet;
     }

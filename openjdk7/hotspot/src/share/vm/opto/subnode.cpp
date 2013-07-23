@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -664,9 +664,7 @@ const Type *CmpPNode::sub( const Type *t1, const Type *t2 ) const {
       // See if neither subclasses the other, or if the class on top
       // is precise.  In either of these cases, the compare is known
       // to fail if at least one of the pointers is provably not null.
-      if (klass0->equals(klass1)   ||   // if types are unequal but klasses are
-          !klass0->is_java_klass() ||   // types not part of Java language?
-          !klass1->is_java_klass()) {   // types not part of Java language?
+      if (klass0->equals(klass1)) {  // if types are unequal but klasses are equal
         // Do nothing; we know nothing for imprecise types
       } else if (klass0->is_subtype_of(klass1)) {
         // If klass1's type is PRECISE, then classes are unrelated.
@@ -744,7 +742,7 @@ static inline Node* isa_const_java_mirror(PhaseGVN* phase, Node* n) {
   }
 
   // return the ConP(Foo.klass)
-  assert(mirror_type->is_klass(), "mirror_type should represent a klassOop");
+  assert(mirror_type->is_klass(), "mirror_type should represent a Klass*");
   return phase->makecon(TypeKlassPtr::make(mirror_type->as_klass()));
 }
 
@@ -791,7 +789,7 @@ Node *CmpPNode::Ideal( PhaseGVN *phase, bool can_reshape ) {
 
   // Now check for LoadKlass on left.
   Node* ldk1 = in(1);
-  if (ldk1->is_DecodeN()) {
+  if (ldk1->is_DecodeNKlass()) {
     ldk1 = ldk1->in(1);
     if (ldk1->Opcode() != Op_LoadNKlass )
       return NULL;
@@ -816,7 +814,7 @@ Node *CmpPNode::Ideal( PhaseGVN *phase, bool can_reshape ) {
 
   // Check for a LoadKlass from primary supertype array.
   // Any nested loadklass from loadklass+con must be from the p.s. array.
-  if (ldk2->is_DecodeN()) {
+  if (ldk2->is_DecodeNKlass()) {
     // Keep ldk2 as DecodeN since it could be used in CmpP below.
     if (ldk2->in(1)->Opcode() != Op_LoadNKlass )
       return NULL;
@@ -865,10 +863,11 @@ const Type *CmpNNode::sub( const Type *t1, const Type *t2 ) const {
   const TypePtr *r1 = t2->make_ptr();
 
   // Undefined inputs makes for an undefined result
-  if( TypePtr::above_centerline(r0->_ptr) ||
-      TypePtr::above_centerline(r1->_ptr) )
+  if ((r0 == NULL) || (r1 == NULL) ||
+      TypePtr::above_centerline(r0->_ptr) ||
+      TypePtr::above_centerline(r1->_ptr)) {
     return Type::TOP;
-
+  }
   if (r0 == r1 && r0->singleton()) {
     // Equal pointer constants (klasses, nulls, etc.)
     return TypeInt::CC_EQ;
@@ -891,9 +890,7 @@ const Type *CmpNNode::sub( const Type *t1, const Type *t2 ) const {
       // See if neither subclasses the other, or if the class on top
       // is precise.  In either of these cases, the compare is known
       // to fail if at least one of the pointers is provably not null.
-      if (klass0->equals(klass1)   ||   // if types are unequal but klasses are
-          !klass0->is_java_klass() ||   // types not part of Java language?
-          !klass1->is_java_klass()) {   // types not part of Java language?
+      if (klass0->equals(klass1)) { // if types are unequal but klasses are equal
         // Do nothing; we know nothing for imprecise types
       } else if (klass0->is_subtype_of(klass1)) {
         // If klass1's type is PRECISE, then classes are unrelated.
@@ -1080,16 +1077,6 @@ uint BoolNode::size_of() const { return sizeof(BoolNode); }
 uint BoolNode::cmp( const Node &n ) const {
   const BoolNode *b = (const BoolNode *)&n; // Cast up
   return (_test._test == b->_test._test);
-}
-
-//------------------------------clone_cmp--------------------------------------
-// Clone a compare/bool tree
-static Node *clone_cmp( Node *cmp, Node *cmp1, Node *cmp2, PhaseGVN *gvn, BoolTest::mask test ) {
-  Node *ncmp = cmp->clone();
-  ncmp->set_req(1,cmp1);
-  ncmp->set_req(2,cmp2);
-  ncmp = gvn->transform( ncmp );
-  return new (gvn->C) BoolNode( ncmp, test );
 }
 
 //-------------------------------make_predicate--------------------------------

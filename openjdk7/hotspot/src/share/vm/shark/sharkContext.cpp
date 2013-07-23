@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2009, 2010 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -29,6 +29,7 @@
 #include "shark/llvmHeaders.hpp"
 #include "shark/sharkContext.hpp"
 #include "utilities/globalDefinitions.hpp"
+#include "memory/allocation.hpp"
 
 using namespace llvm;
 
@@ -52,6 +53,9 @@ SharkContext::SharkContext(const char* name)
   _itableOffsetEntry_type = PointerType::getUnqual(
     ArrayType::get(jbyte_type(), itableOffsetEntry::size() * wordSize));
 
+  _Metadata_type = PointerType::getUnqual(
+    ArrayType::get(jbyte_type(), sizeof(Metadata)));
+
   _klass_type = PointerType::getUnqual(
     ArrayType::get(jbyte_type(), sizeof(Klass)));
 
@@ -61,8 +65,8 @@ SharkContext::SharkContext(const char* name)
   _jniHandleBlock_type = PointerType::getUnqual(
     ArrayType::get(jbyte_type(), sizeof(JNIHandleBlock)));
 
-  _methodOop_type = PointerType::getUnqual(
-    ArrayType::get(jbyte_type(), sizeof(methodOopDesc)));
+  _Method_type = PointerType::getUnqual(
+    ArrayType::get(jbyte_type(), sizeof(Method)));
 
   _monitor_type = ArrayType::get(
     jbyte_type(), frame::interpreter_frame_monitor_size() * wordSize);
@@ -76,14 +80,14 @@ SharkContext::SharkContext(const char* name)
   _zeroStack_type = PointerType::getUnqual(
     ArrayType::get(jbyte_type(), sizeof(ZeroStack)));
 
-  std::vector<const Type*> params;
-  params.push_back(methodOop_type());
+  std::vector<Type*> params;
+  params.push_back(Method_type());
   params.push_back(intptr_type());
   params.push_back(thread_type());
   _entry_point_type = FunctionType::get(jint_type(), params, false);
 
   params.clear();
-  params.push_back(methodOop_type());
+  params.push_back(Method_type());
   params.push_back(PointerType::getUnqual(jbyte_type()));
   params.push_back(intptr_type());
   params.push_back(thread_type());
@@ -150,7 +154,7 @@ SharkContext::SharkContext(const char* name)
   }
 }
 
-class SharkFreeQueueItem : public CHeapObj {
+class SharkFreeQueueItem : public CHeapObj<mtNone> {
  public:
   SharkFreeQueueItem(llvm::Function* function, SharkFreeQueueItem *next)
     : _function(function), _next(next) {}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -453,9 +453,10 @@ public class Throwable implements Serializable {
      */
     public synchronized Throwable initCause(Throwable cause) {
         if (this.cause != this)
-            throw new IllegalStateException("Can't overwrite cause");
+            throw new IllegalStateException("Can't overwrite cause with " +
+                                            Objects.toString(cause, "a null"), this);
         if (cause == this)
-            throw new IllegalArgumentException("Self-causation not permitted");
+            throw new IllegalArgumentException("Self-causation not permitted", this);
         this.cause = cause;
         return this;
     }
@@ -625,7 +626,7 @@ public class Throwable implements Serializable {
      *          at Resource2.close(Resource2.java:20)
      *          at Foo4.main(Foo4.java:5)
      *  Caused by: java.lang.Exception: Rats, you caught me
-     *          at Resource2$CloseFailException.<init>(Resource2.java:45)
+     *          at Resource2$CloseFailException.&lt;init&gt;(Resource2.java:45)
      *          ... 2 more
      * </pre>
      */
@@ -1039,7 +1040,7 @@ public class Throwable implements Serializable {
      */
     public final synchronized void addSuppressed(Throwable exception) {
         if (exception == this)
-            throw new IllegalArgumentException(SELF_SUPPRESSION_MESSAGE);
+            throw new IllegalArgumentException(SELF_SUPPRESSION_MESSAGE, exception);
 
         if (exception == null)
             throw new NullPointerException(NULL_CAUSE_MESSAGE);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2008, 2009 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -26,7 +26,7 @@
 #ifndef CPU_ZERO_VM_SHARKFRAME_ZERO_HPP
 #define CPU_ZERO_VM_SHARKFRAME_ZERO_HPP
 
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "stack_zero.hpp"
 
 // |  ...               |
@@ -68,12 +68,16 @@ class SharkFrame : public ZeroFrame {
     return (address) value_of_word(pc_off);
   }
 
+  void set_pc(address pc) const {
+    *((address*) addr_of_word(pc_off)) = pc;
+  }
+
   intptr_t* unextended_sp() const {
     return (intptr_t *) value_of_word(unextended_sp_off);
   }
 
-  methodOop method() const {
-    return (methodOop) value_of_word(method_off);
+  Method* method() const {
+    return (Method*) value_of_word(method_off);
   }
 
  public:

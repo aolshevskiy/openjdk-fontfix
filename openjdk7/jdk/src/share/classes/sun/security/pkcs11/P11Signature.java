@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,6 +41,7 @@ import sun.security.rsa.RSAPadding;
 
 import sun.security.pkcs11.wrapper.*;
 import static sun.security.pkcs11.wrapper.PKCS11Constants.*;
+import sun.security.util.KeyUtil;
 
 /**
  * Signature implementation class. This class currently supports the
@@ -53,12 +54,14 @@ import static sun.security.pkcs11.wrapper.PKCS11Constants.*;
  *   . MD2withRSA
  *   . MD5withRSA
  *   . SHA1withRSA
+ *   . SHA224withRSA
  *   . SHA256withRSA
  *   . SHA384withRSA
  *   . SHA512withRSA
  * . ECDSA
  *   . NONEwithECDSA
  *   . SHA1withECDSA
+ *   . SHA224withECDSA
  *   . SHA256withECDSA
  *   . SHA384withECDSA
  *   . SHA512withECDSA
@@ -143,6 +146,7 @@ final class P11Signature extends SignatureSpi {
         case (int)CKM_MD2_RSA_PKCS:
         case (int)CKM_MD5_RSA_PKCS:
         case (int)CKM_SHA1_RSA_PKCS:
+        case (int)CKM_SHA224_RSA_PKCS:
         case (int)CKM_SHA256_RSA_PKCS:
         case (int)CKM_SHA384_RSA_PKCS:
         case (int)CKM_SHA512_RSA_PKCS:
@@ -181,6 +185,8 @@ final class P11Signature extends SignatureSpi {
                 String digestAlg;
                 if (algorithm.equals("SHA1withECDSA")) {
                     digestAlg = "SHA-1";
+                } else if (algorithm.equals("SHA224withECDSA")) {
+                    digestAlg = "SHA-224";
                 } else if (algorithm.equals("SHA256withECDSA")) {
                     digestAlg = "SHA-256";
                 } else if (algorithm.equals("SHA384withECDSA")) {
@@ -207,6 +213,9 @@ final class P11Signature extends SignatureSpi {
             } else if (algorithm.equals("MD2withRSA")) {
                 md = MessageDigest.getInstance("MD2");
                 digestOID = AlgorithmId.MD2_oid;
+            } else if (algorithm.equals("SHA224withRSA")) {
+                md = MessageDigest.getInstance("SHA-224");
+                digestOID = AlgorithmId.SHA224_oid;
             } else if (algorithm.equals("SHA256withRSA")) {
                 md = MessageDigest.getInstance("SHA-256");
                 digestOID = AlgorithmId.SHA256_oid;
@@ -332,6 +341,8 @@ final class P11Signature extends SignatureSpi {
             encodedLength = 34;
         } else if (algorithm.equals("SHA1withRSA")) {
             encodedLength = 35;
+        } else if (algorithm.equals("SHA224withRSA")) {
+            encodedLength = 47;
         } else if (algorithm.equals("SHA256withRSA")) {
             encodedLength = 51;
         } else if (algorithm.equals("SHA384withRSA")) {
@@ -396,7 +407,7 @@ final class P11Signature extends SignatureSpi {
         ensureInitialized();
         switch (type) {
         case T_UPDATE:
-            buffer[0] = (byte)b;
+            buffer[0] = b;
             engineUpdate(buffer, 0, 1);
             break;
         case T_DIGEST:
@@ -687,8 +698,8 @@ final class P11Signature extends SignatureSpi {
             BigInteger r = values[0].getPositiveBigInteger();
             BigInteger s = values[1].getPositiveBigInteger();
             // trim leading zeroes
-            byte[] br = P11Util.trimZeroes(r.toByteArray());
-            byte[] bs = P11Util.trimZeroes(s.toByteArray());
+            byte[] br = KeyUtil.trimZeroes(r.toByteArray());
+            byte[] bs = KeyUtil.trimZeroes(s.toByteArray());
             int k = Math.max(br.length, bs.length);
             // r and s each occupy half the array
             byte[] res = new byte[k << 1];

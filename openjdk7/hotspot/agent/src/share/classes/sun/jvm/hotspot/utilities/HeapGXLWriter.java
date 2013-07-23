@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -179,7 +179,7 @@ public class HeapGXLWriter extends AbstractHeapGraphWriter {
                 writeAttribute("object-size", "int",
                                Long.toString(sizeInBytes));
                 // write static fields of this class.
-                writeObjectFields(reflectedType);
+                writeObjectFields((InstanceKlass)reflectedType);
             }
         }
         out.println("</node>");
@@ -193,10 +193,10 @@ public class HeapGXLWriter extends AbstractHeapGraphWriter {
             if (isInstanceKlass) {
                 // write edges for directly implemented interfaces
                 InstanceKlass ik = (InstanceKlass) reflectedType;
-                ObjArray interfaces = ik.getLocalInterfaces();
-                final int len = (int) interfaces.getLength();
+                KlassArray interfaces = ik.getLocalInterfaces();
+                final int len = interfaces.length();
                 for (int i = 0; i < len; i++) {
-                    Klass k = (Klass) interfaces.getObjAt(i);
+                    Klass k = interfaces.getAt(i);
                     writeEdge(instance, k.getJavaMirror(), "implements");
                 }
 
@@ -204,13 +204,13 @@ public class HeapGXLWriter extends AbstractHeapGraphWriter {
                 Oop loader = ik.getClassLoader();
                 writeEdge(instance, loader, "loaded-by");
 
-                // write signers
-                Oop signers = ik.getSigners();
-                writeEdge(instance, signers, "signed-by");
+                // write signers NYI
+                // Oop signers = ik.getJavaMirror().getSigners();
+                writeEdge(instance, null, "signed-by");
 
-                // write protection domain
-                Oop protectionDomain = ik.getProtectionDomain();
-                writeEdge(instance, protectionDomain, "protection-domain");
+                // write protection domain NYI
+                // Oop protectionDomain = ik.getJavaMirror().getProtectionDomain();
+                writeEdge(instance, null, "protection-domain");
 
                 // write edges for static reference fields from this class
                 for (Iterator itr = refFields.iterator(); itr.hasNext();) {

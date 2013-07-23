@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@ import com.sun.istack.internal.Nullable;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.api.pipe.Fiber;
 import com.sun.xml.internal.ws.api.pipe.NextAction;
+import com.sun.xml.internal.ws.api.pipe.ThrowableContainerPropertySet;
 import com.sun.xml.internal.ws.api.pipe.Tube;
 import com.sun.xml.internal.ws.api.server.AsyncProvider;
 import com.sun.xml.internal.ws.api.server.AsyncProviderCallback;
@@ -45,6 +46,7 @@ import java.util.logging.Logger;
  *
  * @author Jitendra Kotamraju
  */
+public // TODO needed by factory
 class AsyncProviderInvokerTube<T> extends ProviderInvokerTube<T> {
 
     private static final Logger LOGGER = Logger.getLogger(
@@ -62,28 +64,71 @@ class AsyncProviderInvokerTube<T> extends ProviderInvokerTube<T> {
     */
     public @NotNull NextAction processRequest(@NotNull Packet request) {
         T param = argsBuilder.getParameter(request);
-        AsyncProviderCallback callback = new AsyncProviderInvokerTube.AsyncProviderCallbackImpl(request);
+        NoSuspendResumer resumer = new NoSuspendResumer();
+        @SuppressWarnings({ "rawtypes", "unchecked" })
+                AsyncProviderCallbackImpl callback = new AsyncProviderInvokerTube.AsyncProviderCallbackImpl(request, resumer);
         AsyncWebServiceContext ctxt = new AsyncWebServiceContext(getEndpoint(),request);
 
         AsyncProviderInvokerTube.LOGGER.fine("Invoking AsyncProvider Endpoint");
         try {
             getInvoker(request).invokeAsyncProvider(request, param, callback, ctxt);
-        } catch(Exception e) {
+        } catch(Throwable e) {
             LOGGER.log(Level.SEVERE, e.getMessage(), e);
             return doThrow(e);
         }
-        // Suspend the Fiber. AsyncProviderCallback will resume the Fiber after
-        // it receives response.
-        return doSuspend();
+
+        synchronized(callback) {
+                if (resumer.response != null) {
+                // Only used by AsyncProvider<Packet>
+                // Implementation may pass Packet containing throwable; use both
+                    ThrowableContainerPropertySet tc = resumer.response.getSatellite(ThrowableContainerPropertySet.class);
+                    Throwable t = (tc != null) ? tc.getThrowable() : null;
+
+                        return t != null ? doThrow(resumer.response, t) : doReturnWith(resumer.response);
+                }
+
+                // Suspend the Fiber. AsyncProviderCallback will resume the Fiber after
+                // it receives response.
+                callback.resumer = new FiberResumer();
+                return doSuspend();
+        }
     }
 
-    private class AsyncProviderCallbackImpl implements AsyncProviderCallback<T> {
-        private final Packet request;
+    private interface Resumer {
+        public void onResume(Packet response);
+    }
+
+    /*private*/ public class FiberResumer implements Resumer { // TODO public for DISI
         private final Fiber fiber;
 
-        public AsyncProviderCallbackImpl(Packet request) {
-            this.request = request;
+        public FiberResumer() {
             this.fiber = Fiber.current();
+        }
+
+        public void onResume(Packet response) {
+            // Only used by AsyncProvider<Packet>
+            // Implementation may pass Packet containing throwable; use both
+            ThrowableContainerPropertySet tc = response.getSatellite(ThrowableContainerPropertySet.class);
+            Throwable t = (tc != null) ? tc.getThrowable() : null;
+                fiber.resume(t, response);
+        }
+    }
+
+    private class NoSuspendResumer implements Resumer {
+        protected Packet response = null;
+
+                public void onResume(Packet response) {
+                        this.response = response;
+                }
+    }
+
+    /*private*/ public class AsyncProviderCallbackImpl implements AsyncProviderCallback<T> { // TODO public for DISI
+        private final Packet request;
+        private Resumer resumer;
+
+        public AsyncProviderCallbackImpl(Packet request, Resumer resumer) {
+            this.request = request;
+            this.resumer = resumer;
         }
 
         public void send(@Nullable T param) {
@@ -93,28 +138,32 @@ class AsyncProviderInvokerTube<T> extends ProviderInvokerTube<T> {
                 }
             }
             Packet packet = argsBuilder.getResponse(request, param, getEndpoint().getPort(), getEndpoint().getBinding());
-            fiber.resume(packet);
+            synchronized(this) {
+                resumer.onResume(packet);
+            }
         }
 
         public void sendError(@NotNull Throwable t) {
             Exception e;
-            if (t instanceof RuntimeException) {
-                e = (RuntimeException)t;
+            if (t instanceof Exception) {
+                e = (Exception) t;
             } else {
                 e = new RuntimeException(t);
             }
             Packet packet = argsBuilder.getResponse(request, e, getEndpoint().getPort(), getEndpoint().getBinding());
-            fiber.resume(packet);
+            synchronized(this) {
+                resumer.onResume(packet);
+            }
         }
     }
 
     /**
      * The single {@link javax.xml.ws.WebServiceContext} instance injected into application.
      */
-    private static final class AsyncWebServiceContext extends AbstractWebServiceContext {
+    /*private static final*/ public class AsyncWebServiceContext extends AbstractWebServiceContext { // TODO public for DISI
         final Packet packet;
 
-        AsyncWebServiceContext(WSEndpoint endpoint, Packet packet) {
+        public AsyncWebServiceContext(WSEndpoint endpoint, Packet packet) { // TODO public for DISI
             super(endpoint);
             this.packet = packet;
         }
@@ -129,7 +178,7 @@ class AsyncProviderInvokerTube<T> extends ProviderInvokerTube<T> {
     }
 
     public @NotNull NextAction processException(@NotNull Throwable t) {
-        throw new IllegalStateException("AsyncProviderInvokerTube's processException shouldn't be called.");
+        return doThrow(t);
     }
 
 }

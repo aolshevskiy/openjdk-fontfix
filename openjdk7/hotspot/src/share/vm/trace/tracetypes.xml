@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
- Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 
  This code is free software; you can redistribute it and/or modify it
@@ -290,15 +290,15 @@ creating the constant pool data in  VM_JFRCheckpoint::write_checkpoint
     <primary_type symbol="SYMBOL" datatype="U8" contenttype="SYMBOL"
                   type="Symbol *" sizeop="sizeof(u8)"/>
 
-    <!-- A klassOop *. The actual class is marked as "used" and will
+    <!-- A Klass *. The actual class is marked as "used" and will
          eventually be written into the recording constant pool -->
     <primary_type symbol="CLASS" datatype="U8" contenttype="CLASS"
-                  type="klassOop" sizeop="sizeof(u8)"/>
+                  type="Klass *" sizeop="sizeof(u8)"/>
 
-    <!-- A methodOop *. The method is marked as "used" and will eventually be
+    <!-- A Method *. The method is marked as "used" and will eventually be
          written into the recording constant pool. -->
     <primary_type symbol="METHOD" datatype="U8" contenttype="METHOD"
-                  type="methodOop" sizeop="sizeof(u8)"/>
+                  type="Method *" sizeop="sizeof(u8)"/>
 
     <!--  The type for stacktraces in the recording. Shoudl not be used by
           events explicitly -->

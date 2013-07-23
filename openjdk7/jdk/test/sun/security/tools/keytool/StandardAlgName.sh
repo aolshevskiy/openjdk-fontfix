@@ -22,7 +22,7 @@
 #
 
 # @test 1.1 04/11/12
-# @bug 4909889 7083664
+# @bug 4909889
 # @summary KeyTool accepts any input that user make as long as we can make some
 #          sense out of it, but when comes to present the info the user, it
 #          promotes a standard look.

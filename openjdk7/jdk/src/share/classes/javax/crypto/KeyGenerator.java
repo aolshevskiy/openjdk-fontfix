@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -127,7 +127,7 @@ public class KeyGenerator {
 
     private final Object lock = new Object();
 
-    private Iterator serviceIterator;
+    private Iterator<Service> serviceIterator;
 
     private int initType;
     private int initKeySize;
@@ -150,7 +150,8 @@ public class KeyGenerator {
 
     private KeyGenerator(String algorithm) throws NoSuchAlgorithmException {
         this.algorithm = algorithm;
-        List list = GetInstance.getServices("KeyGenerator", algorithm);
+        List<Service> list =
+                GetInstance.getServices("KeyGenerator", algorithm);
         serviceIterator = list.iterator();
         initType = I_NONE;
         // fetch and instantiate initial spi
@@ -320,7 +321,7 @@ public class KeyGenerator {
                 return null;
             }
             while (serviceIterator.hasNext()) {
-                Service s = (Service)serviceIterator.next();
+                Service s = serviceIterator.next();
                 if (JceSecurity.canUseProvider(s.getProvider()) == false) {
                     continue;
                 }
@@ -397,7 +398,7 @@ public class KeyGenerator {
      *
      * <p> If this key generator requires any random bytes, it will get them
      * using the
-     * {@link SecureRandom <code>SecureRandom</code>}
+     * {@link java.security.SecureRandom}
      * implementation of the highest-priority installed
      * provider as the source of randomness.
      * (If none of the installed providers supply an implementation of
@@ -462,7 +463,7 @@ public class KeyGenerator {
      *
      * <p> If this key generator requires any random bytes, it will get them
      * using the
-     * {@link SecureRandom <code>SecureRandom</code>}
+     * {@link java.security.SecureRandom}
      * implementation of the highest-priority installed
      * provider as the source of randomness.
      * (If none of the installed providers supply an implementation of

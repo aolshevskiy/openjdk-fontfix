@@ -1,7 +1,7 @@
 #!/bin/sh
 
 #
-# Copyright (c) 2005, 2008, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -35,11 +35,11 @@
 # A list of resource base name list;
 RESOURCE_NAMES=$1
 
-# A list of European resources;
-EURO_FILES_LIST=$2
+# A list of US resources;
+US_FILES_LIST=$2
 
-# A list of non-European resources;
-NONEURO_FILES_LIST=$3
+# A list of non-US resources;
+NONUS_FILES_LIST=$3
 
 INPUT_FILE=$4
 OUTPUT_FILE=$5
@@ -47,21 +47,29 @@ OUTPUT_FILE=$5
 localelist=
 getlocalelist() {
     localelist=""
-    localelist=`$NAWK -F$1_ '{print $2}' $2 | $SORT`
+    localelist=`$NAWK -F$1_ '{print $2}' $2 | $SORT | $SED -e 's/_/-/g'`
 }
 
-sed_script="$SED -e \"s@^#warn .*@// -- This file was mechanically generated: Do not edit! -- //@\" " 
+sed_script="$SED -e \"s@^#warn .*@// -- This file was mechanically generated: Do not edit! -- //@\" "
 
-# MMM: check two sed script changes below work other platforms than mac
-for FILE in $RESOURCE_NAMES 
+# ja-JP-JP and th-TH-TH need to be manually added, as they don't have any resource files.
+nonusall=" ja-JP-JP th-TH-TH "
+
+for FILE in $RESOURCE_NAMES
 do
-    getlocalelist $FILE $EURO_FILES_LIST
-    sed_script=$sed_script"-e \"s@#"$FILE"_EuroLocales#@$localelist@g\" "
-    getlocalelist $FILE $NONEURO_FILES_LIST
-    sed_script=$sed_script"-e \"s@#"$FILE"_NonEuroLocales#@$localelist@g\" "
+    getlocalelist $FILE $US_FILES_LIST
+    sed_script=$sed_script"-e \"s@#"$FILE"_USLocales#@$localelist@g\" "
+    usall=$usall" "$localelist
+    getlocalelist $FILE $NONUS_FILES_LIST
+    sed_script=$sed_script"-e \"s@#"$FILE"_NonUSLocales#@$localelist@g\" "
+    nonusall=$nonusall" "$localelist
 done
+
+usall=`(for LOC in $usall; do echo $LOC;done) |$SORT -u`
+nonusall=`(for LOC in $nonusall; do echo $LOC;done) |$SORT -u`
+
+sed_script=$sed_script"-e \"s@#AvailableLocales_USLocales#@$usall@g\" "
+sed_script=$sed_script"-e \"s@#AvailableLocales_NonUSLocales#@$nonusall@g\" "
 
 sed_script=$sed_script"$INPUT_FILE > $OUTPUT_FILE"
 eval $sed_script
-
-

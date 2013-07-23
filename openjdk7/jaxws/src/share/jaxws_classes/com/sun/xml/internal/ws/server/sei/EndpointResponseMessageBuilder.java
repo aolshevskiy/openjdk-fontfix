@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,16 +25,16 @@
 
 package com.sun.xml.internal.ws.server.sei;
 
-import com.sun.xml.internal.bind.api.AccessorException;
-import com.sun.xml.internal.bind.api.Bridge;
-import com.sun.xml.internal.bind.api.CompositeStructure;
-import com.sun.xml.internal.bind.api.RawAccessor;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.message.Messages;
 import com.sun.xml.internal.ws.message.jaxb.JAXBMessage;
 import com.sun.xml.internal.ws.model.ParameterImpl;
 import com.sun.xml.internal.ws.model.WrapperParameter;
+import com.sun.xml.internal.ws.spi.db.BindingContext;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+import com.sun.xml.internal.ws.spi.db.PropertyAccessor;
+import com.sun.xml.internal.ws.spi.db.WrapperComposite;
 
 import javax.xml.bind.JAXBException;
 import javax.xml.namespace.QName;
@@ -48,11 +48,11 @@ import java.util.List;
  * @see MessageFiller
  * @author Jitendra Kotamraju
  */
-abstract class EndpointResponseMessageBuilder {
-    abstract Message createMessage(Object[] methodArgs, Object returnValue);
+public abstract class EndpointResponseMessageBuilder {
+    public abstract Message createMessage(Object[] methodArgs, Object returnValue);
 
-    static final EndpointResponseMessageBuilder EMPTY_SOAP11 = new Empty(SOAPVersion.SOAP_11);
-    static final EndpointResponseMessageBuilder EMPTY_SOAP12 = new Empty(SOAPVersion.SOAP_12);
+    public static final EndpointResponseMessageBuilder EMPTY_SOAP11 = new Empty(SOAPVersion.SOAP_11);
+    public static final EndpointResponseMessageBuilder EMPTY_SOAP12 = new Empty(SOAPVersion.SOAP_12);
 
     private static final class Empty extends EndpointResponseMessageBuilder {
         private final SOAPVersion soapVersion;
@@ -61,7 +61,7 @@ abstract class EndpointResponseMessageBuilder {
             this.soapVersion = soapVersion;
         }
 
-        Message createMessage(Object[] methodArgs, Object returnValue) {
+        public Message createMessage(Object[] methodArgs, Object returnValue) {
             return Messages.createEmpty(soapVersion);
         }
     }
@@ -75,16 +75,16 @@ abstract class EndpointResponseMessageBuilder {
          * This object determines the binding of the object returned
          * from {@link #createMessage(Object[], Object)}
          */
-        private final Bridge bridge;
+        private final XMLBridge bridge;
         private final SOAPVersion soapVersion;
 
-        protected JAXB(Bridge bridge, SOAPVersion soapVersion) {
+        protected JAXB(XMLBridge bridge, SOAPVersion soapVersion) {
             assert bridge!=null;
             this.bridge = bridge;
             this.soapVersion = soapVersion;
         }
 
-        final Message createMessage(Object[] methodArgs, Object returnValue) {
+        public final Message createMessage(Object[] methodArgs, Object returnValue) {
             return JAXBMessage.create( bridge, build(methodArgs, returnValue), soapVersion );
         }
 
@@ -98,7 +98,7 @@ abstract class EndpointResponseMessageBuilder {
      * Used to create a payload JAXB object just by taking
      * one of the parameters.
      */
-    final static class Bare extends JAXB {
+    public final static class Bare extends JAXB {
         /**
          * The index of the method invocation parameters that goes into the payload.
          */
@@ -109,8 +109,8 @@ abstract class EndpointResponseMessageBuilder {
         /**
          * Creates a {@link EndpointResponseMessageBuilder} from a bare parameter.
          */
-        Bare(ParameterImpl p, SOAPVersion soapVersion) {
-            super(p.getBridge(), soapVersion);
+        public Bare(ParameterImpl p, SOAPVersion soapVersion) {
+            super(p.getXMLBridge(), soapVersion);
             this.methodPos = p.getIndex();
             this.getter = ValueGetter.get(p);
         }
@@ -143,10 +143,20 @@ abstract class EndpointResponseMessageBuilder {
          */
         protected final ValueGetter[] getters;
 
-        protected Wrapped(WrapperParameter wp, SOAPVersion soapVersion) {
-            super(wp.getBridge(), soapVersion);
+        /**
+         * How does each wrapped parameter binds to XML?
+         */
+        protected XMLBridge[] parameterBridges;
 
-            List<ParameterImpl> children = wp.getWrapperChildren();
+        /**
+         * Used for error diagnostics.
+         */
+        protected List<ParameterImpl> children;
+
+        protected Wrapped(WrapperParameter wp, SOAPVersion soapVersion) {
+            super(wp.getXMLBridge(), soapVersion);
+
+            children = wp.getWrapperChildren();
 
             indices = new int[children.size()];
             getters = new ValueGetter[children.size()];
@@ -156,17 +166,43 @@ abstract class EndpointResponseMessageBuilder {
                 getters[i] = ValueGetter.get(p);
             }
         }
+
+        /**
+         * Packs a bunch of arguments intoa {@link WrapperComposite}.
+         */
+        WrapperComposite buildWrapperComposite(Object[] methodArgs, Object returnValue) {
+            WrapperComposite cs = new WrapperComposite();
+            cs.bridges = parameterBridges;
+            cs.values = new Object[parameterBridges.length];
+
+            // fill in wrapped parameters from methodArgs
+            for( int i=indices.length-1; i>=0; i-- ) {
+                Object v;
+                if (indices[i] == -1) {
+                    v = getters[i].get(returnValue);
+                } else {
+                    v = getters[i].get(methodArgs[indices[i]]);
+                }
+                if(v==null) {
+                    throw new WebServiceException("Method Parameter: "+
+                        children.get(i).getName() +" cannot be null. This is BP 1.1 R2211 violation.");
+                }
+                cs.values[i] = v;
+            }
+
+            return cs;
+        }
     }
 
     /**
      * Used to create a payload JAXB object by wrapping
      * multiple parameters into one "wrapper bean".
      */
-    final static class DocLit extends Wrapped {
+    public final static class DocLit extends Wrapped {
         /**
          * How does each wrapped parameter binds to XML?
          */
-        private final RawAccessor[] accessors;
+        private final PropertyAccessor[] accessors;
 
         //private final RawAccessor retAccessor;
 
@@ -174,38 +210,52 @@ abstract class EndpointResponseMessageBuilder {
          * Wrapper bean.
          */
         private final Class wrapper;
+        private boolean dynamicWrapper;
+
+        /**
+         * Needed to get wrapper instantiation method.
+         */
+        private BindingContext bindingContext;
 
         /**
          * Creates a {@link EndpointResponseMessageBuilder} from a {@link WrapperParameter}.
          */
-        DocLit(WrapperParameter wp, SOAPVersion soapVersion) {
+        public DocLit(WrapperParameter wp, SOAPVersion soapVersion) {
             super(wp, soapVersion);
-
-            wrapper = (Class)wp.getBridge().getTypeReference().type;
-
-            List<ParameterImpl> children = wp.getWrapperChildren();
-
-            accessors = new RawAccessor[children.size()];
+            bindingContext = wp.getOwner().getBindingContext();
+            wrapper = (Class)wp.getXMLBridge().getTypeInfo().type;
+            dynamicWrapper = WrapperComposite.class.equals(wrapper);
+            children = wp.getWrapperChildren();
+            parameterBridges = new XMLBridge[children.size()];
+            accessors = new PropertyAccessor[children.size()];
             for( int i=0; i<accessors.length; i++ ) {
                 ParameterImpl p = children.get(i);
                 QName name = p.getName();
-                try {
-                    accessors[i] = p.getOwner().getJAXBContext().getElementPropertyAccessor(
-                        wrapper, name.getNamespaceURI(), name.getLocalPart() );
-                } catch (JAXBException e) {
-                    throw new WebServiceException(  // TODO: i18n
-                        wrapper+" do not have a property of the name "+name,e);
+                if (dynamicWrapper) {
+                    parameterBridges[i] = children.get(i).getInlinedRepeatedElementBridge();
+                    if (parameterBridges[i] == null) parameterBridges[i] = children.get(i).getXMLBridge();
+                } else {
+                    try {
+                        accessors[i] = (dynamicWrapper) ? null :
+                            p.getOwner().getBindingContext().getElementPropertyAccessor(
+                            wrapper, name.getNamespaceURI(), name.getLocalPart() );
+                    } catch (JAXBException e) {
+                        throw new WebServiceException(  // TODO: i18n
+                            wrapper+" do not have a property of the name "+name,e);
+                    }
                 }
             }
 
         }
 
         /**
-         * Packs a bunch of arguments into a {@link CompositeStructure}.
+         * Packs a bunch of arguments into a {@link WrapperComposite}.
          */
         Object build(Object[] methodArgs, Object returnValue) {
+            if (dynamicWrapper) return buildWrapperComposite(methodArgs, returnValue);
             try {
-                Object bean = wrapper.newInstance();
+                //Object bean = wrapper.newInstance();
+                Object bean = bindingContext.newWrapperInstace(wrapper);
 
                 // fill in wrapped parameters from methodArgs
                 for( int i=indices.length-1; i>=0; i-- ) {
@@ -227,7 +277,7 @@ abstract class EndpointResponseMessageBuilder {
                 Error x = new IllegalAccessError(e.getMessage());
                 x.initCause(e);
                 throw x;
-            } catch (AccessorException e) {
+            } catch (com.sun.xml.internal.ws.spi.db.DatabindingException e) {
                 // this can happen when the set method throw a checked exception or something like that
                 throw new WebServiceException(e);    // TODO:i18n
             }
@@ -237,62 +287,32 @@ abstract class EndpointResponseMessageBuilder {
 
     /**
      * Used to create a payload JAXB object by wrapping
-     * multiple parameters into a {@link CompositeStructure}.
+     * multiple parameters into a {@link WrapperComposite}.
      *
      * <p>
      * This is used for rpc/lit, as we don't have a wrapper bean for it.
      * (TODO: Why don't we have a wrapper bean for this, when doc/lit does!?)
      */
-    final static class RpcLit extends Wrapped {
-        /**
-         * How does each wrapped parameter binds to XML?
-         */
-        private final Bridge[] parameterBridges;
-
-        /**
-         * Used for error diagnostics.
-         */
-        private final List<ParameterImpl> children;
+    public final static class RpcLit extends Wrapped {
 
         /**
          * Creates a {@link EndpointResponseMessageBuilder} from a {@link WrapperParameter}.
          */
-        RpcLit(WrapperParameter wp, SOAPVersion soapVersion) {
+        public RpcLit(WrapperParameter wp, SOAPVersion soapVersion) {
             super(wp, soapVersion);
             // we'll use CompositeStructure to pack requests
-            assert wp.getTypeReference().type==CompositeStructure.class;
+            assert wp.getTypeInfo().type==WrapperComposite.class;
 
-            this.children = wp.getWrapperChildren();
-
-            parameterBridges = new Bridge[children.size()];
+            parameterBridges = new XMLBridge[children.size()];
             for( int i=0; i<parameterBridges.length; i++ )
-                parameterBridges[i] = children.get(i).getBridge();
+                parameterBridges[i] = children.get(i).getXMLBridge();
         }
 
         /**
-         * Packs a bunch of arguments intoa {@link CompositeStructure}.
+         * Packs a bunch of arguments intoa {@link WrapperComposite}.
          */
-        CompositeStructure build(Object[] methodArgs, Object returnValue) {
-            CompositeStructure cs = new CompositeStructure();
-            cs.bridges = parameterBridges;
-            cs.values = new Object[parameterBridges.length];
-
-            // fill in wrapped parameters from methodArgs
-            for( int i=indices.length-1; i>=0; i-- ) {
-                Object v;
-                if (indices[i] == -1) {
-                    v = getters[i].get(returnValue);
-                } else {
-                    v = getters[i].get(methodArgs[indices[i]]);
-                }
-                if(v==null) {
-                    throw new WebServiceException("Method Parameter: "+
-                        children.get(i).getName() +" cannot be null. This is BP 1.1 R2211 violation.");
-                }
-                cs.values[i] = v;
-            }
-
-            return cs;
+        Object build(Object[] methodArgs, Object returnValue) {
+            return buildWrapperComposite(methodArgs, returnValue);
         }
     }
 }

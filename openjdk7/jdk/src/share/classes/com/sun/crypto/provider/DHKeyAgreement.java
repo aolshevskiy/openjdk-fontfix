@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -245,8 +245,7 @@ extends KeyAgreementSpi {
         try {
             engineGenerateSecret(result, 0);
         } catch (ShortBufferException sbe) {
-            // should never happen since secret lengths in the two
-            // methods are identical
+            // should never happen since length are identical
         }
         return result;
     }
@@ -404,8 +403,9 @@ extends KeyAgreementSpi {
             }
             return skey;
         } else if (algorithm.equals("TlsPremasterSecret")) {
-            // return entire secret
-            return new SecretKeySpec(secret, "TlsPremasterSecret");
+            // remove leading zero bytes per RFC 5246 Section 8.1.2
+            return new SecretKeySpec(
+                        KeyUtil.trimZeroes(secret), "TlsPremasterSecret");
         } else {
             throw new NoSuchAlgorithmException("Unsupported secret key "
                                                + "algorithm: "+ algorithm);

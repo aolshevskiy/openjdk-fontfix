@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,6 +29,8 @@ enum EventStartTime {
   UNTIMED,
   TIMED
 };
+
+#include "utilities/macros.hpp"
 
 #if INCLUDE_TRACE
 
@@ -90,7 +92,7 @@ class TraceEvent : public StackObj {
         return;
     }
     if (_endTime == 0) {
-      static_cast<T *>(this)->set_endtime(Tracing::time());
+      static_cast<T*>(this)->set_endtime(Tracing::time());
     }
     if (static_cast<T*>(this)->should_write()) {
       static_cast<T*>(this)->writeEvent();

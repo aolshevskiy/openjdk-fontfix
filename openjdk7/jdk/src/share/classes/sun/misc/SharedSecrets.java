@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,8 +29,6 @@ import java.util.jar.JarFile;
 import java.io.Console;
 import java.io.FileDescriptor;
 import java.security.ProtectionDomain;
-import java.util.zip.Adler32;
-import javax.security.auth.kerberos.KeyTab;
 
 import java.security.AccessController;
 
@@ -54,8 +52,7 @@ public class SharedSecrets {
     private static JavaIOFileDescriptorAccess javaIOFileDescriptorAccess;
     private static JavaSecurityProtectionDomainAccess javaSecurityProtectionDomainAccess;
     private static JavaSecurityAccess javaSecurityAccess;
-    private static JavaxSecurityAuthKerberosAccess javaxSecurityAuthKerberosAccess;
-    private static JavaUtilZipAccess javaUtilZipAccess;
+    private static JavaUtilZipFileAccess javaUtilZipFileAccess;
     private static JavaAWTAccess javaAWTAccess;
 
     public static JavaUtilJarAccess javaUtilJarAccess() {
@@ -156,27 +153,14 @@ public class SharedSecrets {
         return javaSecurityAccess;
     }
 
-    public static void setJavaxSecurityAuthKerberosAccess
-            (JavaxSecurityAuthKerberosAccess jsaka) {
-        javaxSecurityAuthKerberosAccess = jsaka;
+    public static JavaUtilZipFileAccess getJavaUtilZipFileAccess() {
+        if (javaUtilZipFileAccess == null)
+            unsafe.ensureClassInitialized(java.util.zip.ZipFile.class);
+        return javaUtilZipFileAccess;
     }
 
-    public static JavaxSecurityAuthKerberosAccess
-            getJavaxSecurityAuthKerberosAccess() {
-        if (javaxSecurityAuthKerberosAccess == null)
-            unsafe.ensureClassInitialized(KeyTab.class);
-        return javaxSecurityAuthKerberosAccess;
-    }
-
-    public static void setJavaUtilZipAccess(JavaUtilZipAccess access) {
-        javaUtilZipAccess = access;
-    }
-
-    public static JavaUtilZipAccess getJavaUtilZipAccess() {
-        if (javaUtilZipAccess == null) {
-            unsafe.ensureClassInitialized(Adler32.class);
-        }
-        return javaUtilZipAccess;
+    public static void setJavaUtilZipFileAccess(JavaUtilZipFileAccess access) {
+        javaUtilZipFileAccess = access;
     }
 
     public static void setJavaAWTAccess(JavaAWTAccess jaa) {
@@ -186,6 +170,9 @@ public class SharedSecrets {
     public static JavaAWTAccess getJavaAWTAccess() {
         // this may return null in which case calling code needs to
         // provision for.
+        if (javaAWTAccess == null || javaAWTAccess.getContext() == null) {
+            return null;
+        }
         return javaAWTAccess;
     }
 }

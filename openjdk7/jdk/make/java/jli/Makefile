@@ -153,10 +153,10 @@ ifeq ($(PLATFORM), windows)
               -export:JLI_ReportErrorMessageSys \
               -export:JLI_ReportMessage \
               -export:JLI_ReportExceptionDescription \
-              -export:JLI_MemAlloc \
-              -export:JLI_CmdToArgs \
-              -export:JLI_GetStdArgc \
-              -export:JLI_GetStdArgs
+	      -export:JLI_MemAlloc \
+	      -export:JLI_CmdToArgs \
+	      -export:JLI_GetStdArgc \
+	      -export:JLI_GetStdArgs
 endif # PLATFORM
 
 OTHER_INCLUDES += -I$(LAUNCHER_SHARE_SRC)
@@ -190,7 +190,7 @@ ifeq ($(PLATFORM), windows)
 
   $(STATIC_LIBRARY): $(FILES_o)
 	@$(prep-target)
-	$(LIBEXE) -nologo -out:$@ $(FILES_o)
+	$(LIBEXE) -nologo -out:$@ $(sort $(FILES_o))
 
   library:: $(STATIC_LIBRARY)
 endif # PLATFORM
@@ -216,7 +216,7 @@ $(STATIC_LIBRARY_DIR): | $(OBJDIR)
 
 $(STATIC_LIBRARY): $(STATIC_LIBRARY_DIR)
 	@$(prep-target)
-	$(AR) $(ARFLAGS) $@ $(FILES_o)
+	$(AR) $(ARFLAGS) $@ $(sort $(FILES_o))
 
 library:: $(STATIC_LIBRARY)
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,13 +44,11 @@ readSingle(JNIEnv *env, jobject this, jfieldID fid) {
         JNU_ThrowIOException(env, "Stream Closed");
         return -1;
     }
-    nread = (jint)IO_Read(fd, &ret, 1);
+    nread = IO_Read(fd, &ret, 1);
     if (nread == 0) { /* EOF */
         return -1;
-    } else if (nread == JVM_IO_ERR) { /* error */
+    } else if (nread == -1) { /* error */
         JNU_ThrowIOExceptionWithLastError(env, "Read error");
-    } else if (nread == JVM_IO_INTR) {
-        JNU_ThrowByName(env, "java/io/InterruptedIOException", NULL);
     }
     return ret & 0xFF;
 }
@@ -108,13 +106,11 @@ readBytes(JNIEnv *env, jobject this, jbyteArray bytes,
         JNU_ThrowIOException(env, "Stream Closed");
         nread = -1;
     } else {
-        nread = (jint)IO_Read(fd, buf, len);
+        nread = IO_Read(fd, buf, len);
         if (nread > 0) {
             (*env)->SetByteArrayRegion(env, bytes, off, nread, (jbyte *)buf);
-        } else if (nread == JVM_IO_ERR) {
+        } else if (nread == -1) {
             JNU_ThrowIOExceptionWithLastError(env, "Read error");
-        } else if (nread == JVM_IO_INTR) {
-            JNU_ThrowByName(env, "java/io/InterruptedIOException", NULL);
         } else { /* EOF */
             nread = -1;
         }
@@ -137,14 +133,12 @@ writeSingle(JNIEnv *env, jobject this, jint byte, jboolean append, jfieldID fid)
         return;
     }
     if (append == JNI_TRUE) {
-        n = (jint)IO_Append(fd, &c, 1);
+        n = IO_Append(fd, &c, 1);
     } else {
-        n = (jint)IO_Write(fd, &c, 1);
+        n = IO_Write(fd, &c, 1);
     }
-    if (n == JVM_IO_ERR) {
+    if (n == -1) {
         JNU_ThrowIOExceptionWithLastError(env, "Write error");
-    } else if (n == JVM_IO_INTR) {
-        JNU_ThrowByName(env, "java/io/InterruptedIOException", NULL);
     }
 }
 
@@ -190,15 +184,12 @@ writeBytes(JNIEnv *env, jobject this, jbyteArray bytes,
                 break;
             }
             if (append == JNI_TRUE) {
-                n = (jint)IO_Append(fd, buf+off, len);
+                n = IO_Append(fd, buf+off, len);
             } else {
-                n = (jint)IO_Write(fd, buf+off, len);
+                n = IO_Write(fd, buf+off, len);
             }
-            if (n == JVM_IO_ERR) {
+            if (n == -1) {
                 JNU_ThrowIOExceptionWithLastError(env, "Write error");
-                break;
-            } else if (n == JVM_IO_INTR) {
-                JNU_ThrowByName(env, "java/io/InterruptedIOException", NULL);
                 break;
             }
             off += n;
@@ -214,11 +205,11 @@ void
 throwFileNotFoundException(JNIEnv *env, jstring path)
 {
     char buf[256];
-    jint n;
+    size_t n;
     jobject x;
     jstring why = NULL;
 
-    n = JVM_GetLastErrorString(buf, sizeof(buf));
+    n = getLastErrorString(buf, sizeof(buf));
     if (n > 0) {
         why = JNU_NewStringPlatform(env, buf);
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,18 +28,7 @@
 #include "prims/jvmtiExport.hpp"
 #include "runtime/jniHandles.hpp"
 #include "runtime/mutexLocker.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
+#include "runtime/thread.inline.hpp"
 
 
 JNIHandleBlock* JNIHandles::_global_handles       = NULL;
@@ -111,19 +100,6 @@ jobject JNIHandles::make_weak_global(Handle obj) {
   return res;
 }
 
-jmethodID JNIHandles::make_jmethod_id(methodHandle mh) {
-  return (jmethodID) make_weak_global(mh);
-}
-
-
-
-void JNIHandles::change_method_associated_with_jmethod_id(jmethodID jmid, methodHandle mh) {
-  MutexLocker ml(JNIGlobalHandle_lock); // Is this necessary?
-  Handle obj = (Handle)mh;
-  oop* jobj = (oop*)jmid;
-  *jobj = obj();
-}
-
 
 void JNIHandles::destroy_global(jobject handle) {
   if (handle != NULL) {
@@ -138,10 +114,6 @@ void JNIHandles::destroy_weak_global(jobject handle) {
     assert(!CheckJNICalls || is_weak_global_handle(handle), "Invalid delete of weak global JNI handle");
     *((oop*)handle) = deleted_handle(); // Mark the handle as deleted, allocate will reuse it
   }
-}
-
-void JNIHandles::destroy_jmethod_id(jmethodID mid) {
-  destroy_weak_global((jobject)mid);
 }
 
 
@@ -162,8 +134,8 @@ void JNIHandles::initialize() {
   EXCEPTION_MARK;
   // We will never reach the CATCH below since Exceptions::_throw will cause
   // the VM to exit if an exception is thrown during initialization
-  klassOop k      = SystemDictionary::Object_klass();
-  _deleted_handle = instanceKlass::cast(k)->allocate_permanent_instance(CATCH);
+  Klass* k      = SystemDictionary::Object_klass();
+  _deleted_handle = InstanceKlass::cast(k)->allocate_instance(CATCH);
 }
 
 
@@ -216,7 +188,6 @@ long JNIHandles::weak_global_handle_memory_usage() {
 class AlwaysAliveClosure: public BoolObjectClosure {
 public:
   bool do_object_b(oop obj) { return true; }
-  void do_object(oop obj) { assert(false, "Don't call"); }
 };
 
 class CountHandleClosure: public OopClosure {

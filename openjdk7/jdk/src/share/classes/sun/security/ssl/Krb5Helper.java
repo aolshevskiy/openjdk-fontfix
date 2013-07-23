@@ -47,6 +47,7 @@ public final class Krb5Helper {
 
     private static final Krb5Proxy proxy =
         AccessController.doPrivileged(new PrivilegedAction<Krb5Proxy>() {
+            @Override
             public Krb5Proxy run() {
                 try {
                     Class<?> c = Class.forName(IMPL_CLASS, true, null);
@@ -93,18 +94,18 @@ public final class Krb5Helper {
     /**
      * Returns the KerberosKeys for the default server-side principal.
      */
-    public static SecretKey[] getServerKeys(AccessControlContext acc)
+    public static Object getServiceCreds(AccessControlContext acc)
             throws LoginException {
         ensureAvailable();
-        return proxy.getServerKeys(acc);
+        return proxy.getServiceCreds(acc);
     }
 
     /**
      * Returns the server-side principal name associated with the KerberosKey.
      */
-    public static String getServerPrincipalName(SecretKey kerberosKey) {
+    public static String getServerPrincipalName(Object serviceCreds) {
         ensureAvailable();
-        return proxy.getServerPrincipalName(kerberosKey);
+        return proxy.getServerPrincipalName(serviceCreds);
     }
 
     /**
@@ -122,5 +123,13 @@ public final class Krb5Helper {
             String action) {
         ensureAvailable();
         return proxy.getServicePermission(principalName, action);
+    }
+
+    /**
+     * Determines if the Subject might contain creds for princ.
+     */
+    public static boolean isRelated(Subject subject, Principal princ) {
+        ensureAvailable();
+        return proxy.isRelated(subject, princ);
     }
 }

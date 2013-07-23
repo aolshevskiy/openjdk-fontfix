@@ -96,23 +96,9 @@ endif
 combo_build:
 	@$(ECHO) $@ installer combo build started: `$(DATE) '+%y-%m-%d %H:%M'`
 	$(CD) $(INSTALL_TOPDIR)/make/installer/bundles/windows/ishield/wrapper/wrapper.jreboth ; $(MAKE) all
-
-
-install-binaries-jdk-debug:
-ifeq ($(BUILD_INSTALL_BUNDLES), true)
-	@$(call MakeStart,install,binaries-jdk-debug)
-	($(CD) $(INSTALL_TOPDIR)/make/installer/binaries/$(PLATFORM) && \
-	  $(MAKE) binaries-jdk-debug $(INSTALL_BUILD_ARGUMENTS))
-	@$(call MakeFinish,install,binaries-jdk-debug)
-endif
-
-install-binaries-jdk-debug-clobber:
-ifeq ($(BUILD_INSTALL_BUNDLES), true)
-	@$(call MakeStart,install,binaries-jdk-debug-clobber)
-	($(CD) $(INSTALL_TOPDIR)/make/installer/binaries/$(PLATFORM) && \
-	  $(MAKE) binaries-jdk-debug-clobber $(INSTALL_BUILD_ARGUMENTS))
-	@$(call MakeFinish,install,binaries-jdk-debug-clobber)
-endif
+	$(CD) $(INSTALL_TOPDIR)/make/installer/bundles/windows/ishield/wrapper/wrapper.new64jre ; $(MAKE) all
+	$(CD) $(INSTALL_TOPDIR)/make/installer/bundles/windows/ishield/jre ; $(MAKE) au_combo
+	$(CD) $(INSTALL_TOPDIR)/make/installer/bundles/windows/xmlinffile ; $(MAKE) all
 
 install-clobber:
 ifeq ($(BUILD_INSTALL), true)
@@ -133,5 +119,4 @@ endif
 ######################################
 
 .PHONY: install install-build install-clobber install-sanity \
-	update-installer update-patchgen installer \
-        install-binaries-jdk-debug install-binaries-jdk-debug-clobber
+	update-installer update-patchgen installer

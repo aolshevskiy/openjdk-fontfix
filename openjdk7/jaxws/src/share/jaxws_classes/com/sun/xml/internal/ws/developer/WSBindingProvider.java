@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 package com.sun.xml.internal.ws.developer;
 
 import com.sun.istack.internal.NotNull;
+import com.sun.xml.internal.ws.api.ComponentRegistry;
 import com.sun.xml.internal.ws.api.message.Header;
 import com.sun.xml.internal.ws.api.message.Headers;
 import com.sun.xml.internal.ws.api.addressing.WSEndpointReference;
@@ -47,7 +48,7 @@ import com.sun.org.glassfish.gmbal.ManagedObjectManager;
  * @author Jitendra Kotamraju
  * @since 2.1EA3
  */
-public interface WSBindingProvider extends BindingProvider, Closeable {
+public interface WSBindingProvider extends BindingProvider, Closeable, ComponentRegistry {
     /**
      * Sets the out-bound headers to be added to messages sent from
      * this {@link BindingProvider}.
@@ -97,7 +98,7 @@ public interface WSBindingProvider extends BindingProvider, Closeable {
      * @param headers
      *      Can be null or empty.
      * @throws UnsupportedOperationException
-     *      If this {@lini WSBindingProvider} is a {@link Dispatch}
+     *      If this {@link WSBindingProvider} is a {@link Dispatch}
      *      that does not use JAXB.
      */
     void setOutboundHeaders(Object... headers);

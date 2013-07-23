@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,9 @@ package sun.misc;
 
 import java.security.*;
 import java.lang.reflect.*;
+
+import sun.reflect.CallerSensitive;
+import sun.reflect.Reflection;
 
 
 /**
@@ -80,9 +83,10 @@ public final class Unsafe {
      *             <code>checkPropertiesAccess</code> method doesn't allow
      *             access to the system properties.
      */
+    @CallerSensitive
     public static Unsafe getUnsafe() {
-        Class cc = sun.reflect.Reflection.getCallerClass(2);
-        if (cc.getClassLoader() != null)
+        Class<?> caller = Reflection.getCallerClass();
+        if (!VM.isSystemDomainLoader(caller.getClassLoader()))
             throw new SecurityException("Unsafe");
         return theUnsafe;
     }
@@ -616,7 +620,7 @@ public final class Unsafe {
      * for a given class in one place.
      */
     @Deprecated
-    public Object staticFieldBase(Class c) {
+    public Object staticFieldBase(Class<?> c) {
         Field[] fields = c.getDeclaredFields();
         for (int i = 0; i < fields.length; i++) {
             if (Modifier.isStatic(fields[i].getModifiers())) {
@@ -690,7 +694,7 @@ public final class Unsafe {
      * needed in conjunction with obtaining the static field base of a
      * class.
      */
-    public native void ensureClassInitialized(Class c);
+    public native void ensureClassInitialized(Class<?> c);
 
     /**
      * Report the offset of the first element in the storage allocation of a
@@ -702,7 +706,7 @@ public final class Unsafe {
      * @see #getInt(Object, long)
      * @see #putInt(Object, long, int)
      */
-    public native int arrayBaseOffset(Class arrayClass);
+    public native int arrayBaseOffset(Class<?> arrayClass);
 
     /** The value of {@code arrayBaseOffset(boolean[].class)} */
     public static final int ARRAY_BOOLEAN_BASE_OFFSET
@@ -751,7 +755,7 @@ public final class Unsafe {
      * @see #getInt(Object, long)
      * @see #putInt(Object, long, int)
      */
-    public native int arrayIndexScale(Class arrayClass);
+    public native int arrayIndexScale(Class<?> arrayClass);
 
     /** The value of {@code arrayIndexScale(boolean[].class)} */
     public static final int ARRAY_BOOLEAN_INDEX_SCALE
@@ -813,11 +817,9 @@ public final class Unsafe {
      * Tell the VM to define a class, without security checks.  By default, the
      * class loader and protection domain come from the caller's class.
      */
-    public native Class defineClass(String name, byte[] b, int off, int len,
-                                    ClassLoader loader,
-                                    ProtectionDomain protectionDomain);
-
-    public native Class defineClass(String name, byte[] b, int off, int len);
+    public native Class<?> defineClass(String name, byte[] b, int off, int len,
+                                       ClassLoader loader,
+                                       ProtectionDomain protectionDomain);
 
     /**
      * Define a class but do not make it known to the class loader or system dictionary.
@@ -835,12 +837,12 @@ public final class Unsafe {
      * @params data      bytes of a class file
      * @params cpPatches where non-null entries exist, they replace corresponding CP entries in data
      */
-    public native Class defineAnonymousClass(Class hostClass, byte[] data, Object[] cpPatches);
+    public native Class<?> defineAnonymousClass(Class<?> hostClass, byte[] data, Object[] cpPatches);
 
 
     /** Allocate an instance but do not run any constructor.
         Initializes the class if it has not yet been. */
-    public native Object allocateInstance(Class cls)
+    public native Object allocateInstance(Class<?> cls)
         throws InstantiationException;
 
     /** Lock the object.  It must get unlocked via {@link #monitorExit}. */
@@ -1008,4 +1010,125 @@ public final class Unsafe {
      *         if the load average is unobtainable.
      */
     public native int getLoadAverage(double[] loadavg, int nelems);
+
+    // The following contain CAS-based Java implementations used on
+    // platforms not supporting native instructions
+
+    /**
+     * Atomically adds the given value to the current value of a field
+     * or array element within the given object <code>o</code>
+     * at the given <code>offset</code>.
+     *
+     * @param o object/array to update the field/element in
+     * @param offset field/element offset
+     * @param delta the value to add
+     * @return the previous value
+     * @since 1.8
+     */
+    public final int getAndAddInt(Object o, long offset, int delta) {
+        int v;
+        do {
+            v = getIntVolatile(o, offset);
+        } while (!compareAndSwapInt(o, offset, v, v + delta));
+        return v;
+    }
+
+    /**
+     * Atomically adds the given value to the current value of a field
+     * or array element within the given object <code>o</code>
+     * at the given <code>offset</code>.
+     *
+     * @param o object/array to update the field/element in
+     * @param offset field/element offset
+     * @param delta the value to add
+     * @return the previous value
+     * @since 1.8
+     */
+    public final long getAndAddLong(Object o, long offset, long delta) {
+        long v;
+        do {
+            v = getLongVolatile(o, offset);
+        } while (!compareAndSwapLong(o, offset, v, v + delta));
+        return v;
+    }
+
+    /**
+     * Atomically exchanges the given value with the current value of
+     * a field or array element within the given object <code>o</code>
+     * at the given <code>offset</code>.
+     *
+     * @param o object/array to update the field/element in
+     * @param offset field/element offset
+     * @param newValue new value
+     * @return the previous value
+     * @since 1.8
+     */
+    public final int getAndSetInt(Object o, long offset, int newValue) {
+        int v;
+        do {
+            v = getIntVolatile(o, offset);
+        } while (!compareAndSwapInt(o, offset, v, newValue));
+        return v;
+    }
+
+    /**
+     * Atomically exchanges the given value with the current value of
+     * a field or array element within the given object <code>o</code>
+     * at the given <code>offset</code>.
+     *
+     * @param o object/array to update the field/element in
+     * @param offset field/element offset
+     * @param newValue new value
+     * @return the previous value
+     * @since 1.8
+     */
+    public final long getAndSetLong(Object o, long offset, long newValue) {
+        long v;
+        do {
+            v = getLongVolatile(o, offset);
+        } while (!compareAndSwapLong(o, offset, v, newValue));
+        return v;
+    }
+
+    /**
+     * Atomically exchanges the given reference value with the current
+     * reference value of a field or array element within the given
+     * object <code>o</code> at the given <code>offset</code>.
+     *
+     * @param o object/array to update the field/element in
+     * @param offset field/element offset
+     * @param newValue new value
+     * @return the previous value
+     * @since 1.8
+     */
+    public final Object getAndSetObject(Object o, long offset, Object newValue) {
+        Object v;
+        do {
+            v = getObjectVolatile(o, offset);
+        } while (!compareAndSwapObject(o, offset, v, newValue));
+        return v;
+    }
+
+
+    /**
+     * Ensures lack of reordering of loads before the fence
+     * with loads or stores after the fence.
+     * @since 1.8
+     */
+    public native void loadFence();
+
+    /**
+     * Ensures lack of reordering of stores before the fence
+     * with loads or stores after the fence.
+     * @since 1.8
+     */
+    public native void storeFence();
+
+    /**
+     * Ensures lack of reordering of loads or stores before the fence
+     * with loads or stores after the fence.
+     * @since 1.8
+     */
+    public native void fullFence();
+
 }

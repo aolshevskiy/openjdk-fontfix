@@ -100,6 +100,7 @@ class WindowsConstants {
     public static final int ERROR_INVALID_LEVEL         = 124;
     public static final int ERROR_DIR_NOT_EMPTY         = 145;
     public static final int ERROR_ALREADY_EXISTS        = 183;
+    public static final int ERROR_MORE_DATA             = 234;
     public static final int ERROR_DIRECTORY             = 267;
     public static final int ERROR_NOTIFY_ENUM_DIR       = 1022;
     public static final int ERROR_NONE_MAPPED           = 1332;
@@ -180,6 +181,11 @@ class WindowsConstants {
     public static final int FILE_DELETE_CHILD           = 0x0040;
     public static final int FILE_READ_ATTRIBUTES        = 0x0080;
     public static final int FILE_WRITE_ATTRIBUTES       = 0x0100;
+
+    public static final int FILE_GENERIC_READ           = 0x00120089;
+    public static final int FILE_GENERIC_WRITE          = 0x00120116;
+    public static final int FILE_GENERIC_EXECUTE        = 0x001200a0;
+    public static final int FILE_ALL_ACCESS             = 0x001f01ff;
 
     // operating system security
     public static final int TOKEN_DUPLICATE             = 0x0002;

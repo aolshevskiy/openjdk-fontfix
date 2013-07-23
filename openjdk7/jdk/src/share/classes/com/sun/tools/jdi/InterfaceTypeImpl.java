@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 1999, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -128,9 +128,9 @@ public class InterfaceTypeImpl extends ReferenceTypeImpl
          * list being built.
          */
         List<InterfaceType> immediate = new ArrayList<InterfaceType>(superinterfaces());
-        Iterator iter = immediate.iterator();
+        Iterator<InterfaceType> iter = immediate.iterator();
         while (iter.hasNext()) {
-            InterfaceType interfaze = (InterfaceType)iter.next();
+            InterfaceType interfaze = iter.next();
             if (list.contains(interfaze)) {
                 iter.remove();
             }

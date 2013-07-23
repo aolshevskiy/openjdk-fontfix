@@ -39,8 +39,8 @@ private:
       BasicType bt = java_lang_Class::primitive_type(klass_oop);
       return ciType::make(bt);
     } else {
-      klassOop k = java_lang_Class::as_klassOop(klass_oop);
-      return CURRENT_ENV->get_object(k)->as_klass();
+      Klass* k = java_lang_Class::as_Klass(klass_oop);
+      return CURRENT_ENV->get_klass(k);
     }
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -969,8 +969,8 @@ size_t CMSAdaptiveSizePolicy::promo_increment_aligned_up(size_t cur_promo) {
 }
 
 
-void CMSAdaptiveSizePolicy::compute_young_generation_free_space(size_t cur_eden,
-                                          size_t max_eden_size)
+void CMSAdaptiveSizePolicy::compute_eden_space_size(size_t cur_eden,
+                                                    size_t max_eden_size)
 {
   size_t desired_eden_size = cur_eden;
   size_t eden_limit = max_eden_size;
@@ -978,7 +978,7 @@ void CMSAdaptiveSizePolicy::compute_young_generation_free_space(size_t cur_eden,
   // Printout input
   if (PrintGC && PrintAdaptiveSizePolicy) {
     gclog_or_tty->print_cr(
-      "CMSAdaptiveSizePolicy::compute_young_generation_free_space: "
+      "CMSAdaptiveSizePolicy::compute_eden_space_size: "
       "cur_eden " SIZE_FORMAT,
       cur_eden);
   }
@@ -1024,7 +1024,7 @@ void CMSAdaptiveSizePolicy::compute_young_generation_free_space(size_t cur_eden,
 
   if (PrintGC && PrintAdaptiveSizePolicy) {
     gclog_or_tty->print_cr(
-      "CMSAdaptiveSizePolicy::compute_young_generation_free_space limits:"
+      "CMSAdaptiveSizePolicy::compute_eden_space_size limits:"
       " desired_eden_size: " SIZE_FORMAT
       " old_eden_size: " SIZE_FORMAT,
       desired_eden_size, cur_eden);
@@ -1195,9 +1195,9 @@ void CMSAdaptiveSizePolicy::compute_tenured_generation_free_space(
   set_promo_size(desired_promo_size);
 }
 
-int CMSAdaptiveSizePolicy::compute_survivor_space_size_and_threshold(
+uint CMSAdaptiveSizePolicy::compute_survivor_space_size_and_threshold(
                                              bool is_survivor_overflow,
-                                             int tenuring_threshold,
+                                             uint tenuring_threshold,
                                              size_t survivor_limit) {
   assert(survivor_limit >= generation_alignment(),
          "survivor_limit too small");
@@ -1315,7 +1315,7 @@ int CMSAdaptiveSizePolicy::compute_survivor_space_size_and_threshold(
 
     gclog_or_tty->print( "  avg_promoted_padded_avg: %f"
                 "  avg_pretenured_padded_avg: %f"
-                "  tenuring_thresh: %d"
+                "  tenuring_thresh: %u"
                 "  target_size: " SIZE_FORMAT
                 "  survivor_limit: " SIZE_FORMAT,
                 gch->gc_stats(1)->avg_promoted()->padded_average(),

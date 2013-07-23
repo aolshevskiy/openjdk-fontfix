@@ -109,6 +109,9 @@ ifndef OPENJDK
   endif
 endif
 
+JAVAC_MAX_WARNINGS=false
+JAVAC_LINT_OPTIONS=-Xlint:all,-deprecation
+JAVAC_WARNINGS_FATAL=true
 include $(BUILDDIR)/common/Defs.gmk
 
 #
@@ -120,16 +123,6 @@ CLASSDESTDIR = $(TEMPDIR)/classes
 # Java files
 #
 AUTO_FILES_JAVA_DIRS = $(PKGDIR)
-
-#
-# Exclude the sources that get built by ../other/Makefile
-#
-AUTO_JAVA_PRUNE = \
-    ECKeyFactory.java \
-    ECParameters.java \
-    ECPrivateKeyImpl.java \
-    ECPublicKeyImpl.java \
-    NamedCurve.java
 
 #
 # Some licensees do not get the native ECC sources, but we still need to
@@ -157,7 +150,8 @@ ifeq ($(NATIVE_ECC_AVAILABLE), true)
       $(PKGDIR)/ECKeyPairGenerator.java
 
   JAVAHFLAGS = -bootclasspath \
-    "$(CLASSDESTDIR)$(CLASSPATH_SEPARATOR)$(CLASSBINDIR)$(JCE_PATH)"
+      "$(CLASSDESTDIR)$(CLASSPATH_SEPARATOR)$(CLASSBINDIR)$(JCE_PATH)"
+
 
   #
   # C and C++ files
@@ -190,10 +184,8 @@ ifeq ($(NATIVE_ECC_AVAILABLE), true)
   #
   # Libraries to link
   #
-  ifeq ($(PLATFORM), windows)
-    OTHER_LDLIBS += $(JVMLIB)
-  else
-    OTHER_LDLIBS = $(LIBDL) $(JVMLIB) $(LIBCXX)
+  ifneq ($(PLATFORM), windows)
+    OTHER_LDLIBS = $(LIBCXX)
   endif
 
   include $(BUILDDIR)/common/Mapfile-vers.gmk

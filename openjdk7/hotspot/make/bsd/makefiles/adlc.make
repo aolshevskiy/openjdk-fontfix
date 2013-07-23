@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -69,7 +69,7 @@ CXXFLAGS += -DASSERT
 # CFLAGS_WARN holds compiler options to suppress/enable warnings.
 # Compiler warnings are treated as errors
 ifneq ($(COMPILER_WARNINGS_FATAL),false)
-  CFLAGS_WARN = -Werror
+  CFLAGS_WARN = $(WARNINGS_ARE_ERRORS)
 endif
 CFLAGS += $(CFLAGS_WARN)
 

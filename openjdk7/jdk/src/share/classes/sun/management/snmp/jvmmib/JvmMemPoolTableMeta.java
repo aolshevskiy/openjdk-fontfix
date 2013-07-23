@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2004, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,6 +67,8 @@ import com.sun.jmx.snmp.agent.SnmpStandardObjectServer;
  * The group is defined with the following oid: 1.3.6.1.4.1.42.2.145.3.163.1.1.2.110.
  */
 public class JvmMemPoolTableMeta extends SnmpMibTable implements Serializable {
+
+    static final long serialVersionUID = -2799470815264898659L;
 
     /**
      * Constructor for the table. Initialize metadata for "JvmMemPoolTableMeta".

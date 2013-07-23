@@ -27,6 +27,7 @@
 
 #include "code/stubs.hpp"
 #include "interpreter/bytecodes.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/vmThread.hpp"
 #include "utilities/top.hpp"
 #ifdef TARGET_ARCH_MODEL_x86_32
@@ -46,18 +47,6 @@
 #endif
 #ifdef TARGET_ARCH_MODEL_ppc
 # include "interp_masm_ppc.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
 #endif
 
 // This file contains the platform-independent parts
@@ -113,6 +102,9 @@ class AbstractInterpreter: AllStatic {
     java_lang_math_pow,                                         // implementation of java.lang.Math.pow   (x,y)
     java_lang_math_exp,                                         // implementation of java.lang.Math.exp   (x)
     java_lang_ref_reference_get,                                // implementation of java.lang.ref.Reference.get()
+    java_util_zip_CRC32_update,                                 // implementation of java.util.zip.CRC32.update()
+    java_util_zip_CRC32_updateBytes,                            // implementation of java.util.zip.CRC32.updateBytes()
+    java_util_zip_CRC32_updateByteBuffer,                       // implementation of java.util.zip.CRC32.updateByteBuffer()
     number_of_method_entries,
     invalid = -1
   };
@@ -176,21 +168,21 @@ class AbstractInterpreter: AllStatic {
 
   // Activation size in words for a method that is just being called.
   // Parameters haven't been pushed so count them too.
-  static int        size_top_interpreter_activation(methodOop method);
+  static int        size_top_interpreter_activation(Method* method);
 
   // Deoptimization support
   // Compute the entry address for continuation after
-  static address deopt_continue_after_entry(methodOop method,
+  static address deopt_continue_after_entry(Method* method,
                                             address bcp,
                                             int callee_parameters,
                                             bool is_top_frame);
   // Compute the entry address for reexecution
-  static address deopt_reexecute_entry(methodOop method, address bcp);
+  static address deopt_reexecute_entry(Method* method, address bcp);
   // Deoptimization should reexecute this bytecode
   static bool    bytecode_should_reexecute(Bytecodes::Code code);
 
   // share implementation of size_activation and layout_activation:
-  static int        size_activation(methodOop method,
+  static int        size_activation(Method* method,
                                     int temps,
                                     int popframe_args,
                                     int monitors,
@@ -212,7 +204,7 @@ class AbstractInterpreter: AllStatic {
                              is_bottom_frame);
   }
 
-  static int       layout_activation(methodOop method,
+  static int       layout_activation(Method* method,
                                      int temps,
                                      int popframe_args,
                                      int monitors,

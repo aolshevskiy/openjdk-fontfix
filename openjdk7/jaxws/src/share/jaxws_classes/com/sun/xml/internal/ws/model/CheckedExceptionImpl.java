@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,17 +25,13 @@
 
 package com.sun.xml.internal.ws.model;
 
-import com.sun.xml.internal.bind.api.TypeReference;
 import com.sun.xml.internal.bind.api.Bridge;
 import com.sun.xml.internal.ws.api.model.CheckedException;
 import com.sun.xml.internal.ws.api.model.ExceptionType;
-import com.sun.xml.internal.ws.api.model.SEIModel;
 import com.sun.xml.internal.ws.api.model.JavaMethod;
 import com.sun.xml.internal.ws.addressing.WsaActionUtil;
-import javax.xml.ws.WebServiceException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.logging.Logger;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+import com.sun.xml.internal.ws.spi.db.TypeInfo;
 
 /**
  * CheckedException class. Holds the exception class - class that has public
@@ -51,7 +47,7 @@ import java.util.logging.Logger;
  */
 public final class CheckedExceptionImpl implements CheckedException {
     private final Class exceptionClass;
-    private final TypeReference detail;
+    private final TypeInfo detail;
     private final ExceptionType exceptionType;
     private final JavaMethodImpl javaMethod;
     private String messageName;
@@ -67,7 +63,7 @@ public final class CheckedExceptionImpl implements CheckedException {
      * @param exceptionType
      *            either ExceptionType.UserDefined or
      */
-    public CheckedExceptionImpl(JavaMethodImpl jm, Class exceptionClass, TypeReference detail, ExceptionType exceptionType) {
+    public CheckedExceptionImpl(JavaMethodImpl jm, Class exceptionClass, TypeInfo detail, ExceptionType exceptionType) {
         this.detail = detail;
         this.exceptionType = exceptionType;
         this.exceptionClass = exceptionClass;
@@ -93,12 +89,17 @@ public final class CheckedExceptionImpl implements CheckedException {
     public Class getDetailBean() {
         return (Class) detail.type;
     }
-
+    /** @deprecated */
     public Bridge getBridge() {
-        return getOwner().getBridge(detail);
+//TODO        return getOwner().getBridge(detail);
+        return null;
     }
 
-    public TypeReference getDetailType() {
+    public XMLBridge getBond() {
+        return getOwner().getXMLBridge(detail);
+    }
+
+    public TypeInfo getDetailType() {
         return detail;
     }
 

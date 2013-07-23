@@ -164,6 +164,7 @@ void Block::implicit_null_check(PhaseCFG *cfg, Node *proj, Node *val, int allowe
     case Op_StoreL:
     case Op_StoreP:
     case Op_StoreN:
+    case Op_StoreNKlass:
       was_store = true;         // Memory op is a store op
       // Stores will have their address in slot 2 (memory in slot 1).
       // If the value being nul-checked is in another slot, it means we
@@ -174,6 +175,7 @@ void Block::implicit_null_check(PhaseCFG *cfg, Node *proj, Node *val, int allowe
     case Op_StrEquals:
     case Op_StrIndexOf:
     case Op_AryEq:
+    case Op_EncodeISOArray:
       // Not a legit memory op for implicit null check regardless of
       // embedded loads
       continue;
@@ -217,9 +219,10 @@ void Block::implicit_null_check(PhaseCFG *cfg, Node *proj, Node *val, int allowe
         // cannot reason about it; is probably not implicit null exception
       } else {
         const TypePtr* tptr;
-        if (UseCompressedOops && Universe::narrow_oop_shift() == 0) {
+        if (UseCompressedOops && (Universe::narrow_oop_shift() == 0 ||
+                                  Universe::narrow_klass_shift() == 0)) {
           // 32-bits narrow oop can be the base of address expressions
-          tptr = base->bottom_type()->make_ptr();
+          tptr = base->get_ptr_type();
         } else {
           // only regular oops are expected here
           tptr = base->bottom_type()->is_ptr();
@@ -419,6 +422,7 @@ Node *Block::select(PhaseCFG *cfg, Node_List &worklist, GrowableArray<int> &read
   uint latency = 0; // Bigger is scheduled first
   uint score   = 0; // Bigger is better
   int idx = -1;     // Index in worklist
+  int cand_cnt = 0; // Candidate count
 
   for( uint i=0; i<cnt; i++ ) { // Inspect entire worklist
     // Order in worklist is used to break ties.
@@ -501,11 +505,14 @@ Node *Block::select(PhaseCFG *cfg, Node_List &worklist, GrowableArray<int> &read
     uint n_score   = n->req();   // Many inputs get high score to break ties
 
     // Keep best latency found
-    if( choice < n_choice ||
-        ( choice == n_choice &&
-          ( latency < n_latency ||
-            ( latency == n_latency &&
-              ( score < n_score ))))) {
+    cand_cnt++;
+    if (choice < n_choice ||
+        (choice == n_choice &&
+         ((StressLCM && Compile::randomized_select(cand_cnt)) ||
+          (!StressLCM &&
+           (latency < n_latency ||
+            (latency == n_latency &&
+             (score < n_score))))))) {
       choice  = n_choice;
       latency = n_latency;
       score   = n_score;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -40,6 +40,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.util.Arrays;
 
 /**
  * JAF data handler for XML content
@@ -58,7 +59,7 @@ public class XmlDataContentHandler implements DataContentHandler {
     }
 
     public DataFlavor[] getTransferDataFlavors() {
-        return flavors;
+        return Arrays.copyOf(flavors, flavors.length);
     }
 
     public Object getTransferData(DataFlavor df, DataSource ds)

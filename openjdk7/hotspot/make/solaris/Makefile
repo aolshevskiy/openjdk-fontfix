@@ -38,10 +38,10 @@
 
 # Along with VM, Serviceability Agent (SA) is built for SA/JDI binding.
 # JDI binding on SA produces two binaries:
-#  1. sa-jdi.jar       - This is build before building libjvm[_g].so
+#  1. sa-jdi.jar       - This is built before building libjvm.so
 #                        Please refer to ./makefiles/sa.make
-#  2. libsaproc[_g].so - Native library for SA - This is built after
-#                        libjsig[_g].so (signal interposition library)
+#  2. libsaproc.so     - Native library for SA - This is built after
+#                        libjsig.so (signal interposition library)
 #                        Please refer to ./makefiles/vm.make
 # If $(GAMMADIR)/agent dir is not present, SA components are not built.
 
@@ -120,37 +120,29 @@ endif
 #
 #       debug           compiler2       <os>_<arch>_compiler2/debug
 #       fastdebug       compiler2       <os>_<arch>_compiler2/fastdebug
-#       jvmg            compiler2       <os>_<arch>_compiler2/jvmg
 #       optimized       compiler2       <os>_<arch>_compiler2/optimized
-#       profiled        compiler2       <os>_<arch>_compiler2/profiled
 #       product         compiler2       <os>_<arch>_compiler2/product
 #
 #       debug1          compiler1       <os>_<arch>_compiler1/debug
 #       fastdebug1      compiler1       <os>_<arch>_compiler1/fastdebug
-#       jvmg1           compiler1       <os>_<arch>_compiler1/jvmg
 #       optimized1      compiler1       <os>_<arch>_compiler1/optimized
-#       profiled1       compiler1       <os>_<arch>_compiler1/profiled
 #       product1        compiler1       <os>_<arch>_compiler1/product
 #
 #       debugcore       core            <os>_<arch>_core/debug
 #       fastdebugcore   core            <os>_<arch>_core/fastdebug
-#       jvmgcore        core            <os>_<arch>_core/jvmg
 #       optimizedcore   core            <os>_<arch>_core/optimized
-#       profiledcore    core            <os>_<arch>_core/profiled
 #       productcore     core            <os>_<arch>_core/product
 #
 # What you get with each target:
 #
-# debug*     - "thin" libjvm_g - debug info linked into the gamma_g launcher
+# debug*     - debug compile with asserts enabled
 # fastdebug* - optimized compile, but with asserts enabled
-# jvmg*      - "fat" libjvm_g - debug info linked into libjvm_g.so
 # optimized* - optimized compile, no asserts
-# profiled*  - gprof
 # product*   - the shippable thing:  optimized compile, no asserts, -DPRODUCT
 
 # This target list needs to be coordinated with the usage message
 # in the build.sh script:
-TARGETS           = debug jvmg fastdebug optimized profiled product
+TARGETS           = debug fastdebug optimized product
 
 SUBDIR_DOCS       = $(OSNAME)_$(BUILDARCH)_docs
 SUBDIRS_C1        = $(addprefix $(OSNAME)_$(BUILDARCH)_compiler1/,$(TARGETS))
@@ -231,28 +223,24 @@ $(SUBDIRS_CORE): $(BUILDTREE_MAKE)
 
 $(TARGETS_C2):  $(SUBDIRS_C2)
 	cd $(OSNAME)_$(BUILDARCH)_compiler2/$@ && $(MAKE) $(MFLAGS)
-	cd $(OSNAME)_$(BUILDARCH)_compiler2/$@ && ./test_gamma
 ifdef INSTALL
 	cd $(OSNAME)_$(BUILDARCH)_compiler2/$@ && $(MAKE) $(MFLAGS) install
 endif
 
 $(TARGETS_TIERED):  $(SUBDIRS_TIERED)
 	cd $(OSNAME)_$(BUILDARCH)_tiered/$(patsubst %tiered,%,$@) && $(MAKE) $(MFLAGS)
-	cd $(OSNAME)_$(BUILDARCH)_tiered/$(patsubst %tiered,%,$@) && ./test_gamma
 ifdef INSTALL
 	cd $(OSNAME)_$(BUILDARCH)_tiered/$(patsubst %tiered,%,$@) && $(MAKE) $(MFLAGS) install
 endif
 
 $(TARGETS_C1):  $(SUBDIRS_C1)
 	cd $(OSNAME)_$(BUILDARCH)_compiler1/$(patsubst %1,%,$@) && $(MAKE) $(MFLAGS)
-	cd $(OSNAME)_$(BUILDARCH)_compiler1/$(patsubst %1,%,$@) && ./test_gamma
 ifdef INSTALL
 	cd $(OSNAME)_$(BUILDARCH)_compiler1/$(patsubst %1,%,$@) && $(MAKE) $(MFLAGS) install
 endif
 
 $(TARGETS_CORE):  $(SUBDIRS_CORE)
 	cd $(OSNAME)_$(BUILDARCH)_core/$(patsubst %core,%,$@) && $(MAKE) $(MFLAGS)
-	cd $(OSNAME)_$(BUILDARCH)_core/$(patsubst %core,%,$@) && ./test_gamma
 ifdef INSTALL
 	cd $(OSNAME)_$(BUILDARCH)_core/$(patsubst %core,%,$@) && $(MAKE) $(MFLAGS) install
 endif
@@ -271,11 +259,21 @@ docs: checks
 	$(MAKE) -f $(GAMMADIR)/make/$(OSNAME)/makefiles/jvmti.make $(MFLAGS) $(BUILDTREE_VARS) JvmtiOutDir=$(SUBDIR_DOCS) BUILD_FLAVOR=product jvmtidocs
 
 # Synonyms for win32-like targets.
-compiler2:  jvmg product
+compiler2:  debug product
 
-compiler1:  jvmg1 product1
+compiler1:  debug1 product1
 
-core: jvmgcore productcore
+core: debugcore productcore
+
+warn_jvmg_deprecated:
+	echo "Warning: The jvmg target has been replaced with debug"
+	echo "Warning: Please update your usage"
+
+jvmg: warn_jvmg_deprecated debug
+
+jvmg1: warn_jvmg_deprecated debug1
+
+jvmgcore: warn_jvmg_deprecated debugcore
 
 clean_docs:
 	rm -rf $(SUBDIR_DOCS)

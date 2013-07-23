@@ -170,13 +170,11 @@ private:
   void initialize_all() {
     initialize_flags();
     initialize_size_info();
-    initialize_perm_generation(PermGen::MarkSweepCompact);
   }
 
   CollectionSetChooser* _collectionSetChooser;
 
   double _full_collection_start_sec;
-  size_t _cur_collection_pause_used_at_start_bytes;
   uint   _cur_collection_pause_used_regions_at_start;
 
   // These exclude marking times.
@@ -195,7 +193,6 @@ private:
 
   uint _young_list_target_length;
   uint _young_list_fixed_length;
-  size_t _prev_eden_capacity; // used for logging
 
   // The max number of regions we can extend the eden by while the GC
   // locker is active. This should be >= _young_list_target_length;
@@ -694,11 +691,11 @@ public:
 
   // Records the information about the heap size for reporting in
   // print_detailed_heap_transition
-  void record_heap_size_info_at_start();
+  void record_heap_size_info_at_start(bool full);
 
   // Print heap sizing transition (with less and more detail).
   void print_heap_transition();
-  void print_detailed_heap_transition();
+  void print_detailed_heap_transition(bool full = false);
 
   void record_stop_world_start();
   void record_concurrent_pause();
@@ -855,18 +852,25 @@ private:
   //
 
   // Current tenuring threshold, set to 0 if the collector reaches the
-  // maximum amount of suvivors regions.
-  int _tenuring_threshold;
+  // maximum amount of survivors regions.
+  uint _tenuring_threshold;
 
   // The limit on the number of regions allocated for survivors.
   uint _max_survivor_regions;
 
   // For reporting purposes.
-  size_t _eden_bytes_before_gc;
-  size_t _survivor_bytes_before_gc;
-  size_t _capacity_before_gc;
+  // The value of _heap_bytes_before_gc is also used to calculate
+  // the cost of copying.
 
-  // The amount of survor regions after a collection.
+  size_t _eden_used_bytes_before_gc;         // Eden occupancy before GC
+  size_t _survivor_used_bytes_before_gc;     // Survivor occupancy before GC
+  size_t _heap_used_bytes_before_gc;         // Heap occupancy before GC
+  size_t _metaspace_used_bytes_before_gc;    // Metaspace occupancy before GC
+
+  size_t _eden_capacity_bytes_before_gc;     // Eden capacity before GC
+  size_t _heap_capacity_bytes_before_gc;     // Heap capacity before GC
+
+  // The amount of survivor regions after a collection.
   uint _recorded_survivor_regions;
   // List of survivor regions.
   HeapRegion* _recorded_survivor_head;
@@ -878,7 +882,7 @@ public:
   uint tenuring_threshold() const { return _tenuring_threshold; }
 
   inline GCAllocPurpose
-    evacuation_destination(HeapRegion* src_region, int age, size_t word_sz) {
+    evacuation_destination(HeapRegion* src_region, uint age, size_t word_sz) {
       if (age < _tenuring_threshold && src_region->is_young()) {
         return GCAllocForSurvived;
       } else {

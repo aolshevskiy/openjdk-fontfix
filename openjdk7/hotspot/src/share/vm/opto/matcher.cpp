@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -198,7 +198,7 @@ void Matcher::match( ) {
   const TypeTuple *range = C->tf()->range();
   if( range->cnt() > TypeFunc::Parms ) { // If not a void function
     // Get ideal-register return type
-    int ireg = base2reg[range->field_at(TypeFunc::Parms)->base()];
+    int ireg = range->field_at(TypeFunc::Parms)->ideal_reg();
     // Get machine return register
     uint sop = C->start()->Opcode();
     OptoRegPair regs = return_value(ireg, false);
@@ -919,6 +919,7 @@ static void match_alias_type(Compile* C, Node* n, Node* m) {
     case Op_AryEq:
     case Op_MemBarVolatile:
     case Op_MemBarCPUOrder: // %%% these ideals should have narrower adr_type?
+    case Op_EncodeISOArray:
       nidx = Compile::AliasIdxTop;
       nat = NULL;
       break;
@@ -984,6 +985,8 @@ Node *Matcher::xform( Node *n, int max_stack ) {
   mstack.push(n, Visit, NULL, -1);  // set NULL as parent to indicate root
 
   while (mstack.is_nonempty()) {
+    C->check_node_count(NodeLimitFudgeFactor, "too many nodes matching instructions");
+    if (C->failing()) return NULL;
     n = mstack.node();          // Leave node on stack
     Node_State nstate = mstack.state();
     if (nstate == Visit) {
@@ -1059,7 +1062,7 @@ Node *Matcher::xform( Node *n, int max_stack ) {
         Node *m = n->in(i);          // Get input
         int op = m->Opcode();
         assert((op == Op_BoxLock) == jvms->is_monitor_use(i), "boxes only at monitor sites");
-        if( op == Op_ConI || op == Op_ConP || op == Op_ConN ||
+        if( op == Op_ConI || op == Op_ConP || op == Op_ConN || op == Op_ConNKlass ||
             op == Op_ConF || op == Op_ConD || op == Op_ConL
             // || op == Op_BoxLock  // %%%% enable this and remove (+++) in chaitin.cpp
             ) {
@@ -1281,16 +1284,6 @@ MachNode *Matcher::match_sfpt( SafePointNode *sfpt ) {
     mcall->_argsize = out_arg_limit_per_call - begin_out_arg_area;
   }
 
-  if (is_method_handle_invoke) {
-    // Kill some extra stack space in case method handles want to do
-    // a little in-place argument insertion.
-    // FIXME: Is this still necessary?
-    int regs_per_word  = NOT_LP64(1) LP64_ONLY(2); // %%% make a global const!
-    out_arg_limit_per_call += methodOopDesc::extra_stack_entries() * regs_per_word;
-    // Do not update mcall->_argsize because (a) the extra space is not
-    // pushed as arguments and (b) _argsize is dead (not used anywhere).
-  }
-
   // Compute the max stack slot killed by any call.  These will not be
   // available for debug info, and will be used to adjust FIRST_STACK_mask
   // after all call sites have been visited.
@@ -1451,7 +1444,8 @@ static bool match_into_reg( const Node *n, Node *m, Node *control, int i, bool s
       if (j == max_scan)        // No post-domination before scan end?
         return true;            // Then break the match tree up
     }
-    if (m->is_DecodeN() && Matcher::narrow_oop_use_complex_address()) {
+    if ((m->is_DecodeN() && Matcher::narrow_oop_use_complex_address()) ||
+        (m->is_DecodeNKlass() && Matcher::narrow_klass_use_complex_address())) {
       // These are commonly used in address expressions and can
       // efficiently fold into them on X64 in some cases.
       return false;
@@ -1575,14 +1569,14 @@ Node *Matcher::Label_Root( const Node *n, State *svec, Node *control, const Node
 // program.  The register allocator is free to split uses later to
 // split live ranges.
 MachNode* Matcher::find_shared_node(Node* leaf, uint rule) {
-  if (!leaf->is_Con() && !leaf->is_DecodeN()) return NULL;
+  if (!leaf->is_Con() && !leaf->is_DecodeNarrowPtr()) return NULL;
 
   // See if this Con has already been reduced using this rule.
   if (_shared_nodes.Size() <= leaf->_idx) return NULL;
   MachNode* last = (MachNode*)_shared_nodes.at(leaf->_idx);
   if (last != NULL && rule == last->rule()) {
     // Don't expect control change for DecodeN
-    if (leaf->is_DecodeN())
+    if (leaf->is_DecodeNarrowPtr())
       return last;
     // Get the new space root.
     Node* xroot = new_node(C->root());
@@ -1672,12 +1666,12 @@ MachNode *Matcher::ReduceInst( State *s, int rule, Node *&mem ) {
       // DecodeN node consumed by an address may have different type
       // then its input. Don't compare types for such case.
       if (m->adr_type() != mach_at &&
-          (m->in(MemNode::Address)->is_DecodeN() ||
+          (m->in(MemNode::Address)->is_DecodeNarrowPtr() ||
            m->in(MemNode::Address)->is_AddP() &&
-           m->in(MemNode::Address)->in(AddPNode::Address)->is_DecodeN() ||
+           m->in(MemNode::Address)->in(AddPNode::Address)->is_DecodeNarrowPtr() ||
            m->in(MemNode::Address)->is_AddP() &&
            m->in(MemNode::Address)->in(AddPNode::Address)->is_AddP() &&
-           m->in(MemNode::Address)->in(AddPNode::Address)->in(AddPNode::Address)->is_DecodeN())) {
+           m->in(MemNode::Address)->in(AddPNode::Address)->in(AddPNode::Address)->is_DecodeNarrowPtr())) {
         mach_at = m->adr_type();
       }
       if (m->adr_type() != mach_at) {
@@ -1722,7 +1716,7 @@ MachNode *Matcher::ReduceInst( State *s, int rule, Node *&mem ) {
     guarantee(_proj_list.size() == num_proj, "no allocation during spill generation");
   }
 
-  if (leaf->is_Con() || leaf->is_DecodeN()) {
+  if (leaf->is_Con() || leaf->is_DecodeNarrowPtr()) {
     // Record the con for sharing
     _shared_nodes.map(leaf->_idx, ex);
   }
@@ -1981,6 +1975,7 @@ void Matcher::find_shared( Node *n ) {
       case Op_StrEquals:
       case Op_StrIndexOf:
       case Op_AryEq:
+      case Op_EncodeISOArray:
         set_shared(n); // Force result into register (it will be anyways)
         break;
       case Op_ConP: {  // Convert pointers above the centerline to NUL
@@ -2039,7 +2034,7 @@ void Matcher::find_shared( Node *n ) {
           continue; // for(int i = ...)
         }
 
-        if( mop == Op_AddP && m->in(AddPNode::Base)->Opcode() == Op_DecodeN ) {
+        if( mop == Op_AddP && m->in(AddPNode::Base)->is_DecodeNarrowPtr()) {
           // Bases used in addresses must be shared but since
           // they are shared through a DecodeN they may appear
           // to have a single use so force sharing here.
@@ -2182,6 +2177,13 @@ void Matcher::find_shared( Node *n ) {
         n->del_req(4);
         break;
       }
+      case Op_EncodeISOArray: {
+        // Restructure into a binary tree for Matching.
+        Node* pair = new (C) BinaryNode(n->in(3), n->in(4));
+        n->set_req(3, pair);
+        n->del_req(4);
+        break;
+      }
       default:
         break;
       }
@@ -2278,7 +2280,7 @@ void Matcher::validate_null_checks( ) {
     if (has_new_node(val)) {
       Node* new_val = new_node(val);
       if (is_decoden) {
-        assert(val->is_DecodeN() && val->in(0) == NULL, "sanity");
+        assert(val->is_DecodeNarrowPtr() && val->in(0) == NULL, "sanity");
         // Note: new_val may have a control edge if
         // the original ideal node DecodeN was matched before
         // it was unpinned in Matcher::collect_null_checks().

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,7 +57,7 @@ class CodeCache : AllStatic {
   static int _number_of_nmethods_with_dependencies;
   static bool _needs_cache_clean;
   static nmethod* _scavenge_root_nmethods;  // linked via nm->scavenge_root_link()
-  static nmethod* _saved_nmethods;          // linked via nm->saved_nmethod_look()
+  static nmethod* _saved_nmethods;          // Linked list of speculatively disconnected nmethods.
 
   static void verify_if_often() PRODUCT_RETURN;
 
@@ -74,7 +74,7 @@ class CodeCache : AllStatic {
   static void report_codemem_full();
 
   // Allocation/administration
-  static CodeBlob* allocate(int size);              // allocates a new CodeBlob
+  static CodeBlob* allocate(int size, bool is_critical = false); // allocates a new CodeBlob
   static void commit(CodeBlob* cb);                 // called when the allocated CodeBlob has been filled
   static int alignment_unit();                      // guaranteed alignment of all CodeBlobs
   static int alignment_offset();                    // guaranteed offset of first CodeBlob byte within alignment unit (i.e., allocation header)
@@ -84,6 +84,7 @@ class CodeCache : AllStatic {
   static void blobs_do(void f(CodeBlob* cb));       // iterates over all CodeBlobs
   static void blobs_do(CodeBlobClosure* f);         // iterates over all CodeBlobs
   static void nmethods_do(void f(nmethod* nm));     // iterates over all nmethods
+  static void alive_nmethods_do(void f(nmethod* nm)); // iterates over all alive nmethods
 
   // Lookup
   static CodeBlob* find_blob(void* start);
@@ -133,9 +134,7 @@ class CodeCache : AllStatic {
   // If "unloading_occurred" is true, then unloads (i.e., breaks root links
   // to) any unmarked codeBlobs in the cache.  Sets "marked_for_unloading"
   // to "true" iff some code got unloaded.
-  static void do_unloading(BoolObjectClosure* is_alive,
-                           OopClosure* keep_alive,
-                           bool unloading_occurred);
+  static void do_unloading(BoolObjectClosure* is_alive, bool unloading_occurred);
   static void oops_do(OopClosure* f) {
     CodeBlobToOopClosure oopc(f, /*do_marking=*/ false);
     blobs_do(&oopc);
@@ -150,11 +149,11 @@ class CodeCache : AllStatic {
   static void prune_scavenge_root_nmethods();
 
   // Printing/debugging
-  static void print()   PRODUCT_RETURN;          // prints summary
+  static void print();                           // prints summary
   static void print_internals();
   static void verify();                          // verifies the code cache
   static void print_trace(const char* event, CodeBlob* cb, int size = 0) PRODUCT_RETURN;
-  static void print_bounds(outputStream* st);    // Prints a summary of the bounds of the code cache
+  static void print_summary(outputStream* st, bool detailed = true); // Prints a summary of the code cache usage
   static void log_state(outputStream* st);
 
   // The full limits of the codeCache
@@ -168,14 +167,14 @@ class CodeCache : AllStatic {
   static size_t  capacity()                      { return _heap->capacity(); }
   static size_t  max_capacity()                  { return _heap->max_capacity(); }
   static size_t  unallocated_capacity()          { return _heap->unallocated_capacity(); }
-  static size_t  largest_free_block();
-  static bool    needs_flushing()                { return largest_free_block() < CodeCacheFlushingMinimumFreeSpace; }
+  static bool    needs_flushing()                { return unallocated_capacity() < CodeCacheFlushingMinimumFreeSpace; }
+  static double  reverse_free_ratio();
 
   static bool needs_cache_clean()                { return _needs_cache_clean; }
   static void set_needs_cache_clean(bool v)      { _needs_cache_clean = v;    }
   static void clear_inline_caches();             // clear all inline caches
 
-  static nmethod* find_and_remove_saved_code(methodOop m);
+  static nmethod* reanimate_saved_code(Method* m);
   static void remove_saved_code(nmethod* nm);
   static void speculatively_disconnect(nmethod* nm);
 
@@ -186,7 +185,7 @@ class CodeCache : AllStatic {
 #endif // HOTSWAP
 
   static void mark_all_nmethods_for_deoptimization();
-  static int  mark_for_deoptimization(methodOop dependee);
+  static int  mark_for_deoptimization(Method* dependee);
   static void make_marked_nmethods_zombies();
   static void make_marked_nmethods_not_entrant();
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -331,18 +331,6 @@ public class ISCII91 extends Charset implements HistoricallyNamedCharset
         '\uffff'  // ff -- This position shall not be used
     }; //end of table definition
 
-    /**
-     * This accessor is temporarily supplied while sun.io
-     * converters co-exist with the sun.nio.cs.{ext} charset coders
-     * These facilitate sharing of conversion tables between the
-     * two co-existing implementations. When sun.io converters
-     * are made extinct these will be unnecessary and should be removed
-     */
-
-    public static char[] getDirectMapTable() {
-        return directMapTable;
-    }
-
     private static final byte[] encoderMappingTable = {
     NO_CHAR,NO_CHAR, //0900 <reserved>
     (byte)161,NO_CHAR, //0901 -- DEVANAGARI SIGN CANDRABINDU = anunasika
@@ -473,20 +461,6 @@ public class ISCII91 extends Charset implements HistoricallyNamedCharset
     NO_CHAR,NO_CHAR, //097e -- reserved
     NO_CHAR,NO_CHAR  //097f -- reserved
     }; //end of table definition
-
-
-    /**
-     * This accessor is temporarily supplied while sun.io
-     * converters co-exist with the sun.nio.cs.{ext} charset coders
-     * These facilitate sharing of conversion tables between the
-     * two co-existing implementations. When sun.io converters
-     * are made extinct these will be unnecessary and should be removed
-     */
-
-    public static byte[] getEncoderMappingTable() {
-        return encoderMappingTable;
-    }
-
 
     private static class Decoder extends CharsetDecoder {
 

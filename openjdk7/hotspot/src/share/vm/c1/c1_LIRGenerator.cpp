@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,14 +30,15 @@
 #include "c1/c1_LIRGenerator.hpp"
 #include "c1/c1_ValueStack.hpp"
 #include "ci/ciArrayKlass.hpp"
-#include "ci/ciCPCache.hpp"
 #include "ci/ciInstance.hpp"
+#include "ci/ciObjArray.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
 #include "utilities/bitMap.inline.hpp"
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/g1/heapRegion.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 #ifdef ASSERT
 #define __ gen()->lir(__FILE__, __LINE__)->
@@ -402,6 +403,10 @@ void LIRGenerator::walk(Value instr) {
 CodeEmitInfo* LIRGenerator::state_for(Instruction* x, ValueStack* state, bool ignore_xhandler) {
   assert(state != NULL, "state must be defined");
 
+#ifndef PRODUCT
+  state->verify();
+#endif
+
   ValueStack* s = state;
   for_each_state(s) {
     if (s->kind() == ValueStack::EmptyExceptionState) {
@@ -452,7 +457,7 @@ CodeEmitInfo* LIRGenerator::state_for(Instruction* x, ValueStack* state, bool ig
     }
   }
 
-  return new CodeEmitInfo(state, ignore_xhandler ? NULL : x->exception_handlers());
+  return new CodeEmitInfo(state, ignore_xhandler ? NULL : x->exception_handlers(), x->check_flag(Instruction::DeoptimizeOnException));
 }
 
 
@@ -461,13 +466,13 @@ CodeEmitInfo* LIRGenerator::state_for(Instruction* x) {
 }
 
 
-void LIRGenerator::jobject2reg_with_patching(LIR_Opr r, ciObject* obj, CodeEmitInfo* info) {
+void LIRGenerator::klass2reg_with_patching(LIR_Opr r, ciMetadata* obj, CodeEmitInfo* info) {
   if (!obj->is_loaded() || PatchALot) {
     assert(info != NULL, "info must be set if class is not loaded");
-    __ oop2reg_patch(NULL, r, info);
+    __ klass2reg_patch(NULL, r, info);
   } else {
     // no patching needed
-    __ oop2reg(obj->constant_encoding(), r);
+    __ metadata2reg(obj->constant_encoding(), r);
   }
 }
 
@@ -657,7 +662,7 @@ void LIRGenerator::monitor_exit(LIR_Opr object, LIR_Opr lock, LIR_Opr new_hdr, L
 
 
 void LIRGenerator::new_instance(LIR_Opr dst, ciInstanceKlass* klass, LIR_Opr scratch1, LIR_Opr scratch2, LIR_Opr scratch3, LIR_Opr scratch4, LIR_Opr klass_reg, CodeEmitInfo* info) {
-  jobject2reg_with_patching(klass_reg, klass, info);
+  klass2reg_with_patching(klass_reg, klass, info);
   // If klass is not loaded we do not know if the klass has finalizers:
   if (UseFastNewInstance && klass->is_loaded()
       && !Klass::layout_helper_needs_slow_path(klass->layout_helper())) {
@@ -703,25 +708,6 @@ static ciArrayKlass* as_array_klass(ciType* type) {
     return (ciArrayKlass*)type;
   } else {
     return NULL;
-  }
-}
-
-static Value maxvalue(IfOp* ifop) {
-  switch (ifop->cond()) {
-    case If::eql: return NULL;
-    case If::neq: return NULL;
-    case If::lss: // x <  y ? x : y
-    case If::leq: // x <= y ? x : y
-      if (ifop->x() == ifop->tval() &&
-          ifop->y() == ifop->fval()) return ifop->y();
-      return NULL;
-
-    case If::gtr: // x >  y ? y : x
-    case If::geq: // x >= y ? y : x
-      if (ifop->x() == ifop->tval() &&
-          ifop->y() == ifop->fval()) return ifop->y();
-      return NULL;
-
   }
 }
 
@@ -955,8 +941,8 @@ void LIRGenerator::profile_branch(If* if_instr, If::Condition cond) {
       not_taken_count_offset = t;
     }
 
-    LIR_Opr md_reg = new_register(T_OBJECT);
-    __ oop2reg(md->constant_encoding(), md_reg);
+    LIR_Opr md_reg = new_register(T_METADATA);
+    __ metadata2reg(md->constant_encoding(), md_reg);
 
     LIR_Opr data_offset_reg = new_pointer_register();
     __ cmove(lir_cond(cond),
@@ -1189,11 +1175,11 @@ void LIRGenerator::do_Return(Return* x) {
   if (compilation()->env()->dtrace_method_probes()) {
     BasicTypeList signature;
     signature.append(LP64_ONLY(T_LONG) NOT_LP64(T_INT));    // thread
-    signature.append(T_OBJECT); // methodOop
+    signature.append(T_OBJECT); // Method*
     LIR_OprList* args = new LIR_OprList();
     args->append(getThreadPointer());
-    LIR_Opr meth = new_register(T_OBJECT);
-    __ oop2reg(method()->constant_encoding(), meth);
+    LIR_Opr meth = new_register(T_METADATA);
+    __ metadata2reg(method()->constant_encoding(), meth);
     args->append(meth);
     call_runtime(&signature, args, CAST_FROM_FN_PTR(address, SharedRuntime::dtrace_method_exit), voidType, NULL);
   }
@@ -1286,7 +1272,7 @@ void LIRGenerator::do_getClass(Intrinsic* x) {
   if (x->needs_null_check()) {
     info = state_for(x);
   }
-  __ move(new LIR_Address(rcvr.result(), oopDesc::klass_offset_in_bytes(), T_OBJECT), result, info);
+  __ move(new LIR_Address(rcvr.result(), oopDesc::klass_offset_in_bytes(), T_ADDRESS), result, info);
   __ move_wide(new LIR_Address(result, in_bytes(Klass::java_mirror_offset()), T_OBJECT), result);
 }
 
@@ -1417,12 +1403,12 @@ void LIRGenerator::pre_barrier(LIR_Opr addr_opr, LIR_Opr pre_val,
                                bool do_load, bool patch, CodeEmitInfo* info) {
   // Do the pre-write barrier, if any.
   switch (_bs->kind()) {
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
     case BarrierSet::G1SATBCT:
     case BarrierSet::G1SATBCTLogging:
       G1SATBCardTableModRef_pre_barrier(addr_opr, pre_val, do_load, patch, info);
       break;
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
     case BarrierSet::CardTableModRef:
     case BarrierSet::CardTableExtension:
       // No pre barriers
@@ -1439,12 +1425,12 @@ void LIRGenerator::pre_barrier(LIR_Opr addr_opr, LIR_Opr pre_val,
 
 void LIRGenerator::post_barrier(LIR_OprDesc* addr, LIR_OprDesc* new_val) {
   switch (_bs->kind()) {
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
     case BarrierSet::G1SATBCT:
     case BarrierSet::G1SATBCTLogging:
       G1SATBCardTableModRef_post_barrier(addr,  new_val);
       break;
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
     case BarrierSet::CardTableModRef:
     case BarrierSet::CardTableExtension:
       CardTableModRef_post_barrier(addr,  new_val);
@@ -1459,7 +1445,7 @@ void LIRGenerator::post_barrier(LIR_OprDesc* addr, LIR_OprDesc* new_val) {
 }
 
 ////////////////////////////////////////////////////////////////////////
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 
 void LIRGenerator::G1SATBCardTableModRef_pre_barrier(LIR_Opr addr_opr, LIR_Opr pre_val,
                                                      bool do_load, bool patch, CodeEmitInfo* info) {
@@ -1575,7 +1561,7 @@ void LIRGenerator::G1SATBCardTableModRef_post_barrier(LIR_OprDesc* addr, LIR_Opr
   __ branch_destination(slow->continuation());
 }
 
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 ////////////////////////////////////////////////////////////////////////
 
 void LIRGenerator::CardTableModRef_post_barrier(LIR_OprDesc* addr, LIR_OprDesc* new_val) {
@@ -1791,11 +1777,18 @@ void LIRGenerator::do_LoadField(LoadField* x) {
   }
 #endif
 
+  bool stress_deopt = StressLoopInvariantCodeMotion && info && info->deoptimize_on_exception();
   if (x->needs_null_check() &&
       (needs_patching ||
-       MacroAssembler::needs_explicit_null_check(x->offset()))) {
+       MacroAssembler::needs_explicit_null_check(x->offset()) ||
+       stress_deopt)) {
+    LIR_Opr obj = object.result();
+    if (stress_deopt) {
+      obj = new_register(T_OBJECT);
+      __ move(LIR_OprFact::oopConst(NULL), obj);
+    }
     // emit an explicit null check because the offset is too large
-    __ null_check(object.result(), new CodeEmitInfo(info));
+    __ null_check(obj, new CodeEmitInfo(info));
   }
 
   LIR_Opr reg = rlock_result(x, field_type);
@@ -1872,6 +1865,11 @@ void LIRGenerator::do_ArrayLength(ArrayLength* x) {
     } else {
       info = state_for(nc);
     }
+    if (StressLoopInvariantCodeMotion && info->deoptimize_on_exception()) {
+      LIR_Opr obj = new_register(T_OBJECT);
+      __ move(LIR_OprFact::oopConst(NULL), obj);
+      __ null_check(obj, new CodeEmitInfo(info));
+    }
   }
   __ load(new LIR_Address(array.result(), arrayOopDesc::length_offset_in_bytes(), T_INT), reg, info, lir_patch_none);
 }
@@ -1882,14 +1880,11 @@ void LIRGenerator::do_LoadIndexed(LoadIndexed* x) {
   LIRItem array(x->array(), this);
   LIRItem index(x->index(), this);
   LIRItem length(this);
-  bool needs_range_check = true;
+  bool needs_range_check = x->compute_needs_range_check();
 
-  if (use_length) {
-    needs_range_check = x->compute_needs_range_check();
-    if (needs_range_check) {
-      length.set_instruction(x->length());
-      length.load_item();
-    }
+  if (use_length && needs_range_check) {
+    length.set_instruction(x->length());
+    length.load_item();
   }
 
   array.load_item();
@@ -1909,13 +1904,20 @@ void LIRGenerator::do_LoadIndexed(LoadIndexed* x) {
     } else {
       null_check_info = range_check_info;
     }
+    if (StressLoopInvariantCodeMotion && null_check_info->deoptimize_on_exception()) {
+      LIR_Opr obj = new_register(T_OBJECT);
+      __ move(LIR_OprFact::oopConst(NULL), obj);
+      __ null_check(obj, new CodeEmitInfo(null_check_info));
+    }
   }
 
   // emit array address setup early so it schedules better
   LIR_Address* array_addr = emit_array_address(array.result(), index.result(), x->elt_type(), false);
 
   if (GenerateRangeChecks && needs_range_check) {
-    if (use_length) {
+    if (StressLoopInvariantCodeMotion && range_check_info->deoptimize_on_exception()) {
+      __ branch(lir_cond_always, T_ILLEGAL, new RangeCheckStub(range_check_info, index.result()));
+    } else if (use_length) {
       // TODO: use a (modified) version of array_range_check that does not require a
       //       constant length to be loaded to a register
       __ cmp(lir_cond_belowEqual, length.result(), index.result());
@@ -2181,7 +2183,7 @@ void LIRGenerator::do_UnsafeGetObject(UnsafeGetObject* x) {
 
   get_Object_unsafe(value, src.result(), off.result(), type, x->is_volatile());
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   // We might be reading the value of the referent field of a
   // Reference object in order to attach it back to the live
   // object graph. If G1 is enabled then we need to record
@@ -2230,6 +2232,7 @@ void LIRGenerator::do_UnsafeGetObject(UnsafeGetObject* x) {
       // We still need to continue with the checks.
       if (src.is_constant()) {
         ciObject* src_con = src.get_jobject_constant();
+        guarantee(src_con != NULL, "no source constant");
 
         if (src_con->is_null_object()) {
           // The constant src object is null - We can skip
@@ -2292,8 +2295,8 @@ void LIRGenerator::do_UnsafeGetObject(UnsafeGetObject* x) {
       if (gen_type_check) {
         // We have determined that offset == referent_offset && src != null.
         // if (src->_klass->_reference_type == REF_NONE) -> continue
-        __ move(new LIR_Address(src.result(), oopDesc::klass_offset_in_bytes(), T_OBJECT), src_klass);
-        LIR_Address* reference_type_addr = new LIR_Address(src_klass, in_bytes(instanceKlass::reference_type_offset()), T_BYTE);
+        __ move(new LIR_Address(src.result(), oopDesc::klass_offset_in_bytes(), UseCompressedKlassPointers ? T_OBJECT : T_ADDRESS), src_klass);
+        LIR_Address* reference_type_addr = new LIR_Address(src_klass, in_bytes(InstanceKlass::reference_type_offset()), T_BYTE);
         LIR_Opr reference_type = new_register(T_INT);
         __ move(reference_type_addr, reference_type);
         __ cmp(lir_cond_equal, reference_type, LIR_OprFact::intConst(REF_NONE));
@@ -2311,7 +2314,7 @@ void LIRGenerator::do_UnsafeGetObject(UnsafeGetObject* x) {
       __ branch_destination(Lcont->label());
     }
   }
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   if (x->is_volatile() && os::is_MP()) __ membar_acquire();
 }
@@ -2553,8 +2556,8 @@ void LIRGenerator::do_Goto(Goto* x) {
       assert(data->is_JumpData(), "need JumpData for branches");
       offset = md->byte_offset_of_slot(data, JumpData::taken_offset());
     }
-    LIR_Opr md_reg = new_register(T_OBJECT);
-    __ oop2reg(md->constant_encoding(), md_reg);
+    LIR_Opr md_reg = new_register(T_METADATA);
+    __ metadata2reg(md->constant_encoding(), md_reg);
 
     increment_counter(new LIR_Address(md_reg, offset,
                                       NOT_LP64(T_INT) LP64_ONLY(T_LONG)), DataLayout::counter_increment);
@@ -2608,11 +2611,11 @@ void LIRGenerator::do_Base(Base* x) {
   if (compilation()->env()->dtrace_method_probes()) {
     BasicTypeList signature;
     signature.append(LP64_ONLY(T_LONG) NOT_LP64(T_INT));    // thread
-    signature.append(T_OBJECT); // methodOop
+    signature.append(T_OBJECT); // Method*
     LIR_OprList* args = new LIR_OprList();
     args->append(getThreadPointer());
-    LIR_Opr meth = new_register(T_OBJECT);
-    __ oop2reg(method()->constant_encoding(), meth);
+    LIR_Opr meth = new_register(T_METADATA);
+    __ metadata2reg(method()->constant_encoding(), meth);
     args->append(meth);
     call_runtime(&signature, args, CAST_FROM_FN_PTR(address, SharedRuntime::dtrace_method_entry), voidType, NULL);
   }
@@ -2633,7 +2636,7 @@ void LIRGenerator::do_Base(Base* x) {
       LIR_Opr lock = new_register(T_INT);
       __ load_stack_address_monitor(0, lock);
 
-      CodeEmitInfo* info = new CodeEmitInfo(scope()->start()->state()->copy(ValueStack::StateBefore, SynchronizationEntryBCI), NULL);
+      CodeEmitInfo* info = new CodeEmitInfo(scope()->start()->state()->copy(ValueStack::StateBefore, SynchronizationEntryBCI), NULL, x->check_flag(Instruction::DeoptimizeOnException));
       CodeStub* slow_path = new MonitorEnterStub(obj, lock, info);
 
       // receiver is guaranteed non-NULL so don't need CodeEmitInfo
@@ -2643,7 +2646,7 @@ void LIRGenerator::do_Base(Base* x) {
 
   // increment invocation counters if needed
   if (!method()->is_accessor()) { // Accessors do not have MDOs, so no counting.
-    CodeEmitInfo* info = new CodeEmitInfo(scope()->start()->state()->copy(ValueStack::StateBefore, SynchronizationEntryBCI), NULL);
+    CodeEmitInfo* info = new CodeEmitInfo(scope()->start()->state()->copy(ValueStack::StateBefore, SynchronizationEntryBCI), NULL, false);
     increment_invocation_counter(info);
   }
 
@@ -2794,7 +2797,7 @@ void LIRGenerator::do_Invoke(Invoke* x) {
                           SharedRuntime::get_resolve_virtual_call_stub(),
                           arg_list, info);
       } else {
-        int entry_offset = instanceKlass::vtable_start_offset() + x->vtable_index() * vtableEntry::size();
+        int entry_offset = InstanceKlass::vtable_start_offset() + x->vtable_index() * vtableEntry::size();
         int vtable_offset = entry_offset * wordSize + vtableEntry::method_offset_in_bytes();
         __ call_virtual(target, receiver, result_register, vtable_offset, arg_list, info);
       }
@@ -2905,11 +2908,12 @@ void LIRGenerator::do_ThreadIDIntrinsic(Intrinsic* x) {
 void LIRGenerator::do_ClassIDIntrinsic(Intrinsic* x) {
     CodeEmitInfo* info = state_for(x);
     CodeEmitInfo* info2 = new CodeEmitInfo(info); // Clone for the second null check
+    BasicType klass_pointer_type = NOT_LP64(T_INT) LP64_ONLY(T_LONG);
     assert(info != NULL, "must have info");
     LIRItem arg(x->argument_at(1), this);
     arg.load_item();
-    LIR_Opr klass = new_register(T_OBJECT);
-    __ move(new LIR_Address(arg.result(), java_lang_Class::klass_offset_in_bytes(), T_OBJECT), klass, info);
+    LIR_Opr klass = new_pointer_register();
+    __ move(new LIR_Address(arg.result(), java_lang_Class::klass_offset_in_bytes(), klass_pointer_type), klass, info);
     LIR_Opr id = new_register(T_LONG);
     ByteSize offset = TRACE_ID_OFFSET;
     LIR_Address* trace_id_addr = new LIR_Address(klass, in_bytes(offset), T_LONG);
@@ -2976,8 +2980,24 @@ void LIRGenerator::do_Intrinsic(Intrinsic* x) {
     do_CompareAndSwap(x, longType);
     break;
 
+  case vmIntrinsics::_loadFence :
+    if (os::is_MP()) __ membar_acquire();
+    break;
+  case vmIntrinsics::_storeFence:
+    if (os::is_MP()) __ membar_release();
+    break;
+  case vmIntrinsics::_fullFence :
+    if (os::is_MP()) __ membar();
+    break;
+
   case vmIntrinsics::_Reference_get:
     do_Reference_get(x);
+    break;
+
+  case vmIntrinsics::_updateCRC32:
+  case vmIntrinsics::_updateBytesCRC32:
+  case vmIntrinsics::_updateByteBufferCRC32:
+    do_update_CRC32(x);
     break;
 
   default: ShouldNotReachHere(); break;
@@ -3031,21 +3051,20 @@ void LIRGenerator::increment_event_counter_impl(CodeEmitInfo* info,
   assert(level > CompLevel_simple, "Shouldn't be here");
 
   int offset = -1;
-  LIR_Opr counter_holder = new_register(T_OBJECT);
-  LIR_Opr meth;
+  LIR_Opr counter_holder;
   if (level == CompLevel_limited_profile) {
-    offset = in_bytes(backedge ? methodOopDesc::backedge_counter_offset() :
-                                 methodOopDesc::invocation_counter_offset());
-    __ oop2reg(method->constant_encoding(), counter_holder);
-    meth = counter_holder;
+    address counters_adr = method->ensure_method_counters();
+    counter_holder = new_pointer_register();
+    __ move(LIR_OprFact::intptrConst(counters_adr), counter_holder);
+    offset = in_bytes(backedge ? MethodCounters::backedge_counter_offset() :
+                                 MethodCounters::invocation_counter_offset());
   } else if (level == CompLevel_full_profile) {
-    offset = in_bytes(backedge ? methodDataOopDesc::backedge_counter_offset() :
-                                 methodDataOopDesc::invocation_counter_offset());
+    counter_holder = new_register(T_METADATA);
+    offset = in_bytes(backedge ? MethodData::backedge_counter_offset() :
+                                 MethodData::invocation_counter_offset());
     ciMethodData* md = method->method_data_or_null();
     assert(md != NULL, "Sanity");
-    __ oop2reg(md->constant_encoding(), counter_holder);
-    meth = new_register(T_OBJECT);
-    __ oop2reg(method->constant_encoding(), meth);
+    __ metadata2reg(md->constant_encoding(), counter_holder);
   } else {
     ShouldNotReachHere();
   }
@@ -3056,6 +3075,8 @@ void LIRGenerator::increment_event_counter_impl(CodeEmitInfo* info,
   __ store(result, counter);
   if (notify) {
     LIR_Opr mask = load_immediate(frequency << InvocationCounter::count_shift, T_INT);
+    LIR_Opr meth = new_register(T_METADATA);
+    __ metadata2reg(method->constant_encoding(), meth);
     __ logical_and(result, mask, result);
     __ cmp(lir_cond_equal, result, LIR_OprFact::intConst(0));
     // The bci for info can point to cmp for if's we want the if bci
@@ -3089,6 +3110,94 @@ void LIRGenerator::do_RuntimeCall(RuntimeCall* x) {
     __ move(result, rlock_result(x));
   }
 }
+
+#ifdef ASSERT
+void LIRGenerator::do_Assert(Assert *x) {
+  ValueTag tag = x->x()->type()->tag();
+  If::Condition cond = x->cond();
+
+  LIRItem xitem(x->x(), this);
+  LIRItem yitem(x->y(), this);
+  LIRItem* xin = &xitem;
+  LIRItem* yin = &yitem;
+
+  assert(tag == intTag, "Only integer assertions are valid!");
+
+  xin->load_item();
+  yin->dont_load_item();
+
+  set_no_result(x);
+
+  LIR_Opr left = xin->result();
+  LIR_Opr right = yin->result();
+
+  __ lir_assert(lir_cond(x->cond()), left, right, x->message(), true);
+}
+#endif
+
+void LIRGenerator::do_RangeCheckPredicate(RangeCheckPredicate *x) {
+
+
+  Instruction *a = x->x();
+  Instruction *b = x->y();
+  if (!a || StressRangeCheckElimination) {
+    assert(!b || StressRangeCheckElimination, "B must also be null");
+
+    CodeEmitInfo *info = state_for(x, x->state());
+    CodeStub* stub = new PredicateFailedStub(info);
+
+    __ jump(stub);
+  } else if (a->type()->as_IntConstant() && b->type()->as_IntConstant()) {
+    int a_int = a->type()->as_IntConstant()->value();
+    int b_int = b->type()->as_IntConstant()->value();
+
+    bool ok = false;
+
+    switch(x->cond()) {
+      case Instruction::eql: ok = (a_int == b_int); break;
+      case Instruction::neq: ok = (a_int != b_int); break;
+      case Instruction::lss: ok = (a_int < b_int); break;
+      case Instruction::leq: ok = (a_int <= b_int); break;
+      case Instruction::gtr: ok = (a_int > b_int); break;
+      case Instruction::geq: ok = (a_int >= b_int); break;
+      case Instruction::aeq: ok = ((unsigned int)a_int >= (unsigned int)b_int); break;
+      case Instruction::beq: ok = ((unsigned int)a_int <= (unsigned int)b_int); break;
+      default: ShouldNotReachHere();
+    }
+
+    if (ok) {
+
+      CodeEmitInfo *info = state_for(x, x->state());
+      CodeStub* stub = new PredicateFailedStub(info);
+
+      __ jump(stub);
+    }
+  } else {
+
+    ValueTag tag = x->x()->type()->tag();
+    If::Condition cond = x->cond();
+    LIRItem xitem(x->x(), this);
+    LIRItem yitem(x->y(), this);
+    LIRItem* xin = &xitem;
+    LIRItem* yin = &yitem;
+
+    assert(tag == intTag, "Only integer deoptimizations are valid!");
+
+    xin->load_item();
+    yin->dont_load_item();
+    set_no_result(x);
+
+    LIR_Opr left = xin->result();
+    LIR_Opr right = yin->result();
+
+    CodeEmitInfo *info = state_for(x, x->state());
+    CodeStub* stub = new PredicateFailedStub(info);
+
+    __ cmp(lir_cond(cond), left, right);
+    __ branch(lir_cond(cond), right->type(), stub);
+  }
+}
+
 
 LIR_Opr LIRGenerator::call_runtime(Value arg1, address entry, ValueType* result_type, CodeEmitInfo* info) {
   LIRItemList args(1);

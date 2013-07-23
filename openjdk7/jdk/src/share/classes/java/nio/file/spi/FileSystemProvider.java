@@ -287,6 +287,8 @@ public abstract class FileSystemProvider {
      * @param   uri
      *          The URI to convert
      *
+     * @return  The resulting {@code Path}
+     *
      * @throws  IllegalArgumentException
      *          If the URI scheme does not identify this provider or other
      *          preconditions on the uri parameter do not hold
@@ -373,11 +375,13 @@ public abstract class FileSystemProvider {
     {
         if (options.length > 0) {
             for (OpenOption opt: options) {
-                if (opt != StandardOpenOption.READ)
+                // All OpenOption values except for APPEND and WRITE are allowed
+                if (opt == StandardOpenOption.APPEND ||
+                    opt == StandardOpenOption.WRITE)
                     throw new UnsupportedOperationException("'" + opt + "' not allowed");
             }
         }
-        return Channels.newInputStream(Files.newByteChannel(path));
+        return Channels.newInputStream(Files.newByteChannel(path, options));
     }
 
     /**
@@ -749,6 +753,8 @@ public abstract class FileSystemProvider {
      * @param   link
      *          the path to the symbolic link
      *
+     * @return  The target of the symbolic link
+     *
      * @throws  UnsupportedOperationException
      *          if the implementation does not support symbolic links
      * @throws  NotLinkException
@@ -982,6 +988,8 @@ public abstract class FileSystemProvider {
      * exactly the manner specified by the {@link Files#getFileAttributeView}
      * method.
      *
+     * @param   <V>
+     *          The {@code FileAttributeView} type
      * @param   path
      *          the path to the file
      * @param   type
@@ -1000,6 +1008,8 @@ public abstract class FileSystemProvider {
      * exactly the manner specified by the {@link
      * Files#readAttributes(Path,Class,LinkOption[])} method.
      *
+     * @param   <A>
+     *          The {@code BasicFileAttributes} type
      * @param   path
      *          the path to the file
      * @param   type

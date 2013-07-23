@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -247,6 +247,7 @@ class LIRGenerator: public InstructionVisitor, public BlockClosure {
   void do_NIOCheckIndex(Intrinsic* x);
   void do_FPIntrinsics(Intrinsic* x);
   void do_Reference_get(Intrinsic* x);
+  void do_update_CRC32(Intrinsic* x);
 
   void do_UnsafePrefetch(UnsafePrefetch* x, bool is_store);
 
@@ -306,7 +307,7 @@ class LIRGenerator: public InstructionVisitor, public BlockClosure {
 
   void store_stack_parameter (LIR_Opr opr, ByteSize offset_from_sp_in_bytes);
 
-  void jobject2reg_with_patching(LIR_Opr r, ciObject* obj, CodeEmitInfo* info);
+  void klass2reg_with_patching(LIR_Opr r, ciMetadata* obj, CodeEmitInfo* info);
 
   // this loads the length and compares against the index
   void array_range_check          (LIR_Opr array, LIR_Opr index, CodeEmitInfo* null_check_info, CodeEmitInfo* range_check_info);
@@ -412,6 +413,8 @@ class LIRGenerator: public InstructionVisitor, public BlockClosure {
     case If::leq: l = lir_cond_lessEqual;    break;
     case If::geq: l = lir_cond_greaterEqual; break;
     case If::gtr: l = lir_cond_greater;      break;
+    case If::aeq: l = lir_cond_aboveEqual;   break;
+    case If::beq: l = lir_cond_belowEqual;   break;
     };
     return l;
   }
@@ -534,6 +537,10 @@ class LIRGenerator: public InstructionVisitor, public BlockClosure {
   virtual void do_ProfileInvoke  (ProfileInvoke*   x);
   virtual void do_RuntimeCall    (RuntimeCall*     x);
   virtual void do_MemBar         (MemBar*          x);
+  virtual void do_RangeCheckPredicate(RangeCheckPredicate* x);
+#ifdef ASSERT
+  virtual void do_Assert         (Assert*          x);
+#endif
 };
 
 

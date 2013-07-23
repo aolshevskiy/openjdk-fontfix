@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.tools.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -39,18 +38,6 @@ public final class ConfigurationMessages {
 
     private final static LocalizableMessageFactory messageFactory = new LocalizableMessageFactory("com.sun.tools.internal.ws.resources.configuration");
     private final static Localizer localizer = new Localizer();
-
-    public static Localizable localizableCONFIGURATION_INVALID_ELEMENT(Object arg0, Object arg1, Object arg2) {
-        return messageFactory.getMessage("configuration.invalidElement", arg0, arg1, arg2);
-    }
-
-    /**
-     * invalid element "{2}" in file "{0}" (line {1})
-     *
-     */
-    public static String CONFIGURATION_INVALID_ELEMENT(Object arg0, Object arg1, Object arg2) {
-        return localizer.localize(localizableCONFIGURATION_INVALID_ELEMENT(arg0, arg1, arg2));
-    }
 
     public static Localizable localizableCONFIGURATION_NOT_BINDING_FILE(Object arg0) {
         return messageFactory.getMessage("configuration.notBindingFile", arg0);

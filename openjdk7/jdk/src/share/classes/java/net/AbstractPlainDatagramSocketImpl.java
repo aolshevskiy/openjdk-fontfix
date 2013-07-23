@@ -26,8 +26,6 @@ package java.net;
 
 import java.io.FileDescriptor;
 import java.io.IOException;
-import java.io.InterruptedIOException;
-import java.util.Enumeration;
 import java.security.AccessController;
 import sun.net.ResourceManager;
 
@@ -47,13 +45,8 @@ abstract class AbstractPlainDatagramSocketImpl extends DatagramSocketImpl
     int timeout = 0;
     boolean connected = false;
     private int trafficClass = 0;
-    private InetAddress connectedAddress = null;
+    protected InetAddress connectedAddress = null;
     private int connectedPort = -1;
-
-    /* cached socket options */
-    private int multicastInterface = 0;
-    private boolean loopbackMode = true;
-    private int ttl = -1;
 
     private static final String os = AccessController.doPrivileged(
         new sun.security.action.GetPropertyAction("os.name")
@@ -69,7 +62,12 @@ abstract class AbstractPlainDatagramSocketImpl extends DatagramSocketImpl
      */
     static {
         java.security.AccessController.doPrivileged(
-                  new sun.security.action.LoadLibraryAction("net"));
+            new java.security.PrivilegedAction<Void>() {
+                public Void run() {
+                    System.loadLibrary("net");
+                    return null;
+                }
+            });
     }
 
     /**
@@ -101,7 +99,7 @@ abstract class AbstractPlainDatagramSocketImpl extends DatagramSocketImpl
     /**
      * Sends a datagram packet. The packet contains the data and the
      * destination address to send the packet to.
-     * @param packet to be sent.
+     * @param p the packet to be sent.
      */
     protected abstract void send(DatagramPacket p) throws IOException;
 
@@ -132,13 +130,13 @@ abstract class AbstractPlainDatagramSocketImpl extends DatagramSocketImpl
 
     /**
      * Peek at the packet to see who it is from.
-     * @param return the address which the packet came from.
+     * @param i the address to populate with the sender address
      */
     protected abstract int peek(InetAddress i) throws IOException;
     protected abstract int peekData(DatagramPacket p) throws IOException;
     /**
      * Receive the datagram packet.
-     * @param Packet Received.
+     * @param p the packet to receive into
      */
     protected synchronized void receive(DatagramPacket p)
         throws IOException {
@@ -150,7 +148,7 @@ abstract class AbstractPlainDatagramSocketImpl extends DatagramSocketImpl
 
     /**
      * Set the TTL (time-to-live) option.
-     * @param TTL to be set.
+     * @param ttl TTL to be set.
      */
     protected abstract void setTimeToLive(int ttl) throws IOException;
 
@@ -161,18 +159,20 @@ abstract class AbstractPlainDatagramSocketImpl extends DatagramSocketImpl
 
     /**
      * Set the TTL (time-to-live) option.
-     * @param TTL to be set.
+     * @param ttl TTL to be set.
      */
+    @Deprecated
     protected abstract void setTTL(byte ttl) throws IOException;
 
     /**
      * Get the TTL (time-to-live) option.
      */
+    @Deprecated
     protected abstract byte getTTL() throws IOException;
 
     /**
      * Join the multicast group.
-     * @param multicast address to join.
+     * @param inetaddr multicast address to join.
      */
     protected void join(InetAddress inetaddr) throws IOException {
         join(inetaddr, null);
@@ -180,14 +180,14 @@ abstract class AbstractPlainDatagramSocketImpl extends DatagramSocketImpl
 
     /**
      * Leave the multicast group.
-     * @param multicast address to leave.
+     * @param inetaddr multicast address to leave.
      */
     protected void leave(InetAddress inetaddr) throws IOException {
         leave(inetaddr, null);
     }
     /**
      * Join the multicast group.
-     * @param multicast address to join.
+     * @param mcastaddr multicast address to join.
      * @param netIf specifies the local interface to receive multicast
      *        datagram packets
      * @throws  IllegalArgumentException if mcastaddr is null or is a
@@ -207,7 +207,7 @@ abstract class AbstractPlainDatagramSocketImpl extends DatagramSocketImpl
 
     /**
      * Leave the multicast group.
-     * @param multicast address to leave.
+     * @param mcastaddr  multicast address to leave.
      * @param netIf specified the local interface to leave the group at
      * @throws  IllegalArgumentException if mcastaddr is null or is a
      *          SocketAddress subclass not supported by this socket

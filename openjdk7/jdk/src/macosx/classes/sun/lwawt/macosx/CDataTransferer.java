@@ -174,7 +174,7 @@ public class CDataTransferer extends DataTransferer {
                 bytes = Normalizer.normalize(new String(bytes, "UTF8"), Form.NFC).getBytes("UTF8");
             }
 
-            return super.translateBytesOrStream(stream, bytes, flavor, format, transferable);
+            return super.translateBytes(bytes, flavor, format, transferable);
         }
 
 
@@ -182,10 +182,6 @@ public class CDataTransferer extends DataTransferer {
         Long format = predefinedClipboardNameMap.get(str);
 
         if (format == null) {
-            if (java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().isHeadlessInstance()) {
-                // Do not try to access GUI manager for unknown format
-                return new Long(-1);
-            }
             format = new Long(registerFormatWithPasteboard(str));
             predefinedClipboardNameMap.put(str, format);
             predefinedClipboardFormatMap.put(format, str);
@@ -261,16 +257,13 @@ public class CDataTransferer extends DataTransferer {
     private native byte[] imageDataToPlatformImageBytes(int[] rData, int nW, int nH);
 
     /**
-        * Translates either a byte array or an input stream which contain
+     * Translates a byte array which contains
      * platform-specific image data in the given format into an Image.
      */
-    protected Image platformImageBytesOrStreamToImage(InputStream stream, byte[] bytes, long format) throws IOException {
-        byte[] imageData = bytes;
-
-        if (imageData == null)
-            imageData = inputStreamToByteArray(stream);
-
-        return getImageForByteStream(imageData);
+    protected Image platformImageBytesToImage(byte[] bytes, long format)
+        throws IOException
+    {
+        return getImageForByteStream(bytes);
     }
 
     private native Image getImageForByteStream(byte[] bytes);

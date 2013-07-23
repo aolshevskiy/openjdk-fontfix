@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2002, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,9 +21,8 @@
  * questions.
  */
 
-/**
+/*
  * @test
- * @bug 0000000
  * @summary Determine if proper warning messages are printed when know.
  * @author jamieh
  * @library ../lib/
@@ -42,7 +41,7 @@ public class TestTagMisuse extends JavadocTester {
     };
     private static final String[][] NEGATED_TEST = NO_TEST;
     private static final String[] ARGS = new String[] {
-        "-d", BUG_ID, SRC_DIR + FS + "TestTagMisuse.java"
+        "-Xdoclint:none", "-d", BUG_ID, SRC_DIR + FS + "TestTagMisuse.java"
     };
 
     /**

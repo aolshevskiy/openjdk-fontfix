@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,11 +25,12 @@
 #ifndef SHARE_VM_TRACE_TRACESTREAM_HPP
 #define SHARE_VM_TRACE_TRACESTREAM_HPP
 
+#include "utilities/macros.hpp"
+
 #if INCLUDE_TRACE
 
 #include "oops/klass.hpp"
-#include "oops/klassOop.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "oops/symbol.hpp"
 #include "utilities/ostream.hpp"
 
@@ -84,11 +85,10 @@ class TraceStream : public StackObj {
   // Event<TraceId>::writeEvent() (pseudocode) contains the
   // necessary ResourceMark for the resource allocations below.
   // See traceEventClasses.xsl for details.
-  void print_val(const char* label, const klassOop& val) {
+  void print_val(const char* label, const Klass* const val) {
     const char* description = "NULL";
     if (val != NULL) {
-      Klass* myklass = val->klass_part();
-      Symbol* name = myklass->name();
+      Symbol* name = val->name();
       if (name != NULL) {
         description = name->as_C_string();
       }
@@ -100,7 +100,7 @@ class TraceStream : public StackObj {
   // Event<TraceId>::writeEvent() (pseudocode) contains the
   // necessary ResourceMark for the resource allocations below.
   // See traceEventClasses.xsl for details.
-  void print_val(const char* label, const methodOop& val) {
+  void print_val(const char* label, const Method* const val) {
     const char* description = "NULL";
     if (val != NULL) {
       description = val->name_and_sig_as_C_string();

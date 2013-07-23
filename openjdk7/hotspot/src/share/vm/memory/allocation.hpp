@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,7 @@
 
 #include "runtime/globals.hpp"
 #include "utilities/globalDefinitions.hpp"
+#include "utilities/macros.hpp"
 #ifdef COMPILER1
 #include "c1/c1_globals.hpp"
 #endif
@@ -52,6 +53,12 @@
   #endif
 #endif
 
+class AllocFailStrategy {
+public:
+  enum AllocFailEnum { EXIT_OOM, RETURN_NULL };
+};
+typedef AllocFailStrategy::AllocFailEnum AllocFailType;
+
 // All classes in the virtual machine must be subclassed
 // by one of the following allocation classes:
 //
@@ -70,18 +77,32 @@
 // For classes used as name spaces.
 // - AllStatic
 //
+// For classes in Metaspace (class data)
+// - MetaspaceObj
+//
 // The printable subclasses are used for debugging and define virtual
 // member functions for printing. Classes that avoid allocating the
 // vtbl entries in the objects should therefore not be the printable
 // subclasses.
 //
 // The following macros and function should be used to allocate memory
-// directly in the resource area or in the C-heap:
+// directly in the resource area or in the C-heap, The _OBJ variants
+// of the NEW/FREE_C_HEAP macros are used for alloc/dealloc simple
+// objects which are not inherited from CHeapObj, note constructor and
+// destructor are not called. The preferable way to allocate objects
+// is using the new operator.
 //
-//   NEW_RESOURCE_ARRAY(type,size)
+// WARNING: The array variant must only be used for a homogenous array
+// where all objects are of the exact type specified. If subtypes are
+// stored in the array then must pay attention to calling destructors
+// at needed.
+//
+//   NEW_RESOURCE_ARRAY(type, size)
 //   NEW_RESOURCE_OBJ(type)
-//   NEW_C_HEAP_ARRAY(type,size)
-//   NEW_C_HEAP_OBJ(type)
+//   NEW_C_HEAP_ARRAY(type, size)
+//   NEW_C_HEAP_OBJ(type, memflags)
+//   FREE_C_HEAP_ARRAY(type, old, memflags)
+//   FREE_C_HEAP_OBJ(objname, type, memflags)
 //   char* AllocateHeap(size_t size, const char* name);
 //   void  FreeHeap(void* p);
 //
@@ -139,7 +160,7 @@ enum MemoryType {
   mtTracing           = 0x0F00,  // memory used for Tracing
   mt_number_of_types  = 0x000F,  // number of memory types (mtDontTrack
                                  // is not included as validate type)
-  mtDontTrack         = 0x1000,  // memory we do not or cannot track
+  mtDontTrack         = 0x0F00,  // memory we do not or cannot track
   mt_masks            = 0x7F00,
 
   // object type mask
@@ -158,10 +179,18 @@ enum MemoryType {
 
 typedef unsigned short MEMFLAGS;
 
+#if INCLUDE_NMT
+
 extern bool NMT_track_callsite;
 
+#else
+
+const bool NMT_track_callsite = false;
+
+#endif // INCLUDE_NMT
+
 // debug build does not inline
-#if defined(_DEBUG_)
+#if defined(_NMT_NOINLINE_)
   #define CURRENT_PC       (NMT_track_callsite ? os::get_caller_pc(1) : 0)
   #define CALLER_PC        (NMT_track_callsite ? os::get_caller_pc(2) : 0)
   #define CALLER_CALLER_PC (NMT_track_callsite ? os::get_caller_pc(3) : 0)
@@ -178,17 +207,22 @@ template <MEMFLAGS F> class CHeapObj ALLOCATION_SUPER_CLASS_SPEC {
   _NOINLINE_ void* operator new(size_t size, address caller_pc = 0);
   _NOINLINE_ void* operator new (size_t size, const std::nothrow_t&  nothrow_constant,
                                address caller_pc = 0);
-
+  _NOINLINE_ void* operator new [](size_t size, address caller_pc = 0);
+  _NOINLINE_ void* operator new [](size_t size, const std::nothrow_t&  nothrow_constant,
+                               address caller_pc = 0);
   void  operator delete(void* p);
+  void  operator delete [] (void* p);
 };
 
 // Base class for objects allocated on the stack only.
 // Calling new or delete will result in fatal error.
 
 class StackObj ALLOCATION_SUPER_CLASS_SPEC {
- public:
+ private:
   void* operator new(size_t size);
   void  operator delete(void* p);
+  void* operator new [](size_t size);
+  void  operator delete [](void* p);
 };
 
 // Base class for objects used as value objects.
@@ -210,9 +244,81 @@ class StackObj ALLOCATION_SUPER_CLASS_SPEC {
 // be defined as a an empty string "".
 //
 class _ValueObj {
- public:
+ private:
   void* operator new(size_t size);
-  void operator delete(void* p);
+  void  operator delete(void* p);
+  void* operator new [](size_t size);
+  void  operator delete [](void* p);
+};
+
+
+// Base class for objects stored in Metaspace.
+// Calling delete will result in fatal error.
+//
+// Do not inherit from something with a vptr because this class does
+// not introduce one.  This class is used to allocate both shared read-only
+// and shared read-write classes.
+//
+
+class ClassLoaderData;
+
+class MetaspaceObj {
+ public:
+  bool is_metaspace_object() const;  // more specific test but slower
+  bool is_shared() const;
+  void print_address_on(outputStream* st) const;  // nonvirtual address printing
+
+#define METASPACE_OBJ_TYPES_DO(f) \
+  f(Unknown) \
+  f(Class) \
+  f(Symbol) \
+  f(TypeArrayU1) \
+  f(TypeArrayU2) \
+  f(TypeArrayU4) \
+  f(TypeArrayU8) \
+  f(TypeArrayOther) \
+  f(Method) \
+  f(ConstMethod) \
+  f(MethodData) \
+  f(ConstantPool) \
+  f(ConstantPoolCache) \
+  f(Annotation) \
+  f(MethodCounters)
+
+#define METASPACE_OBJ_TYPE_DECLARE(name) name ## Type,
+#define METASPACE_OBJ_TYPE_NAME_CASE(name) case name ## Type: return #name;
+
+  enum Type {
+    // Types are MetaspaceObj::ClassType, MetaspaceObj::SymbolType, etc
+    METASPACE_OBJ_TYPES_DO(METASPACE_OBJ_TYPE_DECLARE)
+    _number_of_types
+  };
+
+  static const char * type_name(Type type) {
+    switch(type) {
+    METASPACE_OBJ_TYPES_DO(METASPACE_OBJ_TYPE_NAME_CASE)
+    default:
+      ShouldNotReachHere();
+      return NULL;
+    }
+  }
+
+  static MetaspaceObj::Type array_type(size_t elem_size) {
+    switch (elem_size) {
+    case 1: return TypeArrayU1Type;
+    case 2: return TypeArrayU2Type;
+    case 4: return TypeArrayU4Type;
+    case 8: return TypeArrayU8Type;
+    default:
+      return TypeArrayOtherType;
+    }
+  }
+
+  void* operator new(size_t size, ClassLoaderData* loader_data,
+                     size_t word_size, bool read_only,
+                     Type type, Thread* thread);
+                     // can't use TRAPS from this header file.
+  void operator delete(void* p) { ShouldNotCallThis(); }
 };
 
 // Base class for classes that constitute name spaces.
@@ -233,7 +339,7 @@ class Chunk: CHeapObj<mtChunk> {
   Chunk*       _next;     // Next Chunk in list
   const size_t _len;      // Size of this Chunk
  public:
-  void* operator new(size_t size, size_t length);
+  void* operator new(size_t size, AllocFailType alloc_failmode, size_t length);
   void  operator delete(void* p);
   Chunk(size_t length);
 
@@ -247,7 +353,8 @@ class Chunk: CHeapObj<mtChunk> {
     slack      = 20,            // suspected sizeof(Chunk) + internal malloc headers
 #endif
 
-    init_size  =  1*K  - slack, // Size of first chunk
+    tiny_size  =  256  - slack, // Size of first chunk (tiny)
+    init_size  =  1*K  - slack, // Size of first chunk (normal aka small)
     medium_size= 10*K  - slack, // Size of medium-sized chunk
     size       = 32*K  - slack, // Default size of an Arena chunk (following the first)
     non_pool_size = init_size + 32 // An initial size which is not one of above
@@ -256,6 +363,7 @@ class Chunk: CHeapObj<mtChunk> {
   void chop();                  // Chop this chunk
   void next_chop();             // Chop next chunk
   static size_t aligned_overhead_size(void) { return ARENA_ALIGN(sizeof(Chunk)); }
+  static size_t aligned_overhead_size(size_t byte_size) { return ARENA_ALIGN(byte_size); }
 
   size_t length() const         { return _len;  }
   Chunk* next() const           { return _next;  }
@@ -283,7 +391,8 @@ protected:
   Chunk *_first;                // First chunk
   Chunk *_chunk;                // current chunk
   char *_hwm, *_max;            // High water mark and max in current chunk
-  void* grow(size_t x);         // Get a new Chunk of at least size x
+  // Get a new Chunk of at least size x
+  void* grow(size_t x, AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM);
   size_t _size_in_bytes;        // Size of arena (used for native memory tracking)
 
   NOT_PRODUCT(static julong _bytes_allocated;) // total #bytes allocated since start
@@ -294,10 +403,15 @@ protected:
 
   void signal_out_of_memory(size_t request, const char* whence) const;
 
-  void check_for_overflow(size_t request, const char* whence) const {
+  bool check_for_overflow(size_t request, const char* whence,
+      AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM) const {
     if (UINTPTR_MAX - request < (uintptr_t)_hwm) {
+      if (alloc_failmode == AllocFailStrategy::RETURN_NULL) {
+        return false;
+      }
       signal_out_of_memory(request, whence);
     }
+    return true;
  }
 
  public:
@@ -317,14 +431,15 @@ protected:
   void  operator delete(void* p);
 
   // Fast allocate in the arena.  Common case is: pointer test + increment.
-  void* Amalloc(size_t x) {
+  void* Amalloc(size_t x, AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM) {
     assert(is_power_of_2(ARENA_AMALLOC_ALIGNMENT) , "should be a power of 2");
     x = ARENA_ALIGN(x);
     debug_only(if (UseMallocOnly) return malloc(x);)
-    check_for_overflow(x, "Arena::Amalloc");
+    if (!check_for_overflow(x, "Arena::Amalloc", alloc_failmode))
+      return NULL;
     NOT_PRODUCT(inc_bytes_allocated(x);)
     if (_hwm + x > _max) {
-      return grow(x);
+      return grow(x, alloc_failmode);
     } else {
       char *old = _hwm;
       _hwm += x;
@@ -332,13 +447,14 @@ protected:
     }
   }
   // Further assume size is padded out to words
-  void *Amalloc_4(size_t x) {
+  void *Amalloc_4(size_t x, AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM) {
     assert( (x&(sizeof(char*)-1)) == 0, "misaligned size" );
     debug_only(if (UseMallocOnly) return malloc(x);)
-    check_for_overflow(x, "Arena::Amalloc_4");
+    if (!check_for_overflow(x, "Arena::Amalloc_4", alloc_failmode))
+      return NULL;
     NOT_PRODUCT(inc_bytes_allocated(x);)
     if (_hwm + x > _max) {
-      return grow(x);
+      return grow(x, alloc_failmode);
     } else {
       char *old = _hwm;
       _hwm += x;
@@ -348,7 +464,7 @@ protected:
 
   // Allocate with 'double' alignment. It is 8 bytes on sparc.
   // In other cases Amalloc_D() should be the same as Amalloc_4().
-  void* Amalloc_D(size_t x) {
+  void* Amalloc_D(size_t x, AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM) {
     assert( (x&(sizeof(char*)-1)) == 0, "misaligned size" );
     debug_only(if (UseMallocOnly) return malloc(x);)
 #if defined(SPARC) && !defined(_LP64)
@@ -356,10 +472,11 @@ protected:
     size_t delta = (((size_t)_hwm + DALIGN_M1) & ~DALIGN_M1) - (size_t)_hwm;
     x += delta;
 #endif
-    check_for_overflow(x, "Arena::Amalloc_D");
+    if (!check_for_overflow(x, "Arena::Amalloc_D", alloc_failmode))
+      return NULL;
     NOT_PRODUCT(inc_bytes_allocated(x);)
     if (_hwm + x > _max) {
-      return grow(x); // grow() returns a result aligned >= 8 bytes.
+      return grow(x, alloc_failmode); // grow() returns a result aligned >= 8 bytes.
     } else {
       char *old = _hwm;
       _hwm += x;
@@ -379,7 +496,8 @@ protected:
     if (((char*)ptr) + size == _hwm) _hwm = (char*)ptr;
   }
 
-  void *Arealloc( void *old_ptr, size_t old_size, size_t new_size );
+  void *Arealloc( void *old_ptr, size_t old_size, size_t new_size,
+      AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM);
 
   // Move contents of this arena into an empty arena
   Arena *move_contents(Arena *empty_arena);
@@ -425,9 +543,12 @@ private:
 
 
 //%note allocation_1
-extern char* resource_allocate_bytes(size_t size);
-extern char* resource_allocate_bytes(Thread* thread, size_t size);
-extern char* resource_reallocate_bytes( char *old, size_t old_size, size_t new_size);
+extern char* resource_allocate_bytes(size_t size,
+    AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM);
+extern char* resource_allocate_bytes(Thread* thread, size_t size,
+    AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM);
+extern char* resource_reallocate_bytes( char *old, size_t old_size, size_t new_size,
+    AllocFailType alloc_failmode = AllocFailStrategy::EXIT_OOM);
 extern void resource_free_bytes( char *old, size_t size );
 
 //----------------------------------------------------------------------
@@ -463,17 +584,50 @@ class ResourceObj ALLOCATION_SUPER_CLASS_SPEC {
 
  public:
   void* operator new(size_t size, allocation_type type, MEMFLAGS flags);
+  void* operator new [](size_t size, allocation_type type, MEMFLAGS flags);
+  void* operator new(size_t size, const std::nothrow_t&  nothrow_constant,
+      allocation_type type, MEMFLAGS flags);
+  void* operator new [](size_t size, const std::nothrow_t&  nothrow_constant,
+      allocation_type type, MEMFLAGS flags);
+
   void* operator new(size_t size, Arena *arena) {
       address res = (address)arena->Amalloc(size);
       DEBUG_ONLY(set_allocation_type(res, ARENA);)
       return res;
   }
+
+  void* operator new [](size_t size, Arena *arena) {
+      address res = (address)arena->Amalloc(size);
+      DEBUG_ONLY(set_allocation_type(res, ARENA);)
+      return res;
+  }
+
   void* operator new(size_t size) {
       address res = (address)resource_allocate_bytes(size);
       DEBUG_ONLY(set_allocation_type(res, RESOURCE_AREA);)
       return res;
   }
+
+  void* operator new(size_t size, const std::nothrow_t& nothrow_constant) {
+      address res = (address)resource_allocate_bytes(size, AllocFailStrategy::RETURN_NULL);
+      DEBUG_ONLY(if (res != NULL) set_allocation_type(res, RESOURCE_AREA);)
+      return res;
+  }
+
+  void* operator new [](size_t size) {
+      address res = (address)resource_allocate_bytes(size);
+      DEBUG_ONLY(set_allocation_type(res, RESOURCE_AREA);)
+      return res;
+  }
+
+  void* operator new [](size_t size, const std::nothrow_t& nothrow_constant) {
+      address res = (address)resource_allocate_bytes(size, AllocFailStrategy::RETURN_NULL);
+      DEBUG_ONLY(if (res != NULL) set_allocation_type(res, RESOURCE_AREA);)
+      return res;
+  }
+
   void  operator delete(void* p);
+  void  operator delete [](void* p);
 };
 
 // One of the following macros must be used when allocating an array
@@ -483,11 +637,21 @@ class ResourceObj ALLOCATION_SUPER_CLASS_SPEC {
 #define NEW_RESOURCE_ARRAY(type, size)\
   (type*) resource_allocate_bytes((size) * sizeof(type))
 
+#define NEW_RESOURCE_ARRAY_RETURN_NULL(type, size)\
+  (type*) resource_allocate_bytes((size) * sizeof(type), AllocFailStrategy::RETURN_NULL)
+
 #define NEW_RESOURCE_ARRAY_IN_THREAD(thread, type, size)\
   (type*) resource_allocate_bytes(thread, (size) * sizeof(type))
 
+#define NEW_RESOURCE_ARRAY_IN_THREAD_RETURN_NULL(thread, type, size)\
+  (type*) resource_allocate_bytes(thread, (size) * sizeof(type), AllocFailStrategy::RETURN_NULL)
+
 #define REALLOC_RESOURCE_ARRAY(type, old, old_size, new_size)\
-  (type*) resource_reallocate_bytes((char*)(old), (old_size) * sizeof(type), (new_size) * sizeof(type) )
+  (type*) resource_reallocate_bytes((char*)(old), (old_size) * sizeof(type), (new_size) * sizeof(type))
+
+#define REALLOC_RESOURCE_ARRAY_RETURN_NULL(type, old, old_size, new_size)\
+  (type*) resource_reallocate_bytes((char*)(old), (old_size) * sizeof(type),\
+                                    (new_size) * sizeof(type), AllocFailStrategy::RETURN_NULL)
 
 #define FREE_RESOURCE_ARRAY(type, old, size)\
   resource_free_bytes((char*)(old), (size) * sizeof(type))
@@ -498,30 +662,43 @@ class ResourceObj ALLOCATION_SUPER_CLASS_SPEC {
 #define NEW_RESOURCE_OBJ(type)\
   NEW_RESOURCE_ARRAY(type, 1)
 
-#define NEW_C_HEAP_ARRAY(type, size, memflags)\
-  (type*) (AllocateHeap((size) * sizeof(type), memflags))
+#define NEW_RESOURCE_OBJ_RETURN_NULL(type)\
+  NEW_RESOURCE_ARRAY_RETURN_NULL(type, 1)
 
-#define REALLOC_C_HEAP_ARRAY(type, old, size, memflags)\
-  (type*) (ReallocateHeap((char*)old, (size) * sizeof(type), memflags))
-
-#define FREE_C_HEAP_ARRAY(type,old,memflags) \
-  FreeHeap((char*)(old), memflags)
-
-#define NEW_C_HEAP_OBJ(type, memflags)\
-  NEW_C_HEAP_ARRAY(type, 1, memflags)
-
+#define NEW_C_HEAP_ARRAY3(type, size, memflags, pc, allocfail)\
+  (type*) AllocateHeap(size * sizeof(type), memflags, pc, allocfail)
 
 #define NEW_C_HEAP_ARRAY2(type, size, memflags, pc)\
   (type*) (AllocateHeap((size) * sizeof(type), memflags, pc))
 
-#define REALLOC_C_HEAP_ARRAY2(type, old, size, memflags, pc)\
-  (type*) (ReallocateHeap((char*)old, (size) * sizeof(type), memflags, pc))
+#define NEW_C_HEAP_ARRAY(type, size, memflags)\
+  (type*) (AllocateHeap((size) * sizeof(type), memflags))
 
-#define NEW_C_HEAP_OBJ2(type, memflags, pc)\
-  NEW_C_HEAP_ARRAY2(type, 1, memflags, pc)
+#define NEW_C_HEAP_ARRAY2_RETURN_NULL(type, size, memflags, pc)\
+  NEW_C_HEAP_ARRAY3(type, size, memflags, pc, AllocFailStrategy::RETURN_NULL)
 
+#define NEW_C_HEAP_ARRAY_RETURN_NULL(type, size, memflags)\
+  NEW_C_HEAP_ARRAY3(type, size, memflags, (address)0, AllocFailStrategy::RETURN_NULL)
 
-extern bool warn_new_operator;
+#define REALLOC_C_HEAP_ARRAY(type, old, size, memflags)\
+  (type*) (ReallocateHeap((char*)old, (size) * sizeof(type), memflags))
+
+#define REALLOC_C_HEAP_ARRAY_RETURN_NULL(type, old, size, memflags)\
+   (type*) (ReallocateHeap((char*)old, (size) * sizeof(type), memflags, AllocFailStrategy::RETURN_NULL))
+
+#define FREE_C_HEAP_ARRAY(type, old, memflags) \
+  FreeHeap((char*)(old), memflags)
+
+// allocate type in heap without calling ctor
+#define NEW_C_HEAP_OBJ(type, memflags)\
+  NEW_C_HEAP_ARRAY(type, 1, memflags)
+
+#define NEW_C_HEAP_OBJ_RETURN_NULL(type, memflags)\
+  NEW_C_HEAP_ARRAY_RETURN_NULL(type, 1, memflags)
+
+// deallocate obj of type in heap without calling dtor
+#define FREE_C_HEAP_OBJ(objname, memflags)\
+  FreeHeap((char*)objname, memflags);
 
 // for statistics
 #ifndef PRODUCT
@@ -553,6 +730,33 @@ protected:
 public:
   ReallocMark()   PRODUCT_RETURN;
   void check()    PRODUCT_RETURN;
+};
+
+// Helper class to allocate arrays that may become large.
+// Uses the OS malloc for allocations smaller than ArrayAllocatorMallocLimit
+// and uses mapped memory for larger allocations.
+// Most OS mallocs do something similar but Solaris malloc does not revert
+// to mapped memory for large allocations. By default ArrayAllocatorMallocLimit
+// is set so that we always use malloc except for Solaris where we set the
+// limit to get mapped memory.
+template <class E, MEMFLAGS F>
+class ArrayAllocator VALUE_OBJ_CLASS_SPEC {
+  char* _addr;
+  bool _use_malloc;
+  size_t _size;
+  bool _free_in_destructor;
+ public:
+  ArrayAllocator(bool free_in_destructor = true) :
+    _addr(NULL), _use_malloc(false), _size(0), _free_in_destructor(free_in_destructor) { }
+
+  ~ArrayAllocator() {
+    if (_free_in_destructor) {
+      free();
+    }
+  }
+
+  E* allocate(size_t length);
+  void free();
 };
 
 #endif // SHARE_VM_MEMORY_ALLOCATION_HPP

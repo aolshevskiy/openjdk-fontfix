@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,14 +25,8 @@
 
 package com.sun.crypto.provider;
 
-import java.io.UnsupportedEncodingException;
 import java.io.IOException;
 import java.io.Serializable;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.ObjectInputStream.GetField;
 import java.security.Security;
 import java.security.Key;
 import java.security.PrivateKey;
@@ -42,22 +36,14 @@ import java.security.MessageDigest;
 import java.security.GeneralSecurityException;
 import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
-import java.security.SecureRandom;
 import java.security.UnrecoverableKeyException;
-import java.security.InvalidParameterException;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.InvalidKeyException;
 import java.security.AlgorithmParameters;
-import java.security.spec.InvalidParameterSpecException;
-import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 
 import javax.crypto.Cipher;
 import javax.crypto.CipherSpi;
 import javax.crypto.SecretKey;
-import javax.crypto.NoSuchPaddingException;
 import javax.crypto.IllegalBlockSizeException;
-import javax.crypto.BadPaddingException;
 import javax.crypto.SealedObject;
 import javax.crypto.spec.*;
 import sun.security.x509.AlgorithmId;
@@ -95,8 +81,6 @@ final class KeyProtector {
     // key protector
     private char[] password;
 
-    private static final Provider PROV = Security.getProvider("SunJCE");
-
     KeyProtector(char[] password) {
         if (password == null) {
            throw new IllegalArgumentException("password can't be null");
@@ -113,7 +97,7 @@ final class KeyProtector {
     {
         // create a random salt (8 bytes)
         byte[] salt = new byte[8];
-        SunJCE.RANDOM.nextBytes(salt);
+        SunJCE.getRandom().nextBytes(salt);
 
         // create PBE parameters from salt and iteration count
         PBEParameterSpec pbeSpec = new PBEParameterSpec(salt, 20);
@@ -127,13 +111,13 @@ final class KeyProtector {
         PBEWithMD5AndTripleDESCipher cipher;
         cipher = new PBEWithMD5AndTripleDESCipher();
         cipher.engineInit(Cipher.ENCRYPT_MODE, sKey, pbeSpec, null);
-        byte[] plain = (byte[])key.getEncoded();
+        byte[] plain = key.getEncoded();
         byte[] encrKey = cipher.engineDoFinal(plain, 0, plain.length);
 
         // wrap encrypted private key in EncryptedPrivateKeyInfo
         // (as defined in PKCS#8)
         AlgorithmParameters pbeParams =
-            AlgorithmParameters.getInstance("PBE", PROV);
+            AlgorithmParameters.getInstance("PBE", SunJCE.getInstance());
         pbeParams.init(pbeSpec);
 
         AlgorithmId encrAlg = new AlgorithmId
@@ -169,8 +153,8 @@ final class KeyProtector {
                 AlgorithmParameters pbeParams =
                     AlgorithmParameters.getInstance("PBE");
                 pbeParams.init(encodedParams);
-                PBEParameterSpec pbeSpec = (PBEParameterSpec)
-                    pbeParams.getParameterSpec(PBEParameterSpec.class);
+                PBEParameterSpec pbeSpec =
+                        pbeParams.getParameterSpec(PBEParameterSpec.class);
 
                 // create PBE key from password
                 PBEKeySpec pbeKeySpec = new PBEKeySpec(this.password);
@@ -298,7 +282,7 @@ final class KeyProtector {
     {
         // create a random salt (8 bytes)
         byte[] salt = new byte[8];
-        SunJCE.RANDOM.nextBytes(salt);
+        SunJCE.getRandom().nextBytes(salt);
 
         // create PBE parameters from salt and iteration count
         PBEParameterSpec pbeSpec = new PBEParameterSpec(salt, 20);
@@ -313,7 +297,7 @@ final class KeyProtector {
 
         PBEWithMD5AndTripleDESCipher cipherSpi;
         cipherSpi = new PBEWithMD5AndTripleDESCipher();
-        cipher = new CipherForKeyProtector(cipherSpi, PROV,
+        cipher = new CipherForKeyProtector(cipherSpi, SunJCE.getInstance(),
                                            "PBEWithMD5AndTripleDES");
         cipher.init(Cipher.ENCRYPT_MODE, sKey, pbeSpec);
         return new SealedObjectForKeyProtector(key, cipher);
@@ -344,8 +328,9 @@ final class KeyProtector {
             }
             PBEWithMD5AndTripleDESCipher cipherSpi;
             cipherSpi = new PBEWithMD5AndTripleDESCipher();
-            Cipher cipher = new CipherForKeyProtector(cipherSpi, PROV,
-                                                   "PBEWithMD5AndTripleDES");
+            Cipher cipher = new CipherForKeyProtector(cipherSpi,
+                                                      SunJCE.getInstance(),
+                                                      "PBEWithMD5AndTripleDES");
             cipher.init(Cipher.DECRYPT_MODE, skey, params);
             return (Key)soForKeyProtector.getObject(cipher);
         } catch (NoSuchAlgorithmException ex) {
@@ -375,36 +360,5 @@ final class CipherForKeyProtector extends javax.crypto.Cipher {
                                     Provider provider,
                                     String transformation) {
         super(cipherSpi, provider, transformation);
-    }
-}
-
-final class SealedObjectForKeyProtector extends javax.crypto.SealedObject {
-
-    static final long serialVersionUID = -3650226485480866989L;
-
-    SealedObjectForKeyProtector(Serializable object, Cipher c)
-        throws IOException, IllegalBlockSizeException {
-        super(object, c);
-    }
-
-    SealedObjectForKeyProtector(SealedObject so) {
-        super(so);
-    }
-
-    AlgorithmParameters getParameters() {
-        AlgorithmParameters params = null;
-        if (super.encodedParams != null) {
-            try {
-                params = AlgorithmParameters.getInstance("PBE", "SunJCE");
-                params.init(super.encodedParams);
-            } catch (NoSuchProviderException nspe) {
-                // eat.
-            } catch (NoSuchAlgorithmException nsae) {
-                //eat.
-            } catch (IOException ioe) {
-                //eat.
-            }
-        }
-        return params;
     }
 }

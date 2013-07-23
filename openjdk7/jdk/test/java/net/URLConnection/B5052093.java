@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
  * @test
  * @bug 5052093
  * @library ../../../sun/net/www/httptest/
- * @build HttpCallback HttpServer ClosedChannelList HttpTransaction
+ * @build HttpCallback TestHttpServer ClosedChannelList HttpTransaction
  * @run main B5052093
  * @summary URLConnection doesn't support large files
  */
@@ -34,7 +34,7 @@ import java.io.*;
 import sun.net.www.protocol.file.FileURLConnection;
 
 public class B5052093 implements HttpCallback {
-    private static HttpServer server;
+    private static TestHttpServer server;
     private static long testSize = ((long) (Integer.MAX_VALUE)) + 2;
 
     public static class LargeFile extends File {
@@ -63,7 +63,7 @@ public class B5052093 implements HttpCallback {
     }
 
     public static void main(String[] args) throws Exception {
-        server = new HttpServer(new B5052093(), 1, 10, 0);
+        server = new TestHttpServer(new B5052093(), 1, 10, 0);
         try {
             URL url = new URL("http://localhost:"+server.getLocalPort()+"/foo");
             URLConnection conn = url.openConnection();

@@ -252,6 +252,7 @@ public class XMLEventReaderImpl implements javax.xml.stream.XMLEventReader{
             NoSuchElementException e = new NoSuchElementException(streamException.getMessage());
             e.initCause(streamException.getCause());
             throw e;
+
         }
         return object;
     }

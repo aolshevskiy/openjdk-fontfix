@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 
 import java.text.*;
 import java.util.*;
-import sun.util.*;
+import sun.util.locale.provider.*;
 import sun.util.resources.*;
 
 public class LocaleNameProviderTest extends ProviderTest {
@@ -36,15 +36,21 @@ public class LocaleNameProviderTest extends ProviderTest {
     }
 
     LocaleNameProviderTest() {
+        checkAvailLocValidityTest();
+        variantFallbackTest();
+    }
+
+    void checkAvailLocValidityTest() {
         com.bar.LocaleNameProviderImpl lnp = new com.bar.LocaleNameProviderImpl();
         Locale[] availloc = Locale.getAvailableLocales();
         Locale[] testloc = availloc.clone();
+        List<Locale> jreimplloc = Arrays.asList(LocaleProviderAdapter.forJRE().getLocaleNameProvider().getAvailableLocales());
         List<Locale> providerloc = Arrays.asList(lnp.getAvailableLocales());
 
         for (Locale target: availloc) {
             // pure JRE implementation
-            OpenListResourceBundle rb = LocaleData.getLocaleNames(target);
-            boolean jreHasBundle = rb.getLocale().equals(target);
+            OpenListResourceBundle rb = ((ResourceBundleBasedAdapter)LocaleProviderAdapter.forJRE()).getLocaleData().getLocaleNames(target);
+            boolean jreSupportsTarget = jreimplloc.contains(target);
 
             for (Locale test: testloc) {
                 // codes
@@ -67,7 +73,7 @@ public class LocaleNameProviderTest extends ProviderTest {
                     providersvrnt = lnp.getDisplayVariant(vrnt, target);
                 }
 
-                // JRE's name (if any)
+                // JRE's name
                 String jreslang = null;
                 String jresctry = null;
                 String jresvrnt = null;
@@ -84,18 +90,41 @@ public class LocaleNameProviderTest extends ProviderTest {
                 if (!vrnt.equals("")) {
                     try {
                         jresvrnt = rb.getString("%%"+vrnt);
-                    } catch (MissingResourceException mre) {
-                        jresvrnt = vrnt;
-                    }
+                    } catch (MissingResourceException mre) {}
                 }
 
+                System.out.print("For key: "+lang+" ");
                 checkValidity(target, jreslang, providerslang, langresult,
-                    jreHasBundle && rb.handleGetKeys().contains(lang));
+                    jreSupportsTarget && jreslang != null);
+                System.out.print("For key: "+ctry+" ");
                 checkValidity(target, jresctry, providersctry, ctryresult,
-                    jreHasBundle && rb.handleGetKeys().contains(ctry));
+                    jreSupportsTarget && jresctry != null);
+                System.out.print("For key: "+vrnt+" ");
                 checkValidity(target, jresvrnt, providersvrnt, vrntresult,
-                    jreHasBundle && rb.handleGetKeys().contains("%%"+vrnt));
+                    jreSupportsTarget && jresvrnt != null);
             }
         }
+    }
+
+    void variantFallbackTest() {
+        Locale YY = new Locale("yy", "YY", "YYYY");
+        Locale YY_suffix = new Locale("yy", "YY", "YYYY_suffix");
+        String retVrnt = null;
+        String message = "variantFallbackTest() succeeded.";
+
+
+        try {
+            YY.getDisplayVariant(YY_suffix);
+            message = "variantFallbackTest() failed. Either provider wasn't invoked, or invoked without suffix.";
+        } catch (RuntimeException re) {
+            retVrnt = re.getMessage();
+            if (YY_suffix.getVariant().equals(retVrnt)) {
+                System.out.println(message);
+                return;
+}
+            message = "variantFallbackTest() failed. Returned variant: "+retVrnt;
+        }
+
+        throw new RuntimeException(message);
     }
 }

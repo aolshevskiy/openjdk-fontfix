@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
 #ifndef CPU_SPARC_VM_NATIVEINST_SPARC_HPP
 #define CPU_SPARC_VM_NATIVEINST_SPARC_HPP
 
-#include "asm/assembler.hpp"
+#include "asm/macroAssembler.hpp"
 #include "memory/allocation.hpp"
 #include "runtime/icache.hpp"
 #include "runtime/os.hpp"
@@ -70,8 +70,7 @@ class NativeInstruction VALUE_OBJ_CLASS_SPEC {
   bool is_zombie() {
     int x = long_at(0);
     return is_op3(x,
-                  VM_Version::v9_instructions_work() ?
-                    Assembler::ldsw_op3 : Assembler::lduw_op3,
+                  Assembler::ldsw_op3,
                   Assembler::ldst_op)
         && Assembler::inv_rs1(x) == G0
         && Assembler::inv_rd(x) == O7;
@@ -194,11 +193,10 @@ class NativeInstruction VALUE_OBJ_CLASS_SPEC {
   static int inv_simm(    int x, int nbits ) { return Assembler::inv_simm(x, nbits); }
   static intptr_t inv_wdisp(   int x, int nbits ) { return Assembler::inv_wdisp(  x, 0, nbits); }
   static intptr_t inv_wdisp16( int x )            { return Assembler::inv_wdisp16(x, 0); }
-  static int branch_destination_offset(int x) { return Assembler::branch_destination(x, 0); }
+  static int branch_destination_offset(int x) { return MacroAssembler::branch_destination(x, 0); }
   static int patch_branch_destination_offset(int dest_offset, int x) {
-    return Assembler::patched_branch(dest_offset, x, 0);
+    return MacroAssembler::patched_branch(dest_offset, x, 0);
   }
-  void set_annul_bit() { set_long_at(0, long_at(0) | Assembler::annul(true)); }
 
   // utility for checking if x is either of 2 small constants
   static bool is_either(int x, int k1, int k2) {
@@ -246,7 +244,7 @@ class NativeInstruction VALUE_OBJ_CLASS_SPEC {
     assert(is_op2(*(unsigned int *)pc, Assembler::sethi_op2), "must be sethi");
     intptr_t hi = (intptr_t)gethi( (unsigned int *)pc );
     intptr_t lo = (intptr_t)get_simm13(arith_insn);
-    assert((unsigned)lo < (1 << 10), "offset field of set_oop must be 10 bits");
+    assert((unsigned)lo < (1 << 10), "offset field of set_metadata must be 10 bits");
     return hi | lo;
   }
 
@@ -261,7 +259,7 @@ class NativeInstruction VALUE_OBJ_CLASS_SPEC {
     assert(is_op2(sethi_insn, Assembler::sethi_op2), "must be sethi");
     int hi = Assembler::inv_hi22(sethi_insn);
     int lo = get_simm13(arith_insn);
-    assert((unsigned)lo < (1 << 10), "offset field of set_oop must be 10 bits");
+    assert((unsigned)lo < (1 << 10), "offset field of set_metadata must be 10 bits");
     return hi | lo;
   }
 
@@ -508,9 +506,9 @@ class NativeFarCall: public NativeInstruction {
 
 #endif // _LP64
 
-// An interface for accessing/manipulating native set_oop imm, reg instructions.
+// An interface for accessing/manipulating native set_metadata imm, reg instructions.
 // (used to manipulate inlined data references, etc.)
-//      set_oop imm, reg
+//      set_metadata imm, reg
 //      == sethi %hi22(imm), reg ;  add reg, %lo10(imm), reg
 class NativeMovConstReg;
 inline NativeMovConstReg* nativeMovConstReg_at(address address);
@@ -564,9 +562,9 @@ class NativeMovConstReg: public NativeInstruction {
 };
 
 
-// An interface for accessing/manipulating native set_oop imm, reg instructions.
+// An interface for accessing/manipulating native set_metadata imm, reg instructions.
 // (used to manipulate inlined data references, etc.)
-//      set_oop imm, reg
+//      set_metadata imm, reg
 //      == sethi %hi22(imm), reg; nop; add reg, %lo10(imm), reg
 //
 // Note that it is identical to NativeMovConstReg with the exception of a nop between the
@@ -889,7 +887,6 @@ class NativeGeneralJump: public NativeInstruction {
     int patched_instr = patch_branch_destination_offset(dest - addr_at(0), long_at(0));
     set_long_at(0, patched_instr);
   }
-  void set_annul() { set_annul_bit(); }
   NativeInstruction *delay_slot_instr() { return nativeInstruction_at(addr_at(4));}
   void fill_delay_slot(int instr) { set_long_at(4, instr);}
   Assembler::Condition condition() {

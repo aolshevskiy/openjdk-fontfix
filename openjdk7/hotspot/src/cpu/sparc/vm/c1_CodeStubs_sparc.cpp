@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,10 +30,11 @@
 #include "c1/c1_Runtime1.hpp"
 #include "nativeInst_sparc.hpp"
 #include "runtime/sharedRuntime.hpp"
+#include "utilities/macros.hpp"
 #include "vmreg_sparc.inline.hpp"
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/g1/g1SATBCardTableModRefBS.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 #define __ ce->masm()->
 
@@ -50,6 +51,16 @@ RangeCheckStub::RangeCheckStub(CodeEmitInfo* info, LIR_Opr index,
 void RangeCheckStub::emit_code(LIR_Assembler* ce) {
   __ bind(_entry);
 
+  if (_info->deoptimize_on_exception()) {
+    address a = Runtime1::entry_for(Runtime1::predicate_failed_trap_id);
+    __ call(a, relocInfo::runtime_call_type);
+    __ delayed()->nop();
+    ce->add_call_info_here(_info);
+    ce->verify_oop_map(_info);
+    debug_only(__ should_not_reach_here());
+    return;
+  }
+
   if (_index->is_register()) {
     __ mov(_index->as_register(), G4);
   } else {
@@ -63,11 +74,22 @@ void RangeCheckStub::emit_code(LIR_Assembler* ce) {
   __ delayed()->nop();
   ce->add_call_info_here(_info);
   ce->verify_oop_map(_info);
-#ifdef ASSERT
-  __ should_not_reach_here();
-#endif
+  debug_only(__ should_not_reach_here());
 }
 
+PredicateFailedStub::PredicateFailedStub(CodeEmitInfo* info) {
+  _info = new CodeEmitInfo(info);
+}
+
+void PredicateFailedStub::emit_code(LIR_Assembler* ce) {
+  __ bind(_entry);
+  address a = Runtime1::entry_for(Runtime1::predicate_failed_trap_id);
+  __ call(a, relocInfo::runtime_call_type);
+  __ delayed()->nop();
+  ce->add_call_info_here(_info);
+  ce->verify_oop_map(_info);
+  debug_only(__ should_not_reach_here());
+}
 
 void CounterOverflowStub::emit_code(LIR_Assembler* ce) {
   __ bind(_entry);
@@ -98,10 +120,17 @@ void DivByZeroStub::emit_code(LIR_Assembler* ce) {
 
 
 void ImplicitNullCheckStub::emit_code(LIR_Assembler* ce) {
+  address a;
+  if (_info->deoptimize_on_exception()) {
+    // Deoptimize, do not throw the exception, because it is probably wrong to do it here.
+    a = Runtime1::entry_for(Runtime1::predicate_failed_trap_id);
+  } else {
+    a = Runtime1::entry_for(Runtime1::throw_null_pointer_exception_id);
+  }
+
   ce->compilation()->implicit_exception_table()->append(_offset, __ offset());
   __ bind(_entry);
-  __ call(Runtime1::entry_for(Runtime1::throw_null_pointer_exception_id),
-          relocInfo::runtime_call_type);
+  __ call(a, relocInfo::runtime_call_type);
   __ delayed()->nop();
   ce->add_call_info_here(_info);
   ce->verify_oop_map(_info);
@@ -268,7 +297,22 @@ void PatchingStub::emit_code(LIR_Assembler* ce) {
 #ifdef ASSERT
     address start = __ pc();
 #endif
-    AddressLiteral addrlit(NULL, oop_Relocation::spec(_oop_index));
+    AddressLiteral addrlit(NULL, metadata_Relocation::spec(_index));
+    __ patchable_set(addrlit, _obj);
+
+#ifdef ASSERT
+    for (int i = 0; i < _bytes_to_copy; i++) {
+      address ptr = (address)(_pc_start + i);
+      int a_byte = (*ptr) & 0xFF;
+      assert(a_byte == *start++, "should be the same code");
+    }
+#endif
+  } else if (_id == load_mirror_id) {
+    // produce a copy of the load mirror instruction for use by the being initialized case
+#ifdef ASSERT
+    address start = __ pc();
+#endif
+    AddressLiteral addrlit(NULL, oop_Relocation::spec(_index));
     __ patchable_set(addrlit, _obj);
 
 #ifdef ASSERT
@@ -283,13 +327,13 @@ void PatchingStub::emit_code(LIR_Assembler* ce) {
     for (int i = 0; i < _bytes_to_copy; i++) {
       address ptr = (address)(_pc_start + i);
       int a_byte = (*ptr) & 0xFF;
-      __ a_byte (a_byte);
+      __ emit_int8 (a_byte);
     }
   }
 
   address end_of_patch = __ pc();
   int bytes_to_skip = 0;
-  if (_id == load_klass_id) {
+  if (_id == load_mirror_id) {
     int offset = __ offset();
     if (CommentedAssembly) {
       __ block_comment(" being_initialized check");
@@ -300,9 +344,9 @@ void PatchingStub::emit_code(LIR_Assembler* ce) {
     // check that this code is being executed by the initializing
     // thread.
     assert(_obj != noreg, "must be a valid register");
-    assert(_oop_index >= 0, "must have oop index");
-    __ load_heap_oop(_obj, java_lang_Class::klass_offset_in_bytes(), G3);
-    __ ld_ptr(G3, in_bytes(instanceKlass::init_thread_offset()), G3);
+    assert(_index >= 0, "must have oop index");
+    __ ld_ptr(_obj, java_lang_Class::klass_offset_in_bytes(), G3);
+    __ ld_ptr(G3, in_bytes(InstanceKlass::init_thread_offset()), G3);
     __ cmp_and_brx_short(G2_thread, G3, Assembler::notEqual, Assembler::pn, call_patch);
 
     // load_klass patches may execute the patched code before it's
@@ -325,19 +369,21 @@ void PatchingStub::emit_code(LIR_Assembler* ce) {
   int being_initialized_entry_offset = __ offset() - being_initialized_entry + sizeof_patch_record;
 
   // Emit the patch record.  We need to emit a full word, so emit an extra empty byte
-  __ a_byte(0);
-  __ a_byte(being_initialized_entry_offset);
-  __ a_byte(bytes_to_skip);
-  __ a_byte(_bytes_to_copy);
+  __ emit_int8(0);
+  __ emit_int8(being_initialized_entry_offset);
+  __ emit_int8(bytes_to_skip);
+  __ emit_int8(_bytes_to_copy);
   address patch_info_pc = __ pc();
   assert(patch_info_pc - end_of_patch == bytes_to_skip, "incorrect patch info");
 
   address entry = __ pc();
   NativeGeneralJump::insert_unconditional((address)_pc_start, entry);
   address target = NULL;
+  relocInfo::relocType reloc_type = relocInfo::none;
   switch (_id) {
     case access_field_id:  target = Runtime1::entry_for(Runtime1::access_field_patching_id); break;
-    case load_klass_id:    target = Runtime1::entry_for(Runtime1::load_klass_patching_id); break;
+    case load_klass_id:    target = Runtime1::entry_for(Runtime1::load_klass_patching_id); reloc_type = relocInfo::metadata_type; break;
+    case load_mirror_id:   target = Runtime1::entry_for(Runtime1::load_mirror_patching_id); reloc_type = relocInfo::oop_type; break;
     default: ShouldNotReachHere();
   }
   __ bind(call_patch);
@@ -351,15 +397,15 @@ void PatchingStub::emit_code(LIR_Assembler* ce) {
   ce->add_call_info_here(_info);
   __ br(Assembler::always, false, Assembler::pt, _patch_site_entry);
   __ delayed()->nop();
-  if (_id == load_klass_id) {
+  if (_id == load_klass_id || _id == load_mirror_id) {
     CodeSection* cs = __ code_section();
     address pc = (address)_pc_start;
     RelocIterator iter(cs, pc, pc + 1);
-    relocInfo::change_reloc_info_for_address(&iter, (address) pc, relocInfo::oop_type, relocInfo::none);
+    relocInfo::change_reloc_info_for_address(&iter, (address) pc, reloc_type, relocInfo::none);
 
     pc = (address)(_pc_start + NativeMovConstReg::add_offset);
     RelocIterator iter2(cs, pc, pc+1);
-    relocInfo::change_reloc_info_for_address(&iter2, (address) pc, relocInfo::oop_type, relocInfo::none);
+    relocInfo::change_reloc_info_for_address(&iter2, (address) pc, reloc_type, relocInfo::none);
   }
 
 }
@@ -403,7 +449,7 @@ void ArrayCopyStub::emit_code(LIR_Assembler* ce) {
 
 
 ///////////////////////////////////////////////////////////////////////////////////
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 
 void G1PreBarrierStub::emit_code(LIR_Assembler* ce) {
   // At this point we know that marking is in progress.
@@ -466,7 +512,7 @@ void G1PostBarrierStub::emit_code(LIR_Assembler* ce) {
   __ delayed()->nop();
 }
 
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 ///////////////////////////////////////////////////////////////////////////////////
 
 #undef __

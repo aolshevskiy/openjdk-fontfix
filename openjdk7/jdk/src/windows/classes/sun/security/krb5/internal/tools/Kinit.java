@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -206,9 +206,7 @@ public class Kinit {
             System.out.println(">>> Kinit realm name is " + realm);
         }
 
-        PrincipalName sname = new PrincipalName("krbtgt" + "/" + realm,
-                                        PrincipalName.KRB_NT_SRV_INST);
-        sname.setRealm(realm);
+        PrincipalName sname = PrincipalName.tgsService(realm, realm);
         builder.setTarget(sname);
 
         if (DEBUG) {

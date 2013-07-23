@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -132,12 +132,12 @@ static map_info* add_map_info(struct ps_prochandle* ph, int fd, off_t offset,
 }
 
 // Part of the class sharing workaround
-static map_info* add_class_share_map_info(struct ps_prochandle* ph, off_t offset,
+static void add_class_share_map_info(struct ps_prochandle* ph, off_t offset,
                              uintptr_t vaddr, size_t memsz) {
    map_info* map;
    if ((map = allocate_init_map(ph->core->classes_jsa_fd,
                                 offset, vaddr, memsz)) == NULL) {
-      return NULL;
+      return;
    }
 
    map->next = ph->core->class_share_maps;
@@ -195,10 +195,10 @@ static map_info* core_lookup(struct ps_prochandle *ph, uintptr_t addr)
 //---------------------------------------------------------------
 // Part of the class sharing workaround:
 //
-// With class sharing, pages are mapped from classes[_g].jsa file.
+// With class sharing, pages are mapped from classes.jsa file.
 // The read-only class sharing pages are mapped as MAP_SHARED,
 // PROT_READ pages. These pages are not dumped into core dump.
-// With this workaround, these pages are read from classes[_g].jsa.
+// With this workaround, these pages are read from classes.jsa.
 
 // FIXME: !HACK ALERT!
 // The format of sharing achive file header is needed to read shared heap
@@ -209,7 +209,6 @@ static map_info* core_lookup(struct ps_prochandle *ph, uintptr_t addr)
 // mapped.  This structure gets written to a file.  It is not a class,
 // so that the compilers don't add any compiler-private data to it.
 
-// Refer to CompactingPermGenGen::n_regions in compactingPermGenGen.hpp
 #define NUM_SHARED_MAPS 4
 
 // Refer to FileMapInfo::_current_version in filemap.hpp
@@ -233,7 +232,7 @@ struct FileMapHeader {
     char   _read_only;       // read only space?
     char   _allow_exec;      // executable code in space?
 
-  } _space[NUM_SHARED_MAPS]; // was _space[CompactingPermGenGen::n_regions];
+  } _space[NUM_SHARED_MAPS];
 
   // Ignore the rest of the FileMapHeader. We don't need those fields here.
 };
@@ -285,10 +284,9 @@ static bool init_classsharing_workaround(struct ps_prochandle* ph) {
    lib_info* lib = ph->libs;
    while (lib != NULL) {
       // we are iterating over shared objects from the core dump. look for
-      // libjvm[_g].so.
+      // libjvm.so.
       const char *jvm_name = 0;
-      if ((jvm_name = strstr(lib->name, "/libjvm.so")) != 0 ||
-          (jvm_name = strstr(lib->name, "/libjvm_g.so")) != 0) {
+      if ((jvm_name = strstr(lib->name, "/libjvm.so")) != 0) {
          char classes_jsa[PATH_MAX];
          struct FileMapHeader header;
          size_t n = 0;
@@ -372,7 +370,7 @@ static bool init_classsharing_workaround(struct ps_prochandle* ph) {
          }
 
          ph->core->classes_jsa_fd = fd;
-         // add read-only maps from classes[_g].jsa to the list of maps
+         // add read-only maps from classes.jsa to the list of maps
          for (m = 0; m < NUM_SHARED_MAPS; m++) {
             if (header._space[m]._read_only) {
                base = (uintptr_t) header._space[m]._base;

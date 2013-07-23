@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,8 @@
 
 package sun.security.provider;
 
+import java.io.*;
+import java.net.*;
 import java.util.Map;
 import java.security.*;
 
@@ -43,6 +45,14 @@ import java.security.*;
  *   identifier strings "OID.1.3.14.3.2.13", "OID.1.3.14.3.2.27" and
  *   "OID.1.2.840.10040.4.3".
  *
+ * - SHA-2 is a set of message digest schemes described in FIPS 180-2.
+ *   SHA-2 family of hash functions includes SHA-224, SHA-256, SHA-384,
+ *   and SHA-512.
+ *
+ * - SHA-224withDSA/SHA-256withDSA are the signature schemes
+ *   described in FIPS 186-3. The associated object identifiers are
+ *   "OID.2.16.840.1.101.3.4.3.1", and "OID.2.16.840.1.101.3.4.3.2".
+
  * - DSA is the key generation scheme as described in FIPS 186.
  *   Aliases for DSA include the OID strings "OID.1.3.14.3.2.12"
  *   and "OID.1.2.840.10040.4.1".
@@ -84,29 +94,48 @@ final class SunEntries {
         // if user selected /dev/urandom, we put it before SHA1PRNG,
         // otherwise after it
         boolean nativeAvailable = NativePRNG.isAvailable();
-        boolean useUrandom = seedSource.equals(URL_DEV_URANDOM);
-        if (nativeAvailable && useUrandom) {
+        boolean useNativePRNG = seedSource.equals(URL_DEV_URANDOM) ||
+            seedSource.equals(URL_DEV_RANDOM);
+
+        if (nativeAvailable && useNativePRNG) {
             map.put("SecureRandom.NativePRNG",
                 "sun.security.provider.NativePRNG");
         }
         map.put("SecureRandom.SHA1PRNG",
              "sun.security.provider.SecureRandom");
-        if (nativeAvailable && !useUrandom) {
+        if (nativeAvailable && !useNativePRNG) {
             map.put("SecureRandom.NativePRNG",
                 "sun.security.provider.NativePRNG");
+        }
+
+        if (NativePRNG.Blocking.isAvailable()) {
+            map.put("SecureRandom.NativePRNGBlocking",
+                "sun.security.provider.NativePRNG$Blocking");
+        }
+
+        if (NativePRNG.NonBlocking.isAvailable()) {
+            map.put("SecureRandom.NativePRNGNonBlocking",
+                "sun.security.provider.NativePRNG$NonBlocking");
         }
 
         /*
          * Signature engines
          */
-        map.put("Signature.SHA1withDSA", "sun.security.provider.DSA$SHA1withDSA");
+        map.put("Signature.SHA1withDSA",
+                "sun.security.provider.DSA$SHA1withDSA");
         map.put("Signature.NONEwithDSA", "sun.security.provider.DSA$RawDSA");
         map.put("Alg.Alias.Signature.RawDSA", "NONEwithDSA");
+        map.put("Signature.SHA224withDSA",
+                "sun.security.provider.DSA$SHA224withDSA");
+        map.put("Signature.SHA256withDSA",
+                "sun.security.provider.DSA$SHA256withDSA");
 
         String dsaKeyClasses = "java.security.interfaces.DSAPublicKey" +
                 "|java.security.interfaces.DSAPrivateKey";
         map.put("Signature.SHA1withDSA SupportedKeyClasses", dsaKeyClasses);
         map.put("Signature.NONEwithDSA SupportedKeyClasses", dsaKeyClasses);
+        map.put("Signature.SHA224withDSA SupportedKeyClasses", dsaKeyClasses);
+        map.put("Signature.SHA256withDSA SupportedKeyClasses", dsaKeyClasses);
 
         map.put("Alg.Alias.Signature.DSA", "SHA1withDSA");
         map.put("Alg.Alias.Signature.DSS", "SHA1withDSA");
@@ -116,10 +145,16 @@ final class SunEntries {
         map.put("Alg.Alias.Signature.SHAwithDSA", "SHA1withDSA");
         map.put("Alg.Alias.Signature.DSAWithSHA1", "SHA1withDSA");
         map.put("Alg.Alias.Signature.OID.1.2.840.10040.4.3",
-            "SHA1withDSA");
+                "SHA1withDSA");
         map.put("Alg.Alias.Signature.1.2.840.10040.4.3", "SHA1withDSA");
         map.put("Alg.Alias.Signature.1.3.14.3.2.13", "SHA1withDSA");
         map.put("Alg.Alias.Signature.1.3.14.3.2.27", "SHA1withDSA");
+        map.put("Alg.Alias.Signature.OID.2.16.840.1.101.3.4.3.1",
+                "SHA224withDSA");
+        map.put("Alg.Alias.Signature.2.16.840.1.101.3.4.3.1", "SHA224withDSA");
+        map.put("Alg.Alias.Signature.OID.2.16.840.1.101.3.4.3.2",
+                "SHA256withDSA");
+        map.put("Alg.Alias.Signature.2.16.840.1.101.3.4.3.2", "SHA256withDSA");
 
         /*
          *  Key Pair Generator engines
@@ -139,10 +174,26 @@ final class SunEntries {
 
         map.put("Alg.Alias.MessageDigest.SHA-1", "SHA");
         map.put("Alg.Alias.MessageDigest.SHA1", "SHA");
+        map.put("Alg.Alias.MessageDigest.1.3.14.3.2.26", "SHA");
+        map.put("Alg.Alias.MessageDigest.OID.1.3.14.3.2.26", "SHA");
 
-        map.put("MessageDigest.SHA-256", "sun.security.provider.SHA2");
+        map.put("MessageDigest.SHA-224", "sun.security.provider.SHA2$SHA224");
+        map.put("Alg.Alias.MessageDigest.2.16.840.1.101.3.4.2.4", "SHA-224");
+        map.put("Alg.Alias.MessageDigest.OID.2.16.840.1.101.3.4.2.4",
+                "SHA-224");
+
+        map.put("MessageDigest.SHA-256", "sun.security.provider.SHA2$SHA256");
+        map.put("Alg.Alias.MessageDigest.2.16.840.1.101.3.4.2.1", "SHA-256");
+        map.put("Alg.Alias.MessageDigest.OID.2.16.840.1.101.3.4.2.1",
+                "SHA-256");
         map.put("MessageDigest.SHA-384", "sun.security.provider.SHA5$SHA384");
+        map.put("Alg.Alias.MessageDigest.2.16.840.1.101.3.4.2.2", "SHA-384");
+        map.put("Alg.Alias.MessageDigest.OID.2.16.840.1.101.3.4.2.2",
+                "SHA-384");
         map.put("MessageDigest.SHA-512", "sun.security.provider.SHA5$SHA512");
+        map.put("Alg.Alias.MessageDigest.2.16.840.1.101.3.4.2.3", "SHA-512");
+        map.put("Alg.Alias.MessageDigest.OID.2.16.840.1.101.3.4.2.3",
+                "SHA-512");
 
         /*
          * Algorithm Parameter Generator engines
@@ -155,15 +206,17 @@ final class SunEntries {
          */
         map.put("AlgorithmParameters.DSA",
             "sun.security.provider.DSAParameters");
-        map.put("Alg.Alias.AlgorithmParameters.1.3.14.3.2.12", "DSA");
+        map.put("Alg.Alias.AlgorithmParameters.OID.1.2.840.10040.4.1", "DSA");
         map.put("Alg.Alias.AlgorithmParameters.1.2.840.10040.4.1", "DSA");
+        map.put("Alg.Alias.AlgorithmParameters.1.3.14.3.2.12", "DSA");
 
         /*
          * Key factories
          */
         map.put("KeyFactory.DSA", "sun.security.provider.DSAKeyFactory");
-        map.put("Alg.Alias.KeyFactory.1.3.14.3.2.12", "DSA");
+        map.put("Alg.Alias.KeyFactory.OID.1.2.840.10040.4.1", "DSA");
         map.put("Alg.Alias.KeyFactory.1.2.840.10040.4.1", "DSA");
+        map.put("Alg.Alias.KeyFactory.1.3.14.3.2.12", "DSA");
 
         /*
          * Certificates
@@ -178,6 +231,7 @@ final class SunEntries {
         map.put("KeyStore.JKS", "sun.security.provider.JavaKeyStore$JKS");
         map.put("KeyStore.CaseExactJKS",
                         "sun.security.provider.JavaKeyStore$CaseExactJKS");
+        map.put("KeyStore.DKS", "sun.security.provider.DomainKeyStore$DKS");
 
         /*
          * Policy
@@ -220,9 +274,13 @@ final class SunEntries {
         /*
          * KeySize
          */
+        map.put("Signature.NONEwithDSA KeySize", "1024");
         map.put("Signature.SHA1withDSA KeySize", "1024");
-        map.put("KeyPairGenerator.DSA KeySize", "1024");
-        map.put("AlgorithmParameterGenerator.DSA KeySize", "1024");
+        map.put("Signature.SHA224withDSA KeySize", "2048");
+        map.put("Signature.SHA256withDSA KeySize", "2048");
+
+        map.put("KeyPairGenerator.DSA KeySize", "2048");
+        map.put("AlgorithmParameterGenerator.DSA KeySize", "2048");
 
         /*
          * Implementation type: software or hardware
@@ -261,6 +319,7 @@ final class SunEntries {
         seedSource = AccessController.doPrivileged(
                 new PrivilegedAction<String>() {
 
+            @Override
             public String run() {
                 String egdSource = System.getProperty(PROP_EGD, "");
                 if (egdSource.length() != 0) {
@@ -279,4 +338,36 @@ final class SunEntries {
         return seedSource;
     }
 
+    /*
+     * Use a URI to access this File. Previous code used a URL
+     * which is less strict on syntax. If we encounter a
+     * URISyntaxException we make best efforts for backwards
+     * compatibility. e.g. space character in deviceName string.
+     *
+     * Method called within PrivilegedExceptionAction block.
+     *
+     * Moved from SeedGenerator to avoid initialization problems with
+     * signed providers.
+     */
+    static File getDeviceFile(URL device) throws IOException {
+        try {
+            URI deviceURI = device.toURI();
+            if(deviceURI.isOpaque()) {
+                // File constructor does not accept opaque URI
+                URI localDir = new File(
+                    System.getProperty("user.dir")).toURI();
+                String uriPath = localDir.toString() +
+                                     deviceURI.toString().substring(5);
+                return new File(URI.create(uriPath));
+            } else {
+                return new File(deviceURI);
+            }
+        } catch (URISyntaxException use) {
+            /*
+             * Make best effort to access this File.
+             * We can try using the URL path.
+             */
+            return new File(device.getPath());
+        }
+    }
 }

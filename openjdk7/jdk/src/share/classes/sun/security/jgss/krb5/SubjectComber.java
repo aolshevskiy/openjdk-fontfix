@@ -33,6 +33,7 @@ import java.util.Iterator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import javax.security.auth.kerberos.KerberosPrincipal;
 import javax.security.auth.kerberos.KeyTab;
 
 /**
@@ -56,15 +57,17 @@ class SubjectComber {
     static <T> T find(Subject subject, String serverPrincipal,
         String clientPrincipal, Class<T> credClass) {
 
-        return (T)findAux(subject, serverPrincipal, clientPrincipal, credClass,
-            true);
+        // findAux returns T if oneOnly.
+        return credClass.cast(findAux(subject, serverPrincipal,
+                                      clientPrincipal, credClass, true));
     }
 
+    @SuppressWarnings("unchecked") // findAux returns List<T> if !oneOnly.
     static <T> List<T> findMany(Subject subject, String serverPrincipal,
         String clientPrincipal, Class<T> credClass) {
 
-        return (List<T>)findAux(subject, serverPrincipal, clientPrincipal, credClass,
-            false);
+        return (List<T>)findAux(subject, serverPrincipal, clientPrincipal,
+            credClass, false);
     }
 
     /**
@@ -73,6 +76,7 @@ class SubjectComber {
      *
      * @return the private credentials
      */
+    // Returns T if oneOnly and List<T> if !oneOnly.
     private static <T> Object findAux(Subject subject, String serverPrincipal,
         String clientPrincipal, Class<T> credClass, boolean oneOnly) {
 
@@ -81,28 +85,49 @@ class SubjectComber {
         } else {
             List<T> answer = (oneOnly ? null : new ArrayList<T>());
 
-            if (credClass == KeyTab.class) {    // Principal un-related
-                // We are looking for credentials unrelated to serverPrincipal
-                Iterator<T> iterator =
-                    subject.getPrivateCredentials(credClass).iterator();
+            if (credClass == KeyTab.class) {
+                Iterator<KeyTab> iterator =
+                    subject.getPrivateCredentials(KeyTab.class).iterator();
                 while (iterator.hasNext()) {
-                    T t = iterator.next();
+                    KeyTab t = iterator.next();
+                    if (serverPrincipal != null && t.isBound()) {
+                        KerberosPrincipal name = t.getPrincipal();
+                        if (name != null) {
+                            if (!serverPrincipal.equals(name.getName())) {
+                                continue;
+                            }
+                        } else {
+                            // legacy bound keytab. although we don't know who
+                            // the bound principal is, it must be in allPrincs
+                            boolean found = false;
+                            for (KerberosPrincipal princ:
+                                    subject.getPrincipals(KerberosPrincipal.class)) {
+                                if (princ.getName().equals(serverPrincipal)) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) continue;
+                        }
+                    }
+                    // Check passed, we can add now
                     if (DEBUG) {
-                        System.out.println("Found " + credClass.getSimpleName());
+                        System.out.println("Found " + credClass.getSimpleName()
+                                + " " + t);
                     }
                     if (oneOnly) {
                         return t;
                     } else {
-                        answer.add(t);
+                        answer.add(credClass.cast(t));
                     }
                 }
             } else if (credClass == KerberosKey.class) {
                 // We are looking for credentials for the serverPrincipal
-                Iterator<T> iterator =
-                    subject.getPrivateCredentials(credClass).iterator();
+                Iterator<KerberosKey> iterator =
+                    subject.getPrivateCredentials(KerberosKey.class).iterator();
                 while (iterator.hasNext()) {
-                    T t = iterator.next();
-                    String name = ((KerberosKey)t).getPrincipal().getName();
+                    KerberosKey t = iterator.next();
+                    String name = t.getPrincipal().getName();
                     if (serverPrincipal == null || serverPrincipal.equals(name)) {
                          if (DEBUG) {
                              System.out.println("Found " +
@@ -111,12 +136,7 @@ class SubjectComber {
                          if (oneOnly) {
                              return t;
                          } else {
-                             if (serverPrincipal == null) {
-                                 // Record name so that keys returned will all
-                                 // belong to the same principal
-                                 serverPrincipal = name;
-                             }
-                             answer.add(t);
+                             answer.add(credClass.cast(t));
                          }
                     }
                 }
@@ -129,6 +149,7 @@ class SubjectComber {
                     while (iterator.hasNext()) {
                         Object obj = iterator.next();
                         if (obj instanceof KerberosTicket) {
+                            @SuppressWarnings("unchecked")
                             KerberosTicket ticket = (KerberosTicket)obj;
                             if (DEBUG) {
                                 System.out.println("Found ticket for "
@@ -180,7 +201,7 @@ class SubjectComber {
                                                 serverPrincipal =
                                                 ticket.getServer().getName();
                                             }
-                                            answer.add((T)ticket);
+                                            answer.add(credClass.cast(ticket));
                                         }
                                     }
                                 }

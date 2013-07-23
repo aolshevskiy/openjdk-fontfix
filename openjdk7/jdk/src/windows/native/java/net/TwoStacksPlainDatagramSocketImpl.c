@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -145,7 +145,7 @@ static int getFD1(JNIEnv *env, jobject this) {
 /*
  * This function returns JNI_TRUE if the datagram size exceeds the underlying
  * provider's ability to send to the target address. The following OS
- * oddies have been observed :-
+ * oddities have been observed :-
  *
  * 1. On Windows 95/98 if we try to send a datagram > 12k to an application
  *    on the same machine then the send will fail silently.
@@ -218,7 +218,7 @@ jboolean exceedSizeLimit(JNIEnv *env, jint fd, jint addr, jint size)
 
             /*
              * Step 3: On Windows 95/98 then enumerate the IP addresses on
-             * this machine. This is necesary because we need to check if the
+             * this machine. This is neccesary because we need to check if the
              * datagram is being sent to an application on the same machine.
              */
             if (is95or98) {
@@ -421,7 +421,8 @@ Java_java_net_TwoStacksPlainDatagramSocketImpl_init(JNIEnv *env, jclass cls) {
 
 JNIEXPORT void JNICALL
 Java_java_net_TwoStacksPlainDatagramSocketImpl_bind0(JNIEnv *env, jobject this,
-                                           jint port, jobject addressObj) {
+                                           jint port, jobject addressObj,
+                                           jboolean exclBind) {
     jobject fdObj = (*env)->GetObjectField(env, this, pdsi_fdID);
     jobject fd1Obj = (*env)->GetObjectField(env, this, pdsi_fd1ID);
 
@@ -464,7 +465,7 @@ Java_java_net_TwoStacksPlainDatagramSocketImpl_bind0(JNIEnv *env, jobject this,
         v6bind.addr = &lcladdr;
         v6bind.ipv4_fd = fd;
         v6bind.ipv6_fd = fd1;
-        if (NET_BindV6(&v6bind) != -1) {
+        if (NET_BindV6(&v6bind, exclBind) != -1) {
             /* check if the fds have changed */
             if (v6bind.ipv4_fd != fd) {
                 fd = v6bind.ipv4_fd;
@@ -491,7 +492,7 @@ Java_java_net_TwoStacksPlainDatagramSocketImpl_bind0(JNIEnv *env, jobject this,
             return;
         }
     } else {
-        if (bind(fd, (struct sockaddr *)&lcladdr, lcladdrlen) == -1) {
+        if (NET_WinBind(fd, (struct sockaddr *)&lcladdr, lcladdrlen, exclBind) == -1) {
             if (WSAGetLastError() == WSAEACCES) {
                 WSASetLastError(WSAEADDRINUSE);
             }
@@ -565,8 +566,8 @@ Java_java_net_TwoStacksPlainDatagramSocketImpl_connect0(JNIEnv *env, jobject thi
 
     if (xp_or_later) {
         /* SIO_UDP_CONNRESET fixes a bug introduced in Windows 2000, which
-         * returns connection reset errors un connected UDP sockets (as well
-         * as connected sockets. The solution is to only enable this feature
+         * returns connection reset errors on connected UDP sockets (as well
+         * as connected sockets). The solution is to only enable this feature
          * when the socket is connected
          */
         DWORD x1, x2; /* ignored result codes */
@@ -690,6 +691,12 @@ Java_java_net_TwoStacksPlainDatagramSocketImpl_send(JNIEnv *env, jobject this,
     fd = (*env)->GetIntField(env, fdObj, IO_fd_fdID);
 
     packetBufferLen = (*env)->GetIntField(env, packet, dp_lengthID);
+    /* Note: the buffer needn't be greater than 65,536 (0xFFFF)...
+     * the maximum size of an IP packet. Anything bigger is truncated anyway.
+     */
+    if (packetBufferLen > MAX_PACKET_LEN) {
+        packetBufferLen = MAX_PACKET_LEN;
+    }
 
     if (connected) {
         addrp = 0; /* arg to JVM_Sendto () null in this case */
@@ -728,7 +735,7 @@ Java_java_net_TwoStacksPlainDatagramSocketImpl_send(JNIEnv *env, jobject this,
         }
 
         /* When JNI-ifying the JDK's IO routines, we turned
-         * read's and write's of byte arrays of size greater
+         * reads and writes of byte arrays of size greater
          * than 2048 bytes into several operations of size 2048.
          * This saves a malloc()/memcpy()/free() for big
          * buffers.  This is OK for file IO and TCP, but that
@@ -1776,11 +1783,11 @@ static void setMulticastInterface(JNIEnv *env, jobject this, int fd, int fd1,
 
 /*
  * Class:     java_net_TwoStacksPlainDatagramSocketImpl
- * Method:    socketSetOption
+ * Method:    socketNativeSetOption
  * Signature: (ILjava/lang/Object;)V
  */
 JNIEXPORT void JNICALL
-Java_java_net_TwoStacksPlainDatagramSocketImpl_socketSetOption(JNIEnv *env,jobject this,
+Java_java_net_TwoStacksPlainDatagramSocketImpl_socketNativeSetOption(JNIEnv *env,jobject this,
                                                       jint opt,jobject value) {
 
     int fd=-1, fd1=-1;
@@ -2157,30 +2164,6 @@ Java_java_net_TwoStacksPlainDatagramSocketImpl_socketGetOption(JNIEnv *env, jobj
         return getMulticastInterface(env, this, fd, fd1, opt);
     }
 
-    if (opt == java_net_SocketOptions_SO_BINDADDR) {
-        /* find out local IP address */
-        SOCKETADDRESS him;
-        int len = 0;
-        int port;
-        jobject iaObj;
-
-        len = sizeof (struct sockaddr_in);
-
-        if (fd == -1) {
-            fd = fd1; /* must be IPv6 only */
-            len = sizeof (struct SOCKADDR_IN6);
-        }
-
-        if (getsockname(fd, (struct sockaddr *)&him, &len) == -1) {
-            NET_ThrowByNameWithLastError(env, JNU_JAVANETPKG "SocketException",
-                           "Error getting socket name");
-            return NULL;
-        }
-        iaObj = NET_SockaddrToInetAddress(env, (struct sockaddr *)&him, &port);
-
-        return iaObj;
-    }
-
     /*
      * Map the Java level socket option to the platform specific
      * level and option name.
@@ -2226,6 +2209,61 @@ Java_java_net_TwoStacksPlainDatagramSocketImpl_socketGetOption(JNIEnv *env, jobj
             return NULL;
 
     }
+}
+
+/*
+ * Returns local address of the socket.
+ *
+ * Class:     java_net_TwoStacksPlainDatagramSocketImpl
+ * Method:    socketLocalAddress
+ * Signature: (I)Ljava/lang/Object;
+ */
+JNIEXPORT jobject JNICALL
+Java_java_net_TwoStacksPlainDatagramSocketImpl_socketLocalAddress(JNIEnv *env, jobject this,
+                                                      jint family) {
+
+    int fd=-1, fd1=-1;
+    SOCKETADDRESS him;
+    int len = 0;
+    int port;
+    jobject iaObj;
+    int ipv6_supported = ipv6_available();
+
+    fd = getFD(env, this);
+    if (ipv6_supported) {
+        fd1 = getFD1(env, this);
+    }
+
+    if (fd < 0 && fd1 < 0) {
+        JNU_ThrowByName(env, JNU_JAVANETPKG "SocketException",
+                        "Socket closed");
+        return NULL;
+    }
+
+    /* find out local IP address */
+
+    len = sizeof (struct sockaddr_in);
+
+    /* family==-1 when socket is not connected */
+    if ((family == IPv6) || (family == -1 && fd == -1)) {
+        fd = fd1; /* must be IPv6 only */
+        len = sizeof (struct SOCKADDR_IN6);
+    }
+
+    if (fd == -1) {
+        JNU_ThrowByName(env, JNU_JAVANETPKG "SocketException",
+                        "Socket closed");
+        return NULL;
+    }
+
+    if (getsockname(fd, (struct sockaddr *)&him, &len) == -1) {
+        NET_ThrowByNameWithLastError(env, JNU_JAVANETPKG "SocketException",
+                       "Error getting socket name");
+        return NULL;
+    }
+    iaObj = NET_SockaddrToInetAddress(env, (struct sockaddr *)&him, &port);
+
+    return iaObj;
 }
 
 /*

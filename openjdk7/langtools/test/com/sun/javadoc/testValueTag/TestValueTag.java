@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -41,6 +41,7 @@ public class TestValueTag extends JavadocTester {
     //Javadoc arguments.
     private static final String[] ARGS =
         new String[] {
+            "-Xdoclint:none",
             "-d", BUG_ID, "-sourcepath", SRC_DIR, "-tag",
             "todo", "pkg1", "pkg2"
         };
@@ -89,7 +90,7 @@ public class TestValueTag extends JavadocTester {
         //Test @value tag used with custom tag.
         {BUG_ID + FS + "pkg1" + FS + "CustomTagUsage.html",
             "<dt><span class=\"strong\">Todo:</span></dt>" + NL +
-                "  <dd>the value of this constant is 55.</dd>"},
+                "<dd>the value of this constant is 55.</dd>"},
         //Test @value warning printed when used with non-constant.
         {WARNING_OUTPUT,"warning - @value tag (which references nonConstant) " +
             "can only be used in constants."

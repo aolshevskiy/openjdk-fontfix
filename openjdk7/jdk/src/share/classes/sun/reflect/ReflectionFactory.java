@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 package sun.reflect;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Modifier;
@@ -161,7 +162,7 @@ public class ReflectionFactory {
         }
     }
 
-    public ConstructorAccessor newConstructorAccessor(Constructor c) {
+    public ConstructorAccessor newConstructorAccessor(Constructor<?> c) {
         checkInitted();
 
         Class<?> declaringClass = c.getDeclaringClass();
@@ -250,14 +251,14 @@ public class ReflectionFactory {
 
     /** Creates a new java.lang.reflect.Constructor. Access checks as
         per java.lang.reflect.AccessibleObject are not overridden. */
-    public Constructor newConstructor(Class<?> declaringClass,
-                                      Class<?>[] parameterTypes,
-                                      Class<?>[] checkedExceptions,
-                                      int modifiers,
-                                      int slot,
-                                      String signature,
-                                      byte[] annotations,
-                                      byte[] parameterAnnotations)
+    public Constructor<?> newConstructor(Class<?> declaringClass,
+                                         Class<?>[] parameterTypes,
+                                         Class<?>[] checkedExceptions,
+                                         int modifiers,
+                                         int slot,
+                                         String signature,
+                                         byte[] annotations,
+                                         byte[] parameterAnnotations)
     {
         return langReflectAccess().newConstructor(declaringClass,
                                                   parameterTypes,
@@ -281,13 +282,13 @@ public class ReflectionFactory {
 
     /** Gets the ConstructorAccessor object for a
         java.lang.reflect.Constructor */
-    public ConstructorAccessor getConstructorAccessor(Constructor c) {
+    public ConstructorAccessor getConstructorAccessor(Constructor<?> c) {
         return langReflectAccess().getConstructorAccessor(c);
     }
 
     /** Sets the ConstructorAccessor object for a
         java.lang.reflect.Constructor */
-    public void setConstructorAccessor(Constructor c,
+    public void setConstructorAccessor(Constructor<?> c,
                                        ConstructorAccessor accessor)
     {
         langReflectAccess().setConstructorAccessor(c, accessor);
@@ -314,14 +315,20 @@ public class ReflectionFactory {
         return langReflectAccess().copyConstructor(arg);
     }
 
+    /** Gets the byte[] that encodes TypeAnnotations on an executable.
+     */
+    public byte[] getExecutableTypeAnnotationBytes(Executable ex) {
+        return langReflectAccess().getExecutableTypeAnnotationBytes(ex);
+    }
+
     //--------------------------------------------------------------------------
     //
     // Routines used by serialization
     //
     //
 
-    public Constructor newConstructorForSerialization
-        (Class<?> classToInstantiate, Constructor constructorToCall)
+    public Constructor<?> newConstructorForSerialization
+        (Class<?> classToInstantiate, Constructor<?> constructorToCall)
     {
         // Fast path
         if (constructorToCall.getDeclaringClass() == classToInstantiate) {
@@ -334,18 +341,18 @@ public class ReflectionFactory {
                                              constructorToCall.getExceptionTypes(),
                                              constructorToCall.getModifiers(),
                                              constructorToCall.getDeclaringClass());
-        Constructor c = newConstructor(constructorToCall.getDeclaringClass(),
-                                       constructorToCall.getParameterTypes(),
-                                       constructorToCall.getExceptionTypes(),
-                                       constructorToCall.getModifiers(),
-                                       langReflectAccess().
-                                       getConstructorSlot(constructorToCall),
-                                       langReflectAccess().
-                                       getConstructorSignature(constructorToCall),
-                                       langReflectAccess().
-                                       getConstructorAnnotations(constructorToCall),
-                                       langReflectAccess().
-                                       getConstructorParameterAnnotations(constructorToCall));
+        Constructor<?> c = newConstructor(constructorToCall.getDeclaringClass(),
+                                          constructorToCall.getParameterTypes(),
+                                          constructorToCall.getExceptionTypes(),
+                                          constructorToCall.getModifiers(),
+                                          langReflectAccess().
+                                          getConstructorSlot(constructorToCall),
+                                          langReflectAccess().
+                                          getConstructorSignature(constructorToCall),
+                                          langReflectAccess().
+                                          getConstructorAnnotations(constructorToCall),
+                                          langReflectAccess().
+                                          getConstructorParameterAnnotations(constructorToCall));
         setConstructorAccessor(c, acc);
         return c;
     }
@@ -393,9 +400,7 @@ public class ReflectionFactory {
                         try {
                             inflationThreshold = Integer.parseInt(val);
                         } catch (NumberFormatException e) {
-                            throw (RuntimeException)
-                                new RuntimeException("Unable to parse property sun.reflect.inflationThreshold").
-                                    initCause(e);
+                            throw new RuntimeException("Unable to parse property sun.reflect.inflationThreshold", e);
                         }
                     }
 

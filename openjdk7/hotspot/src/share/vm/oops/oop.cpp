@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,22 +23,12 @@
  */
 
 #include "precompiled.hpp"
+#include "classfile/altHashing.hpp"
 #include "classfile/javaClasses.hpp"
 #include "oops/oop.inline.hpp"
 #include "runtime/handles.inline.hpp"
+#include "runtime/thread.inline.hpp"
 #include "utilities/copy.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
 
 bool always_do_update_barrier = false;
 
@@ -48,7 +38,7 @@ void oopDesc::print_on(outputStream* st) const {
   if (this == NULL) {
     st->print_cr("NULL");
   } else {
-    blueprint()->oop_print_on(oop(this), st);
+    klass()->oop_print_on(oop(this), st);
   }
 }
 
@@ -86,19 +76,15 @@ void oopDesc::print_value_on(outputStream* st) const {
   } else if (java_lang_String::is_instance(obj)) {
     java_lang_String::print(obj, st);
     if (PrintOopAddress) print_address_on(st);
-#ifdef ASSERT
-  } else if (!Universe::heap()->is_in(obj) || !Universe::heap()->is_in(klass())) {
-    st->print("### BAD OOP %p ###", (address)obj);
-#endif //ASSERT
   } else {
-    blueprint()->oop_print_value_on(obj, st);
+    klass()->oop_print_value_on(obj, st);
   }
 }
 
 
 void oopDesc::verify_on(outputStream* st) {
   if (this != NULL) {
-    blueprint()->oop_verify_on(this, st);
+    klass()->oop_verify_on(this, st);
   }
 }
 
@@ -107,23 +93,27 @@ void oopDesc::verify() {
   verify_on(tty);
 }
 
-bool oopDesc::partially_loaded() {
-  return blueprint()->oop_partially_loaded(this);
-}
-
-
-void oopDesc::set_partially_loaded() {
-  blueprint()->oop_set_partially_loaded(this);
-}
-
-
 intptr_t oopDesc::slow_identity_hash() {
   // slow case; we have to acquire the micro lock in order to locate the header
   ResetNoHandleMark rnm; // Might be called from LEAF/QUICK ENTRY
   HandleMark hm;
-  Handle object((oop)this);
-  assert(!is_shared_readonly(), "using identity hash on readonly object?");
+  Handle object(this);
   return ObjectSynchronizer::identity_hash_value_for(object);
+}
+
+// When String table needs to rehash
+unsigned int oopDesc::new_hash(jint seed) {
+  EXCEPTION_MARK;
+  ResourceMark rm;
+  int length;
+  jchar* chars = java_lang_String::as_unicode_string(this, length, THREAD);
+  if (chars != NULL) {
+    // Use alternate hashing algorithm on the string
+    return AltHashing::murmur3_32(seed, chars, length);
+  } else {
+    vm_exit_out_of_memory(length, OOM_MALLOC_ERROR, "unable to create Unicode strings for String table rehash");
+    return 0;
+  }
 }
 
 VerifyOopClosure VerifyOopClosure::verify_oop;

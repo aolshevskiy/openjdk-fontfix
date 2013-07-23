@@ -162,7 +162,7 @@ Java_sun_nio_fs_WindowsNativeDispatcher_initIDs(JNIEnv* env, jclass this)
     }
     completionStatus_error = (*env)->GetFieldID(env, clazz, "error", "I");
     completionStatus_bytesTransferred = (*env)->GetFieldID(env, clazz, "bytesTransferred", "I");
-    completionStatus_completionKey = (*env)->GetFieldID(env, clazz, "completionKey", "I");
+    completionStatus_completionKey = (*env)->GetFieldID(env, clazz, "completionKey", "J");
 
     clazz = (*env)->FindClass(env, "sun/nio/fs/WindowsNativeDispatcher$BackupResult");
     if (clazz == NULL) {
@@ -1021,6 +1021,33 @@ Java_sun_nio_fs_WindowsNativeDispatcher_AdjustTokenPrivileges(JNIEnv* env,
         throwWindowsException(env, GetLastError());
 }
 
+JNIEXPORT jboolean JNICALL
+Java_sun_nio_fs_WindowsNativeDispatcher_AccessCheck(JNIEnv* env,
+    jclass this, jlong token, jlong securityInfo, jint accessMask,
+    jint genericRead, jint genericWrite, jint genericExecute, jint genericAll)
+{
+    HANDLE hImpersonatedToken = (HANDLE)jlong_to_ptr(token);
+    PSECURITY_DESCRIPTOR security = (PSECURITY_DESCRIPTOR)jlong_to_ptr(securityInfo);
+    DWORD checkAccessRights = (DWORD)accessMask;
+    GENERIC_MAPPING mapping = {
+        genericRead,
+        genericWrite,
+        genericExecute,
+        genericAll};
+    PRIVILEGE_SET privileges = {0};
+    DWORD privilegesLength = sizeof(privileges);
+    DWORD grantedAccess = 0;
+    BOOL result = FALSE;
+
+    /* checkAccessRights is in-out parameter */
+    MapGenericMask(&checkAccessRights, &mapping);
+    if (AccessCheck(security, hImpersonatedToken, checkAccessRights,
+            &mapping, &privileges, &privilegesLength, &grantedAccess, &result) == 0)
+        throwWindowsException(env, GetLastError());
+
+    return (result == FALSE) ? JNI_FALSE : JNI_TRUE;
+}
+
 JNIEXPORT jlong JNICALL
 Java_sun_nio_fs_WindowsNativeDispatcher_LookupPrivilegeValue0(JNIEnv* env,
     jclass this, jlong name)
@@ -1035,35 +1062,6 @@ Java_sun_nio_fs_WindowsNativeDispatcher_LookupPrivilegeValue0(JNIEnv* env,
             throwWindowsException(env, GetLastError());
     }
     return ptr_to_jlong(pLuid);
-}
-
-JNIEXPORT jlong JNICALL
-Java_sun_nio_fs_WindowsNativeDispatcher_BuildTrusteeWithSid(JNIEnv* env,
-    jclass this, jlong sid)
-{
-    PSID pSid = (HANDLE)jlong_to_ptr(sid);
-    PTRUSTEE_W pTrustee = LocalAlloc(0, sizeof(TRUSTEE_W));
-
-    if (pTrustee == NULL) {
-        JNU_ThrowInternalError(env, "Unable to allocate TRUSTEE_W structure");
-    } else {
-        BuildTrusteeWithSidW(pTrustee, pSid);
-    }
-    return ptr_to_jlong(pTrustee);
-}
-
-JNIEXPORT jint JNICALL
-Java_sun_nio_fs_WindowsNativeDispatcher_GetEffectiveRightsFromAcl(JNIEnv* env,
-    jclass this, jlong acl, jlong trustee)
-{
-    ACCESS_MASK access;
-    PACL pAcl = (PACL)jlong_to_ptr(acl);
-    PTRUSTEE pTrustee = (PTRUSTEE)jlong_to_ptr(trustee);
-
-    if (GetEffectiveRightsFromAcl(pAcl, pTrustee, &access) != ERROR_SUCCESS) {
-        throwWindowsException(env, GetLastError());
-    }
-    return (jint)access;
 }
 
 JNIEXPORT void JNICALL
@@ -1171,12 +1169,11 @@ Java_sun_nio_fs_WindowsNativeDispatcher_GetFinalPathNameByHandle(JNIEnv* env,
 
 JNIEXPORT jlong JNICALL
 Java_sun_nio_fs_WindowsNativeDispatcher_CreateIoCompletionPort(JNIEnv* env, jclass this,
-    jlong fileHandle, jlong existingPort, jint completionKey)
+    jlong fileHandle, jlong existingPort, jlong completionKey)
 {
-    ULONG_PTR ck = completionKey;
     HANDLE port = CreateIoCompletionPort((HANDLE)jlong_to_ptr(fileHandle),
                                          (HANDLE)jlong_to_ptr(existingPort),
-                                         ck,
+                                         (ULONG_PTR)completionKey,
                                          0);
     if (port == NULL) {
         throwWindowsException(env, GetLastError());
@@ -1205,21 +1202,20 @@ Java_sun_nio_fs_WindowsNativeDispatcher_GetQueuedCompletionStatus0(JNIEnv* env, 
         (*env)->SetIntField(env, obj, completionStatus_error, ioResult);
         (*env)->SetIntField(env, obj, completionStatus_bytesTransferred,
             (jint)bytesTransferred);
-        (*env)->SetIntField(env, obj, completionStatus_completionKey,
-            (jint)completionKey);
-
+        (*env)->SetLongField(env, obj, completionStatus_completionKey,
+            (jlong)completionKey);
     }
 }
 
 JNIEXPORT void JNICALL
 Java_sun_nio_fs_WindowsNativeDispatcher_PostQueuedCompletionStatus(JNIEnv* env, jclass this,
-    jlong completionPort, jint completionKey)
+    jlong completionPort, jlong completionKey)
 {
     BOOL res;
 
     res = PostQueuedCompletionStatus((HANDLE)jlong_to_ptr(completionPort),
                                      (DWORD)0,  /* dwNumberOfBytesTransferred */
-                                     (DWORD)completionKey,
+                                     (ULONG_PTR)completionKey,
                                      NULL);  /* lpOverlapped */
     if (res == 0) {
         throwWindowsException(env, GetLastError());
@@ -1234,7 +1230,17 @@ Java_sun_nio_fs_WindowsNativeDispatcher_ReadDirectoryChangesW(JNIEnv* env, jclas
     BOOL res;
     BOOL subtree = (watchSubTree == JNI_TRUE) ? TRUE : FALSE;
 
-    ((LPOVERLAPPED)jlong_to_ptr(pOverlapped))->hEvent = NULL;
+    /* Any unused members of [OVERLAPPED] structure should always be initialized to zero
+       before the structure is used in a function call.
+       Otherwise, the function may fail and return ERROR_INVALID_PARAMETER.
+       http://msdn.microsoft.com/en-us/library/windows/desktop/ms684342%28v=vs.85%29.aspx
+
+       The [Offset] and [OffsetHigh] members of this structure are not used.
+       http://msdn.microsoft.com/en-us/library/windows/desktop/aa365465%28v=vs.85%29.aspx
+
+       [hEvent] should be zero, other fields are the return values. */
+    ZeroMemory((LPOVERLAPPED)jlong_to_ptr(pOverlapped), sizeof(OVERLAPPED));
+
     res = ReadDirectoryChangesW((HANDLE)jlong_to_ptr(hDirectory),
                                 (LPVOID)jlong_to_ptr(bufferAddress),
                                 (DWORD)bufferLength,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -148,8 +148,8 @@ final class P11KeyAgreement extends KeyAgreementSpi {
             // just in case not, attempt conversion
             P11DHKeyFactory kf = new P11DHKeyFactory(token, "DH");
             try {
-                DHPublicKeySpec spec = (DHPublicKeySpec)kf.engineGetKeySpec
-                                                (key, DHPublicKeySpec.class);
+                DHPublicKeySpec spec = kf.engineGetKeySpec(
+                        key, DHPublicKeySpec.class);
 
                 // validate the Diffie-Hellman public key
                 KeyUtil.validate(spec);
@@ -330,7 +330,7 @@ final class P11KeyAgreement extends KeyAgreementSpi {
                 // as here we always retrieve the CKA_VALUE even for tokens
                 // that do not have that bug.
                 byte[] keyBytes = key.getEncoded();
-                byte[] newBytes = P11Util.trimZeroes(keyBytes);
+                byte[] newBytes = KeyUtil.trimZeroes(keyBytes);
                 if (keyBytes != newBytes) {
                     key = new SecretKeySpec(newBytes, algorithm);
                 }

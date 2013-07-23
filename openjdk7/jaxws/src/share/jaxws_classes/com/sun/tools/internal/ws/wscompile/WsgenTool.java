@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,15 +25,10 @@
 
 package com.sun.tools.internal.ws.wscompile;
 
-import com.sun.mirror.apt.AnnotationProcessor;
-import com.sun.mirror.apt.AnnotationProcessorEnvironment;
-import com.sun.mirror.apt.AnnotationProcessorFactory;
-import com.sun.mirror.declaration.AnnotationTypeDeclaration;
+import com.oracle.webservices.internal.api.databinding.WSDLResolver;
+import com.sun.istack.internal.tools.ParallelWorldClassLoader;
 import com.sun.tools.internal.ws.ToolVersion;
-import com.sun.tools.internal.ws.api.WsgenExtension;
-import com.sun.tools.internal.ws.api.WsgenProtocol;
-import com.sun.tools.internal.ws.processor.modeler.annotation.AnnotationProcessorContext;
-import com.sun.tools.internal.ws.processor.modeler.annotation.WebServiceAP;
+import com.sun.tools.internal.ws.processor.modeler.annotation.WebServiceAp;
 import com.sun.tools.internal.ws.processor.modeler.wsdl.ConsoleErrorReporter;
 import com.sun.tools.internal.ws.resources.WscompileMessages;
 import com.sun.tools.internal.xjc.util.NullStream;
@@ -43,18 +38,22 @@ import com.sun.xml.internal.txw2.annotation.XmlAttribute;
 import com.sun.xml.internal.txw2.annotation.XmlElement;
 import com.sun.xml.internal.txw2.output.StreamSerializer;
 import com.sun.xml.internal.ws.api.BindingID;
+import com.sun.xml.internal.ws.api.databinding.DatabindingConfig;
+import com.sun.xml.internal.ws.api.databinding.DatabindingFactory;
+import com.sun.xml.internal.ws.api.databinding.WSDLGenInfo;
 import com.sun.xml.internal.ws.api.server.Container;
 import com.sun.xml.internal.ws.api.wsdl.writer.WSDLGeneratorExtension;
 import com.sun.xml.internal.ws.binding.WebServiceFeatureList;
-import com.sun.xml.internal.ws.binding.SOAPBindingImpl;
+import com.sun.xml.internal.ws.model.ExternalMetadataReader;
 import com.sun.xml.internal.ws.model.AbstractSEIModelImpl;
-import com.sun.xml.internal.ws.model.RuntimeModeler;
 import com.sun.xml.internal.ws.util.ServiceFinder;
-import com.sun.xml.internal.ws.wsdl.writer.WSDLGenerator;
-import com.sun.xml.internal.ws.wsdl.writer.WSDLResolver;
-import com.sun.istack.internal.tools.ParallelWorldClassLoader;
 import org.xml.sax.SAXParseException;
 
+import javax.tools.DiagnosticCollector;
+import javax.tools.JavaCompiler;
+import javax.tools.JavaFileObject;
+import javax.tools.StandardJavaFileManager;
+import javax.tools.ToolProvider;
 import javax.xml.bind.annotation.XmlSeeAlso;
 import javax.xml.namespace.QName;
 import javax.xml.transform.Result;
@@ -68,27 +67,28 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
-import java.lang.reflect.Field;
 import java.net.URLClassLoader;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * @author Vivek Pandey
  */
-public class WsgenTool implements AnnotationProcessorFactory {
+
+/*
+ * All annotation types are supported.
+ */
+public class WsgenTool {
     private final PrintStream out;
     private final WsgenOptions options = new WsgenOptions();
 
 
     public WsgenTool(OutputStream out, Container container) {
-        this.out = (out instanceof PrintStream)?(PrintStream)out:new PrintStream(out);
+        this.out = (out instanceof PrintStream) ? (PrintStream) out : new PrintStream(out);
         this.container = container;
     }
 
@@ -97,120 +97,120 @@ public class WsgenTool implements AnnotationProcessorFactory {
         this(out, null);
     }
 
-    public boolean run(String[] args){
+    public boolean run(String[] args) {
         final Listener listener = new Listener();
         for (String arg : args) {
             if (arg.equals("-version")) {
-                listener.message(ToolVersion.VERSION.BUILD_VERSION);
+                listener.message(
+                        WscompileMessages.WSGEN_VERSION(ToolVersion.VERSION.MAJOR_VERSION));
+                return true;
+            }
+            if (arg.equals("-fullversion")) {
+                listener.message(
+                        WscompileMessages.WSGEN_FULLVERSION(ToolVersion.VERSION.toString()));
                 return true;
             }
         }
         try {
             options.parseArguments(args);
             options.validate();
-            if(!buildModel(options.endpoint.getName(), listener)){
+            if (!buildModel(options.endpoint.getName(), listener)) {
                 return false;
             }
-        }catch (Options.WeAreDone done){
-            usage((WsgenOptions)done.getOptions());
-        }catch (BadCommandLineException e) {
-            if(e.getMessage()!=null) {
+        } catch (Options.WeAreDone done) {
+            usage(done.getOptions());
+        } catch (BadCommandLineException e) {
+            if (e.getMessage() != null) {
                 System.out.println(e.getMessage());
                 System.out.println();
             }
-            usage((WsgenOptions)e.getOptions());
+            usage(e.getOptions());
             return false;
-        }catch(AbortException e){
+        } catch (AbortException e) {
             //error might have been reported
-        }finally{
-            if(!options.keep){
+        } finally {
+            if (!options.keep) {
                 options.removeGeneratedFiles();
             }
         }
         return true;
     }
 
-    private AnnotationProcessorContext context;
     private final Container container;
-
-    private WebServiceAP webServiceAP;
-
-    private int round = 0;
-
-    // Workaround for bug 6499165 on jax-ws,
-    // Original bug with JDK 6500594 , 6500594 when compiled with debug option,
-    private void workAroundJavacDebug() {
-        ClassLoader cl = Thread.currentThread().getContextClassLoader();
-        try {
-            final Class aptMain = cl.loadClass("com.sun.tools.apt.main.Main");
-            AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                public Void run() {
-                    try {
-                        Field forcedOpts = aptMain.getDeclaredField("forcedOpts");
-                        forcedOpts.setAccessible(true);
-                        forcedOpts.set(null, new String[]{});
-                    } catch (NoSuchFieldException e) {
-                        if(options.verbose)
-                            e.printStackTrace();
-                    } catch (IllegalAccessException e) {
-                        if(options.verbose)
-                            e.printStackTrace();
-                    }
-                    return null;
-                }
-            });
-        } catch (ClassNotFoundException e) {
-            if(options.verbose)
-                e.printStackTrace();
-        }
-    }
 
     /*
      * To take care of JDK6-JDK6u3, where 2.1 API classes are not there
      */
     private static boolean useBootClasspath(Class clazz) {
         try {
-            ParallelWorldClassLoader.toJarUrl(clazz.getResource('/'+clazz.getName().replace('.','/')+".class"));
+            ParallelWorldClassLoader.toJarUrl(clazz.getResource('/' + clazz.getName().replace('.', '/') + ".class"));
             return true;
-        } catch(Exception e) {
+        } catch (Exception e) {
             return false;
         }
     }
 
-
+    /**
+     *
+     * @param endpoint
+     * @param listener
+     * @return
+     * @throws BadCommandLineException
+     */
     public boolean buildModel(String endpoint, Listener listener) throws BadCommandLineException {
         final ErrorReceiverFilter errReceiver = new ErrorReceiverFilter(listener);
-        context = new AnnotationProcessorContext();
-        webServiceAP = new WebServiceAP(options, context, errReceiver, out);
 
         boolean bootCP = useBootClasspath(EndpointReference.class) || useBootClasspath(XmlSeeAlso.class);
-
-        String[] args = new String[8 + (bootCP ? 1 :0) + (options.nocompile?1:0)];
-        int i = 0;
-        args[i++] = "-d";
-        args[i++] = options.destDir.getAbsolutePath();
-        args[i++] = "-classpath";
-        args[i++] = options.classpath;
-        args[i++] = "-s";
-        args[i++] = options.sourceDir.getAbsolutePath();
-        args[i++] = "-XclassesAsDecls";
-        if(options.nocompile) {
-            args[i++] = "-nocompile";
+        Collection<String> args = new ArrayList<String>(6 + (bootCP ? 1 : 0) + (options.nocompile ? 1 : 0)
+                + (options.encoding != null ? 2 : 0));
+        args.add("-d");
+        args.add(options.destDir.getAbsolutePath());
+        args.add("-classpath");
+        args.add(options.classpath);
+        args.add("-s");
+        args.add(options.sourceDir.getAbsolutePath());
+        if (options.nocompile) {
+            args.add("-proc:only");
         }
-        args[i++] = endpoint;
+        if (options.encoding != null) {
+            args.add("-encoding");
+            args.add(options.encoding);
+        }
         if (bootCP) {
-            args[i++] = "-Xbootclasspath/p:"+JavaCompilerHelper.getJarFile(EndpointReference.class)+File.pathSeparator+JavaCompilerHelper.getJarFile(XmlSeeAlso.class);
+            args.add(new StringBuilder()
+                    .append("-Xbootclasspath/p:")
+                    .append(JavaCompilerHelper.getJarFile(EndpointReference.class))
+                    .append(File.pathSeparator)
+                    .append(JavaCompilerHelper.getJarFile(XmlSeeAlso.class)).toString());
         }
 
-        // Workaround for bug 6499165: issue with javac debug option
-        workAroundJavacDebug();
-        int result = com.sun.tools.apt.Main.process(this, args);
-        if (result != 0) {
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();//        compiler = JavacTool.create();
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
+        StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, null);
+        JavaCompiler.CompilationTask task = compiler.getTask(
+                null,
+                fileManager,
+                diagnostics,
+                args,
+                Collections.singleton(endpoint.replaceAll("\\$", ".")),
+                null);
+        task.setProcessors(Collections.singleton(new WebServiceAp(options, out)));
+        boolean result = task.call();
+
+        if (!result) {
             out.println(WscompileMessages.WSCOMPILE_ERROR(WscompileMessages.WSCOMPILE_COMPILATION_FAILED()));
             return false;
         }
         if (options.genWsdl) {
-            String tmpPath = options.destDir.getAbsolutePath()+ File.pathSeparator+options.classpath;
+            DatabindingConfig config = new DatabindingConfig();
+
+            List<String> externalMetadataFileNames = options.externalMetadataFiles;
+            boolean disableSecureXmlProcessing = options.disableSecureXmlProcessing;
+            if (externalMetadataFileNames != null && externalMetadataFileNames.size() > 0) {
+                config.setMetadataReader(new ExternalMetadataReader(getExternalFiles(externalMetadataFileNames), null, null, true, disableSecureXmlProcessing));
+            }
+
+            String tmpPath = options.destDir.getAbsolutePath() + File.pathSeparator + options.classpath;
             ClassLoader classLoader = new URLClassLoader(Options.pathToURLs(tmpPath),
                     this.getClass().getClassLoader());
             Class<?> endpointClass;
@@ -225,20 +225,32 @@ public class WsgenTool implements AnnotationProcessorFactory {
                 bindingID = BindingID.parse(endpointClass);
             }
             WebServiceFeatureList wsfeatures = new WebServiceFeatureList(endpointClass);
-            RuntimeModeler rtModeler = new RuntimeModeler(endpointClass, options.serviceName, bindingID, wsfeatures.toArray());
-            rtModeler.setClassLoader(classLoader);
+//            RuntimeModeler rtModeler = new RuntimeModeler(endpointClass, options.serviceName, bindingID, wsfeatures.toArray());
+//            rtModeler.setClassLoader(classLoader);
             if (options.portName != null)
-                rtModeler.setPortName(options.portName);
-            AbstractSEIModelImpl rtModel = rtModeler.buildRuntimeModel();
+                config.getMappingInfo().setPortName(options.portName);//rtModeler.setPortName(options.portName);
+//            AbstractSEIModelImpl rtModel = rtModeler.buildRuntimeModel();
+
+            DatabindingFactory fac = DatabindingFactory.newInstance();
+            config.setEndpointClass(endpointClass);
+            config.getMappingInfo().setServiceName(options.serviceName);
+            config.setFeatures(wsfeatures.toArray());
+            config.setClassLoader(classLoader);
+            config.getMappingInfo().setBindingID(bindingID);
+            com.sun.xml.internal.ws.db.DatabindingImpl rt = (com.sun.xml.internal.ws.db.DatabindingImpl) fac.createRuntime(config);
 
             final File[] wsdlFileName = new File[1]; // used to capture the generated WSDL file.
-            final Map<String,File> schemaFiles = new HashMap<String,File>();
+            final Map<String, File> schemaFiles = new HashMap<String, File>();
 
-            WSDLGenerator wsdlGenerator = new WSDLGenerator(rtModel,
+            WSDLGenInfo wsdlGenInfo = new WSDLGenInfo();
+            wsdlGenInfo.setSecureXmlProcessingDisabled(disableSecureXmlProcessing);
+
+            wsdlGenInfo.setWsdlResolver(
                     new WSDLResolver() {
                         private File toFile(String suggestedFilename) {
                             return new File(options.nonclassDestDir, suggestedFilename);
                         }
+
                         private Result toResult(File file) {
                             Result result;
                             try {
@@ -251,43 +263,67 @@ public class WsgenTool implements AnnotationProcessorFactory {
                             return result;
                         }
 
+                        @Override
                         public Result getWSDL(String suggestedFilename) {
                             File f = toFile(suggestedFilename);
                             wsdlFileName[0] = f;
                             return toResult(f);
                         }
+
                         public Result getSchemaOutput(String namespace, String suggestedFilename) {
-                            if (namespace.equals(""))
+                            if (namespace == null)
                                 return null;
                             File f = toFile(suggestedFilename);
-                            schemaFiles.put(namespace,f);
+                            schemaFiles.put(namespace, f);
                             return toResult(f);
                         }
+
+                        @Override
                         public Result getAbstractWSDL(Holder<String> filename) {
                             return toResult(toFile(filename.value));
                         }
+
+                        @Override
                         public Result getSchemaOutput(String namespace, Holder<String> filename) {
                             return getSchemaOutput(namespace, filename.value);
                         }
                         // TODO pass correct impl's class name
-                    }, bindingID.createBinding(wsfeatures.toArray()), container,
-                    endpointClass, options.inlineSchemas, ServiceFinder.find(WSDLGeneratorExtension.class).toArray());
-            wsdlGenerator.doGeneration();
+                    });
 
-            if(options.wsgenReport!=null)
-                generateWsgenReport(endpointClass,rtModel,wsdlFileName[0],schemaFiles);
+            wsdlGenInfo.setContainer(container);
+            wsdlGenInfo.setExtensions(ServiceFinder.find(WSDLGeneratorExtension.class).toArray());
+            wsdlGenInfo.setInlineSchemas(options.inlineSchemas);
+            rt.generateWSDL(wsdlGenInfo);
+
+
+            if (options.wsgenReport != null)
+                generateWsgenReport(endpointClass, (AbstractSEIModelImpl) rt.getModel(), wsdlFileName[0], schemaFiles);
         }
         return true;
+    }
+
+    private List<File> getExternalFiles(List<String> exts) {
+        List<File> files = new ArrayList<File>();
+        for (String ext : exts) {
+            // first try absolute path ...
+            File file = new File(ext);
+            if (!file.exists()) {
+                // then relative path ...
+                file = new File(options.sourceDir.getAbsolutePath() + File.separator + ext);
+            }
+            files.add(file);
+        }
+        return files;
     }
 
     /**
      * Generates a small XML file that captures the key activity of wsgen,
      * so that test harness can pick up artifacts.
      */
-    private void generateWsgenReport(Class<?> endpointClass, AbstractSEIModelImpl rtModel, File wsdlFile, Map<String,File> schemaFiles) {
+    private void generateWsgenReport(Class<?> endpointClass, AbstractSEIModelImpl rtModel, File wsdlFile, Map<String, File> schemaFiles) {
         try {
             ReportOutput.Report report = TXW.create(ReportOutput.Report.class,
-                new StreamSerializer(new BufferedOutputStream(new FileOutputStream(options.wsgenReport))));
+                    new StreamSerializer(new BufferedOutputStream(new FileOutputStream(options.wsgenReport))));
 
             report.wsdl(wsdlFile.getAbsolutePath());
             ReportOutput.writeQName(rtModel.getServiceQName(), report.service());
@@ -296,7 +332,7 @@ public class WsgenTool implements AnnotationProcessorFactory {
 
             report.implClass(endpointClass.getName());
 
-            for (Map.Entry<String,File> e : schemaFiles.entrySet()) {
+            for (Map.Entry<String, File> e : schemaFiles.entrySet()) {
                 ReportOutput.Schema s = report.schema();
                 s.ns(e.getKey());
                 s.location(e.getValue().getAbsolutePath());
@@ -317,10 +353,13 @@ public class WsgenTool implements AnnotationProcessorFactory {
         interface Report extends TypedXmlWriter {
             @XmlElement
             void wsdl(String file); // location of WSDL
+
             @XmlElement
             QualifiedName portType();
+
             @XmlElement
             QualifiedName service();
+
             @XmlElement
             QualifiedName port();
 
@@ -337,6 +376,7 @@ public class WsgenTool implements AnnotationProcessorFactory {
         interface QualifiedName extends TypedXmlWriter {
             @XmlAttribute
             void uri(String ns);
+
             @XmlAttribute
             void localName(String localName);
         }
@@ -344,38 +384,28 @@ public class WsgenTool implements AnnotationProcessorFactory {
         interface Schema extends TypedXmlWriter {
             @XmlAttribute
             void ns(String ns);
+
             @XmlAttribute
             void location(String filePath);
         }
 
-        private static void writeQName( QName n, QualifiedName w ) {
+        private static void writeQName(QName n, QualifiedName w) {
             w.uri(n.getNamespaceURI());
             w.localName(n.getLocalPart());
         }
     }
 
-    protected void usage(WsgenOptions options) {
+    protected void usage(Options options) {
         // Just don't see any point in passing WsgenOptions
         // BadCommandLineException also shouldn't have options
         if (options == null)
             options = this.options;
-        System.out.println(WscompileMessages.WSGEN_HELP("WSGEN", options.protocols, options.nonstdProtocols.keySet()));
-        System.out.println(WscompileMessages.WSGEN_USAGE_EXAMPLES());
-    }
-
-    public Collection<String> supportedOptions() {
-        return supportedOptions;
-    }
-
-    public Collection<String> supportedAnnotationTypes() {
-        return supportedAnnotations;
-    }
-
-    public AnnotationProcessor getProcessorFor(Set<AnnotationTypeDeclaration> set, AnnotationProcessorEnvironment apEnv) {
-        if (options.verbose)
-            apEnv.getMessager().printNotice("\tap round: " + ++round);
-        webServiceAP.init(apEnv);
-        return webServiceAP;
+        if (options instanceof WsgenOptions) {
+            System.out.println(WscompileMessages.WSGEN_HELP("WSGEN",
+                    ((WsgenOptions)options).protocols,
+                    ((WsgenOptions)options).nonstdProtocols.keySet()));
+            System.out.println(WscompileMessages.WSGEN_USAGE_EXAMPLES());
+        }
     }
 
     class Listener extends WsimportListener {
@@ -410,23 +440,5 @@ public class WsgenTool implements AnnotationProcessorFactory {
         public void info(SAXParseException exception) {
             cer.info(exception);
         }
-    }
-
-    /*
-     * Processor doesn't examine any options.
-     */
-    static final Collection<String> supportedOptions = Collections
-            .unmodifiableSet(new HashSet<String>());
-
-    /*
-     * All annotation types are supported.
-     */
-    static final Collection<String> supportedAnnotations;
-    static {
-        Collection<String> types = new HashSet<String>();
-        types.add("*");
-        types.add("javax.jws.*");
-        types.add("javax.jws.soap.*");
-        supportedAnnotations = Collections.unmodifiableCollection(types);
     }
 }

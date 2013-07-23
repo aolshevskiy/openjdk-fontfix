@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -67,7 +67,7 @@ public interface RuntimeConstants {
     /* Class File Constants */
     int JAVA_MAGIC                   = 0xcafebabe;
     int JAVA_MIN_SUPPORTED_VERSION   = 45;
-    int JAVA_MAX_SUPPORTED_VERSION   = 51;
+    int JAVA_MAX_SUPPORTED_VERSION   = 52;
     int JAVA_MAX_SUPPORTED_MINOR_VERSION = 0;
 
     /* Generate class file version for 1.1  by default */
@@ -87,6 +87,9 @@ public interface RuntimeConstants {
     int CONSTANT_METHOD              = 10;
     int CONSTANT_INTERFACEMETHOD     = 11;
     int CONSTANT_NAMEANDTYPE         = 12;
+    int CONSTANT_METHODHANDLE        = 15;
+    int CONSTANT_METHODTYPE          = 16;
+    int CONSTANT_INVOKEDYNAMIC       = 18;
 
     /* Access and modifier flags */
     int ACC_PUBLIC                   = 0x00000001;

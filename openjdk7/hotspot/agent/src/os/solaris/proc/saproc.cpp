@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -510,7 +510,6 @@ wrapper_fill_cframe_list(void *cd, const prgregset_t regs, uint_t argc,
 // mapped.  This structure gets written to a file.  It is not a class, so
 // that the compilers don't add any compiler-private data to it.
 
-// Refer to CompactingPermGenGen::n_regions in compactingPermGenGen.hpp
 const int NUM_SHARED_MAPS = 4;
 
 // Refer to FileMapInfo::_current_version in filemap.hpp
@@ -531,7 +530,7 @@ struct FileMapHeader {
    bool   _read_only;       // read only space?
    bool   _allow_exec;      // executable code in space?
 
- } _space[NUM_SHARED_MAPS]; // was _space[CompactingPermGenGen::n_regions];
+ } _space[NUM_SHARED_MAPS];
 
  // Ignore the rest of the FileMapHeader. We don't need those fields here.
 };
@@ -590,8 +589,7 @@ init_classsharing_workaround(void *cd, const prmap_t* pmap, const char* obj_name
   JNIEnv*   env = dbg->env;
   jobject this_obj = dbg->this_obj;
   const char* jvm_name = 0;
-  if ((jvm_name = strstr(obj_name, "libjvm.so")) != NULL ||
-      (jvm_name = strstr(obj_name, "libjvm_g.so")) != NULL) {
+  if ((jvm_name = strstr(obj_name, "libjvm.so")) != NULL) {
     jvm_name = obj_name;
   } else {
     return 0;
@@ -599,7 +597,7 @@ init_classsharing_workaround(void *cd, const prmap_t* pmap, const char* obj_name
 
   struct ps_prochandle* ph = (struct ps_prochandle*) env->GetLongField(this_obj, p_ps_prochandle_ID);
 
-  // initialize classes[_g].jsa file descriptor field.
+  // initialize classes.jsa file descriptor field.
   dbg->env->SetIntField(this_obj, classes_jsa_fd_ID, -1);
 
   // check whether class sharing is on by reading variable "UseSharedSpaces"
@@ -642,7 +640,7 @@ init_classsharing_workaround(void *cd, const prmap_t* pmap, const char* obj_name
 
   print_debug("looking for %s\n", classes_jsa);
 
-  // open the classes[_g].jsa
+  // open the classes.jsa
   int fd = libsaproc_open(classes_jsa, O_RDONLY);
   if (fd < 0) {
     char errMsg[ERR_MSG_SIZE];
@@ -652,7 +650,7 @@ init_classsharing_workaround(void *cd, const prmap_t* pmap, const char* obj_name
     print_debug("opened shared archive file %s\n", classes_jsa);
   }
 
-  // parse classes[_g].jsa
+  // parse classes.jsa
   struct FileMapHeader* pheader = (struct FileMapHeader*) malloc(sizeof(struct FileMapHeader));
   if (pheader == NULL) {
     close(fd);
@@ -799,8 +797,8 @@ static void attach_internal(JNIEnv* env, jobject this_obj, jstring cmdLine, jboo
   if (! isProcess) {
     /*
      * With class sharing, shared perm. gen heap is allocated in with MAP_SHARED|PROT_READ.
-     * These pages are mapped from the file "classes[_g].jsa". MAP_SHARED pages are not dumped
-     * in Solaris core.To read shared heap pages, we have to read classes[_g].jsa file.
+     * These pages are mapped from the file "classes.jsa". MAP_SHARED pages are not dumped
+     * in Solaris core.To read shared heap pages, we have to read classes.jsa file.
      */
     Pobject_iter(ph, init_classsharing_workaround, &dbg);
     exception = env->ExceptionOccurred();

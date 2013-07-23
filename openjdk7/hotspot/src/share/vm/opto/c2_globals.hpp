@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -53,6 +53,12 @@
 //
 
 #define C2_FLAGS(develop, develop_pd, product, product_pd, diagnostic, experimental, notproduct) \
+                                                                            \
+  develop(bool, StressLCM, false,                                           \
+          "Randomize instruction scheduling in LCM")                        \
+                                                                            \
+  develop(bool, StressGCM, false,                                           \
+          "Randomize instruction scheduling in GCM")                        \
                                                                             \
   notproduct(intx, CompileZapFirst, 0,                                      \
           "If +ZapDeadCompiledLocals, "                                     \
@@ -400,10 +406,10 @@
   develop(intx, WarmCallMaxSize, 999999,                                    \
           "size of the largest inlinable method")                           \
                                                                             \
-  product(intx, MaxNodeLimit, 65000,                                        \
+  product(intx, MaxNodeLimit, 80000,                                        \
           "Maximum number of nodes")                                        \
                                                                             \
-  product(intx, NodeLimitFudgeFactor, 1000,                                 \
+  product(intx, NodeLimitFudgeFactor, 2000,                                 \
           "Fudge Factor for certain optimizations")                         \
                                                                             \
   product(bool, UseJumpTables, true,                                        \
@@ -436,11 +442,14 @@
   notproduct(bool, PrintEliminateLocks, false,                              \
           "Print out when locks are eliminated")                            \
                                                                             \
-  diagnostic(bool, EliminateAutoBox, false,                                 \
-          "Private flag to control optimizations for autobox elimination")  \
+  product(bool, EliminateAutoBox, true,                                     \
+          "Control optimizations for autobox elimination")                  \
                                                                             \
   product(intx, AutoBoxCacheMax, 128,                                       \
           "Sets max value cached by the java.lang.Integer autobox cache")   \
+                                                                            \
+  experimental(bool, AggressiveUnboxing, false,                             \
+          "Control optimizations for aggressive boxing elimination")        \
                                                                             \
   product(bool, DoEscapeAnalysis, true,                                     \
           "Perform escape analysis")                                        \
@@ -515,6 +524,9 @@
                                                                             \
   develop(bool, SpecialArraysEquals, true,                                  \
           "special version of Arrays.equals(char[],char[])")                \
+                                                                            \
+  product(bool, SpecialEncodeISOArray, true,                                \
+          "special version of ISO_8859_1$Encoder.encodeISOArray")           \
                                                                             \
   develop(bool, BailoutToInterpreterForThrows, false,                       \
           "Compiled methods which throws/catches exceptions will be "       \

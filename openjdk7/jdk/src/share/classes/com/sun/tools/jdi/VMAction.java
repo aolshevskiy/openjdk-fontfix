@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,8 @@ import java.util.EventObject;
  * with JDI events.
  */
 class VMAction extends EventObject {
+    private static final long serialVersionUID = -1701944679310296090L;
+
     // Event ids
     static final int VM_SUSPENDED = 1;
     static final int VM_NOT_SUSPENDED = 2;

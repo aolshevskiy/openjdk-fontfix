@@ -95,7 +95,7 @@ public class BufferedWriter extends Writer {
      * @param  out  A Writer
      * @param  sz   Output-buffer size, a positive integer
      *
-     * @exception  IllegalArgumentException  If sz is <= 0
+     * @exception  IllegalArgumentException  If {@code sz <= 0}
      */
     public BufferedWriter(Writer out, int sz) {
         super(out);
@@ -255,15 +255,15 @@ public class BufferedWriter extends Writer {
         }
     }
 
+    @SuppressWarnings("try")
     public void close() throws IOException {
         synchronized (lock) {
             if (out == null) {
                 return;
             }
-            try {
+            try (Writer w = out) {
                 flushBuffer();
             } finally {
-                out.close();
                 out = null;
                 cb = null;
             }

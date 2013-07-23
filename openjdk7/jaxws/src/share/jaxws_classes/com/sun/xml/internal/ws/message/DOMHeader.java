@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -81,7 +81,7 @@ public class DOMHeader<N extends Element> extends AbstractHeaderImpl {
     public <T> T readAsJAXB(Unmarshaller unmarshaller) throws JAXBException {
         return (T) unmarshaller.unmarshal(node);
     }
-
+    /** @deprecated */
     public <T> T readAsJAXB(Bridge<T> bridge) throws JAXBException {
         return bridge.unmarshal(node);
     }
@@ -118,4 +118,26 @@ public class DOMHeader<N extends Element> extends AbstractHeaderImpl {
     public String getStringContent() {
         return node.getTextContent();
     }
+
+    public N getWrappedNode() {
+        return node;
+    }
+
+
+    @Override
+    public int hashCode() {
+        return getWrappedNode().hashCode();
+    }
+
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof DOMHeader) {
+            return getWrappedNode().equals(((DOMHeader) obj).getWrappedNode());
+        } else {
+            return false;
+        }
+    }
+
+
 }

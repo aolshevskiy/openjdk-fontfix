@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,33 +25,30 @@
 
 package com.sun.xml.internal.ws.api.message;
 
+import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Set;
+
+import javax.xml.namespace.QName;
+import javax.xml.ws.WebServiceException;
+
 import com.sun.istack.internal.NotNull;
 import com.sun.istack.internal.Nullable;
-import com.sun.xml.internal.ws.addressing.WsaTubeHelper;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
-import com.sun.xml.internal.ws.api.addressing.OneWayFeature;
 import com.sun.xml.internal.ws.api.addressing.WSEndpointReference;
-import com.sun.xml.internal.ws.api.model.wsdl.WSDLBoundOperation;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLPort;
-import com.sun.xml.internal.ws.api.pipe.Pipe;
 import com.sun.xml.internal.ws.api.pipe.Codec;
-import com.sun.xml.internal.ws.message.RelatesToHeader;
-import com.sun.xml.internal.ws.message.StringHeader;
+import com.sun.xml.internal.ws.api.pipe.Pipe;
+import com.sun.xml.internal.ws.binding.SOAPBindingImpl;
 import com.sun.xml.internal.ws.protocol.soap.ClientMUTube;
 import com.sun.xml.internal.ws.protocol.soap.ServerMUTube;
-import com.sun.xml.internal.ws.resources.AddressingMessages;
-import com.sun.xml.internal.ws.resources.ClientMessages;
-
-import javax.xml.namespace.QName;
-import javax.xml.stream.XMLStreamException;
-import javax.xml.ws.WebServiceException;
-import javax.xml.ws.soap.AddressingFeature;
-import java.util.ArrayList;
-import java.util.BitSet;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
+import java.util.Arrays;
 
 /**
  * A list of {@link Header}s on a {@link Message}.
@@ -113,7 +110,7 @@ import java.util.NoSuchElementException;
  *
  * @see Message#getHeaders()
  */
-public final class HeaderList extends ArrayList<Header> {
+public class HeaderList extends ArrayList<Header> implements MessageHeaders {
 
     private static final long serialVersionUID = -6358045781349627237L;
     /**
@@ -131,17 +128,24 @@ public final class HeaderList extends ArrayList<Header> {
      * Lazily allocated.
      */
     private BitSet moreUnderstoodBits = null;
-    private String to = null;
-    private String action = null;
-    private WSEndpointReference replyTo = null;
-    private WSEndpointReference faultTo = null;
-    private String messageId;
-    private String relatesTo;
+
+    private SOAPVersion soapVersion;
 
     /**
+     * This method is deprecated - instead use this one:
+     * public HeaderList(SOAPVersion)
      * Creates an empty {@link HeaderList}.
      */
+    @Deprecated
     public HeaderList() {
+    }
+
+    /**
+     * Creates an empty {@link HeaderList} with the given soap version
+     * @param soapVersion
+     */
+    public HeaderList(SOAPVersion soapVersion) {
+        this.soapVersion = soapVersion;
     }
 
     /**
@@ -153,11 +157,24 @@ public final class HeaderList extends ArrayList<Header> {
         if (that.moreUnderstoodBits != null) {
             this.moreUnderstoodBits = (BitSet) that.moreUnderstoodBits.clone();
         }
-        this.to = that.to;
-        this.action = that.action;
-        this.replyTo = that.replyTo;
-        this.faultTo = that.faultTo;
-        this.messageId = that.messageId;
+    }
+
+    public HeaderList(MessageHeaders that) {
+        super(that.asList());
+        if (that instanceof HeaderList) {
+            HeaderList hThat = (HeaderList) that;
+            this.understoodBits = hThat.understoodBits;
+            if (hThat.moreUnderstoodBits != null) {
+                this.moreUnderstoodBits = (BitSet) hThat.moreUnderstoodBits.clone();
+            }
+        } else {
+            Set<QName> understood = that.getUnderstoodHeaders();
+            if (understood != null) {
+                for (QName qname : understood) {
+                    understood(qname);
+                }
+            }
+        }
     }
 
     /**
@@ -168,13 +185,18 @@ public final class HeaderList extends ArrayList<Header> {
         return super.size();
     }
 
+    @Override
+    public boolean hasHeaders() {
+        return !isEmpty();
+    }
+
     /**
      * Adds all the headers.
+     * @deprecated throws UnsupportedOperationException from some HeaderList implementations - better iterate over items one by one
      */
+    @Deprecated
     public void addAll(Header... headers) {
-        for (Header header : headers) {
-            add(header);
-        }
+        addAll(Arrays.asList(headers));
     }
 
     /**
@@ -244,6 +266,7 @@ public final class HeaderList extends ArrayList<Header> {
      *      if the given header is not {@link #contains(Object) contained}
      *      in this header.
      */
+    @Override
     public void understood(@NotNull Header header) {
         int sz = size();
         for (int i = 0; i < sz; i++) {
@@ -263,9 +286,8 @@ public final class HeaderList extends ArrayList<Header> {
      *      be marked as <a href="#MU">"understood"</a>.
      * @return null if not found.
      */
-    public
-    @Nullable
-    Header get(@NotNull String nsUri, @NotNull String localName, boolean markAsUnderstood) {
+    @Override
+    public @Nullable Header get(@NotNull String nsUri, @NotNull String localName, boolean markAsUnderstood) {
         int len = size();
         for (int i = 0; i < len; i++) {
             Header h = get(i);
@@ -296,9 +318,8 @@ public final class HeaderList extends ArrayList<Header> {
      * @return null
      *      if not found.
      */
-    public
-    @Nullable
-    Header get(@NotNull QName name, boolean markAsUnderstood) {
+    @Override
+    public @Nullable Header get(@NotNull QName name, boolean markAsUnderstood) {
         return get(name.getNamespaceURI(), name.getLocalPart(), markAsUnderstood);
     }
 
@@ -332,12 +353,14 @@ public final class HeaderList extends ArrayList<Header> {
      */
     public
     @NotNull
+    @Override
     Iterator<Header> getHeaders(@NotNull final String nsUri, @NotNull final String localName, final boolean markAsUnderstood) {
         return new Iterator<Header>() {
 
             int idx = 0;
             Header next;
 
+            @Override
             public boolean hasNext() {
                 if (next == null) {
                     fetch();
@@ -345,6 +368,7 @@ public final class HeaderList extends ArrayList<Header> {
                 return next != null;
             }
 
+            @Override
             public Header next() {
                 if (next == null) {
                     fetch();
@@ -373,6 +397,7 @@ public final class HeaderList extends ArrayList<Header> {
                 }
             }
 
+            @Override
             public void remove() {
                 throw new UnsupportedOperationException();
             }
@@ -384,6 +409,7 @@ public final class HeaderList extends ArrayList<Header> {
      */
     public
     @NotNull
+    @Override
     Iterator<Header> getHeaders(@NotNull QName headerName, final boolean markAsUnderstood) {
         return getHeaders(headerName.getNamespaceURI(), headerName.getLocalPart(), markAsUnderstood);
     }
@@ -411,12 +437,14 @@ public final class HeaderList extends ArrayList<Header> {
      */
     public
     @NotNull
+    @Override
     Iterator<Header> getHeaders(@NotNull final String nsUri, final boolean markAsUnderstood) {
         return new Iterator<Header>() {
 
             int idx = 0;
             Header next;
 
+            @Override
             public boolean hasNext() {
                 if (next == null) {
                     fetch();
@@ -424,6 +452,7 @@ public final class HeaderList extends ArrayList<Header> {
                 return next != null;
             }
 
+            @Override
             public Header next() {
                 if (next == null) {
                     fetch();
@@ -452,37 +481,11 @@ public final class HeaderList extends ArrayList<Header> {
                 }
             }
 
+            @Override
             public void remove() {
                 throw new UnsupportedOperationException();
             }
         };
-    }
-
-    /**
-     * Gets the first {@link Header} of the specified name targeted at the
-     * current implicit role.
-     *
-     * @param name name of the header
-     * @param markUnderstood
-     *      If this parameter is true, the returned headers will
-     *      be marked as <a href="#MU">"understood"</a> when they are returned
-     *      from {@link Iterator#next()}.
-     * @return null if header not found
-     */
-    private Header getFirstHeader(QName name, boolean markUnderstood, SOAPVersion sv) {
-        if (sv == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_SOAP_VERSION());
-        }
-
-        Iterator<Header> iter = getHeaders(name.getNamespaceURI(), name.getLocalPart(), markUnderstood);
-        while (iter.hasNext()) {
-            Header h = iter.next();
-            if (h.getRole(sv).equals(sv.implicitRole)) {
-                return h;
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -497,21 +500,7 @@ public final class HeaderList extends ArrayList<Header> {
      * @return Value of WS-Addressing To header, anonymous URI if no header is present
      */
     public String getTo(AddressingVersion av, SOAPVersion sv) {
-        if (to != null) {
-            return to;
-        }
-        if (av == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_ADDRESSING_VERSION());
-        }
-
-        Header h = getFirstHeader(av.toTag, true, sv);
-        if (h != null) {
-            to = h.getStringContent();
-        } else {
-            to = av.anonymousUri;
-        }
-
-        return to;
+        return AddressingUtils.getTo(this, av, sv);
     }
 
     /**
@@ -526,19 +515,7 @@ public final class HeaderList extends ArrayList<Header> {
      * @return Value of WS-Addressing Action header, null if no header is present
      */
     public String getAction(@NotNull AddressingVersion av, @NotNull SOAPVersion sv) {
-        if (action != null) {
-            return action;
-        }
-        if (av == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_ADDRESSING_VERSION());
-        }
-
-        Header h = getFirstHeader(av.actionTag, true, sv);
-        if (h != null) {
-            action = h.getStringContent();
-        }
-
-        return action;
+        return AddressingUtils.getAction(this, av, sv);
     }
 
     /**
@@ -553,25 +530,7 @@ public final class HeaderList extends ArrayList<Header> {
      * @return Value of WS-Addressing ReplyTo header, null if no header is present
      */
     public WSEndpointReference getReplyTo(@NotNull AddressingVersion av, @NotNull SOAPVersion sv) {
-        if (replyTo != null) {
-            return replyTo;
-        }
-        if (av == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_ADDRESSING_VERSION());
-        }
-
-        Header h = getFirstHeader(av.replyToTag, true, sv);
-        if (h != null) {
-            try {
-                replyTo = h.readAsEPR(av);
-            } catch (XMLStreamException e) {
-                throw new WebServiceException(AddressingMessages.REPLY_TO_CANNOT_PARSE(), e);
-            }
-        } else {
-            replyTo = av.anonymousEpr;
-        }
-
-        return replyTo;
+        return AddressingUtils.getReplyTo(this, av, sv);
     }
 
     /**
@@ -586,24 +545,7 @@ public final class HeaderList extends ArrayList<Header> {
      * @return Value of WS-Addressing FaultTo header, null if no header is present
      */
     public WSEndpointReference getFaultTo(@NotNull AddressingVersion av, @NotNull SOAPVersion sv) {
-        if (faultTo != null) {
-            return faultTo;
-        }
-
-        if (av == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_ADDRESSING_VERSION());
-        }
-
-        Header h = getFirstHeader(av.faultToTag, true, sv);
-        if (h != null) {
-            try {
-                faultTo = h.readAsEPR(av);
-            } catch (XMLStreamException e) {
-                throw new WebServiceException(AddressingMessages.FAULT_TO_CANNOT_PARSE(), e);
-            }
-        }
-
-        return faultTo;
+        return AddressingUtils.getFaultTo(this, av, sv);
     }
 
     /**
@@ -618,20 +560,7 @@ public final class HeaderList extends ArrayList<Header> {
      * @return Value of WS-Addressing MessageID header, null if no header is present
      */
     public String getMessageID(@NotNull AddressingVersion av, @NotNull SOAPVersion sv) {
-        if (messageId != null) {
-            return messageId;
-        }
-
-        if (av == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_ADDRESSING_VERSION());
-        }
-
-        Header h = getFirstHeader(av.messageIDTag, true, sv);
-        if (h != null) {
-            messageId = h.getStringContent();
-        }
-
-        return messageId;
+        return AddressingUtils.getMessageID(this, av, sv);
     }
 
     /**
@@ -646,20 +575,7 @@ public final class HeaderList extends ArrayList<Header> {
      * @return Value of WS-Addressing RelatesTo header, null if no header is present
      */
     public String getRelatesTo(@NotNull AddressingVersion av, @NotNull SOAPVersion sv) {
-        if (relatesTo != null) {
-            return relatesTo;
-        }
-
-        if (av == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_ADDRESSING_VERSION());
-        }
-
-        Header h = getFirstHeader(av.relatesToTag, true, sv);
-        if (h != null) {
-            relatesTo = h.getStringContent();
-        }
-
-        return relatesTo;
+        return AddressingUtils.getRelatesTo(this, av, sv);
     }
 
     /**
@@ -679,24 +595,13 @@ public final class HeaderList extends ArrayList<Header> {
      * @param action Action Message Addressing Property value
      * @param mustUnderstand to indicate if the addressing headers are set with mustUnderstand attribute
      */
-    public void fillRequestAddressingHeaders(Packet packet, AddressingVersion av, SOAPVersion sv, boolean oneway, String action, boolean mustUnderstand)  {
-        fillCommonAddressingHeaders(packet, av, sv, action, mustUnderstand);
-
-        // wsa:ReplyTo
-        // null or "true" is equivalent to request/response MEP
-        if (!oneway) {
-            WSEndpointReference epr = av.anonymousEpr;
-            add(epr.createHeader(av.replyToTag));
-
-            // wsa:MessageID
-            Header h = new StringHeader(av.messageIDTag, packet.getMessage().getID(av, sv));
-            add(h);
-        }
+    public void fillRequestAddressingHeaders(Packet packet, AddressingVersion av, SOAPVersion sv, boolean oneway, String action, boolean mustUnderstand) {
+        AddressingUtils.fillRequestAddressingHeaders(this, packet, av, sv, oneway, action, mustUnderstand);
     }
 
     public void fillRequestAddressingHeaders(Packet packet, AddressingVersion av, SOAPVersion sv, boolean oneway, String action) {
-            fillRequestAddressingHeaders(packet,av,sv,oneway,action,false);
-        }
+        AddressingUtils.fillRequestAddressingHeaders(this, packet, av, sv, oneway, action);
+    }
 
     /**
      * Creates a set of outbound WS-Addressing headers on the client with the
@@ -718,107 +623,7 @@ public final class HeaderList extends ArrayList<Header> {
      * @param packet request packet
      */
     public void fillRequestAddressingHeaders(WSDLPort wsdlPort, @NotNull WSBinding binding, Packet packet) {
-        if (binding == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_BINDING());
-        }
-        //See if WSA headers are already set by the user.
-        HeaderList hl = packet.getMessage().getHeaders();
-        String action = hl.getAction(binding.getAddressingVersion(), binding.getSOAPVersion());
-        if(action != null) {
-            //assume that all the WSA headers are set by the user
-            return;
-        }
-        AddressingVersion addressingVersion = binding.getAddressingVersion();
-        //seiModel is passed as null as it is not needed.
-        WsaTubeHelper wsaHelper = addressingVersion.getWsaHelper(wsdlPort, null, binding);
-
-        // wsa:Action
-        String effectiveInputAction = wsaHelper.getEffectiveInputAction(packet);
-        if (effectiveInputAction == null || effectiveInputAction.equals("")) {
-            throw new WebServiceException(ClientMessages.INVALID_SOAP_ACTION());
-        }
-        boolean oneway = !packet.expectReply;
-        if (wsdlPort != null) {
-            // if WSDL has <wsaw:Anonymous>prohibited</wsaw:Anonymous>, then throw an error
-            // as anonymous ReplyTo MUST NOT be added in that case. BindingProvider need to
-            // disable AddressingFeature and MemberSubmissionAddressingFeature and hand-craft
-            // the SOAP message with non-anonymous ReplyTo/FaultTo.
-            if (!oneway && packet.getMessage() != null)
-            {
-                WSDLBoundOperation wbo = wsdlPort.getBinding().get(packet.getWSDLOperation());
-                if (wbo != null && wbo.getAnonymous() == WSDLBoundOperation.ANONYMOUS.prohibited) {
-                    throw new WebServiceException(AddressingMessages.WSAW_ANONYMOUS_PROHIBITED());
-                }
-            }
-        }
-        if (!binding.isFeatureEnabled(OneWayFeature.class)) {
-            // standard oneway
-            fillRequestAddressingHeaders(packet, addressingVersion, binding.getSOAPVersion(), oneway, effectiveInputAction,addressingVersion.isRequired(binding));
-        } else {
-            // custom oneway
-            fillRequestAddressingHeaders(packet, addressingVersion, binding.getSOAPVersion(), binding.getFeature(OneWayFeature.class), effectiveInputAction);
-        }
-    }
-
-    private void fillRequestAddressingHeaders(@NotNull Packet packet, @NotNull AddressingVersion av, @NotNull SOAPVersion sv, @NotNull OneWayFeature of, @NotNull String action) {
-        fillCommonAddressingHeaders(packet, av, sv, action, false);
-
-        // wsa:ReplyTo
-        if (of.getReplyTo() != null) {
-            add(of.getReplyTo().createHeader(av.replyToTag));
-
-            // add wsa:MessageID only for non-null ReplyTo
-            Header h = new StringHeader(av.messageIDTag, packet.getMessage().getID(av, sv));
-            add(h);
-        }
-
-        // wsa:From
-        if (of.getFrom() != null) {
-            add(of.getFrom().createHeader(av.fromTag));
-        }
-
-        // wsa:RelatesTo
-        if (of.getRelatesToID() != null) {
-            add(new RelatesToHeader(av.relatesToTag, of.getRelatesToID()));
-        }
-    }
-
-    /**
-     * Creates wsa:To, wsa:Action and wsa:MessageID header on the client
-     *
-     * @param packet request packet
-     * @param av WS-Addressing version
-     * @param sv SOAP version
-     * @param action Action Message Addressing Property value
-     * @throws IllegalArgumentException if any of the parameters is null.
-     */
-    private void fillCommonAddressingHeaders(Packet packet, @NotNull AddressingVersion av, @NotNull SOAPVersion sv, @NotNull String action, boolean mustUnderstand) {
-        if (packet == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_PACKET());
-        }
-
-        if (av == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_ADDRESSING_VERSION());
-        }
-
-        if (sv == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_SOAP_VERSION());
-        }
-
-        if (action == null) {
-            throw new IllegalArgumentException(AddressingMessages.NULL_ACTION());
-        }
-
-        // wsa:To
-        StringHeader h = new StringHeader(av.toTag, packet.endpointAddress.toString());
-        add(h);
-
-        // wsa:Action
-        packet.soapAction = action;
-        //As per WS-I BP 1.2/2.0, if one of the WSA headers is MU, then all WSA headers should be treated as MU.,
-        // so just set MU on action header
-        h = new StringHeader(av.actionTag, action, sv, mustUnderstand);
-        add(h);
+        AddressingUtils.fillRequestAddressingHeaders(this, wsdlPort, binding, packet);
     }
 
     /**
@@ -839,7 +644,6 @@ public final class HeaderList extends ArrayList<Header> {
 
     /**
      * Removes the first {@link Header} of the specified name.
-     *
      * @param nsUri namespace URI of the header to remove
      * @param localName local part of the FQN of the header to remove
      *
@@ -847,6 +651,7 @@ public final class HeaderList extends ArrayList<Header> {
      */
     public
     @Nullable
+    @Override
     Header remove(@NotNull String nsUri, @NotNull String localName) {
         int len = size();
         for (int i = 0; i < len; i++) {
@@ -859,6 +664,58 @@ public final class HeaderList extends ArrayList<Header> {
     }
 
     /**
+     * Replaces an existing {@link Header} or adds a new {@link Header}.
+     *
+     * <p>
+     * Order doesn't matter in headers, so this method
+     * does not make any guarantee as to where the new header
+     * is inserted.
+     *
+     * @return
+     *      always true. Don't use the return value.
+     */
+    @Override
+    public boolean addOrReplace(Header header) {
+        for (int i=0; i < size(); i++) {
+          Header hdr = get(i);
+          if (hdr.getNamespaceURI().equals(header.getNamespaceURI()) &&
+              hdr.getLocalPart().equals(header.getLocalPart())) {
+            // Put the new header in the old position. Call super versions
+            // internally to avoid UnsupportedOperationException
+            removeInternal(i);
+            addInternal(i, header);
+            return true;
+          }
+        }
+        return add(header);
+    }
+
+    @Override
+    public void replace(Header old, Header header) {
+        for (int i=0; i < size(); i++) {
+            Header hdr = get(i);
+            if (hdr.getNamespaceURI().equals(header.getNamespaceURI()) &&
+                hdr.getLocalPart().equals(header.getLocalPart())) {
+              // Put the new header in the old position. Call super versions
+              // internally to avoid UnsupportedOperationException
+              removeInternal(i);
+              addInternal(i, header);
+              return;
+            }
+          }
+
+          throw new IllegalArgumentException();
+    }
+
+    protected void addInternal(int index, Header header) {
+        super.add(index, header);
+    }
+
+    protected Header removeInternal(int index) {
+        return super.remove(index);
+    }
+
+    /**
      * Removes the first {@link Header} of the specified name.
      *
      * @param name fully qualified name of the header to remove
@@ -867,6 +724,7 @@ public final class HeaderList extends ArrayList<Header> {
      */
     public
     @Nullable
+    @Override
     Header remove(@NotNull QName name) {
         return remove(name.getNamespaceURI(), name.getLocalPart());
     }
@@ -937,7 +795,7 @@ public final class HeaderList extends ArrayList<Header> {
         }
 
         // remove bit set if the new size will be < 33 => we fit all bits into int
-        if (size() - 1 <= 33  && moreUnderstoodBits != null) {
+        if (size() - 1 <= 33 && moreUnderstoodBits != null) {
             moreUnderstoodBits = null;
         }
     }
@@ -958,14 +816,39 @@ public final class HeaderList extends ArrayList<Header> {
     @Override
     public boolean remove(Object o) {
         if (o != null) {
-            for (int index = 0; index < this.size(); index++)
-            if (o.equals(this.get(index))) {
-                remove(index);
-                return true;
+            for (int index = 0; index < this.size(); index++) {
+                if (o.equals(this.get(index))) {
+                    remove(index);
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    public Header remove(Header h) {
+        if (remove((Object) h)) {
+            return h;
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * Creates a copy.
+     *
+     * This handles null {@link HeaderList} correctly.
+     *
+     * @param original
+     *      Can be null, in which case null will be returned.
+     */
+    public static HeaderList copy(MessageHeaders original) {
+        if (original == null) {
+            return null;
+        } else {
+            return new HeaderList(original);
+        }
     }
 
     /**
@@ -977,16 +860,117 @@ public final class HeaderList extends ArrayList<Header> {
      *      Can be null, in which case null will be returned.
      */
     public static HeaderList copy(HeaderList original) {
-        if (original == null) {
-            return null;
-        } else {
-            return new HeaderList(original);
-        }
+        return copy((MessageHeaders) original);
     }
 
     public void readResponseAddressingHeaders(WSDLPort wsdlPort, WSBinding binding) {
         // read Action
-        String wsaAction = getAction(binding.getAddressingVersion(), binding.getSOAPVersion());
-    // TODO: validate client-inbound Action
+//        String wsaAction = getAction(binding.getAddressingVersion(), binding.getSOAPVersion());
+        // TODO: validate client-inbound Action
+    }
+
+    @Override
+    public void understood(QName name) {
+       get(name, true);
+    }
+
+    @Override
+    public void understood(String nsUri, String localName) {
+        get(nsUri, localName, true);
+    }
+
+    @Override
+    public Set<QName> getUnderstoodHeaders() {
+        Set<QName> understoodHdrs = new HashSet<QName>();
+        for (int i = 0; i < size(); i++) {
+            if (isUnderstood(i)) {
+                Header header = get(i);
+                understoodHdrs.add(new QName(header.getNamespaceURI(), header.getLocalPart()));
+            }
+        }
+        return understoodHdrs;
+//        throw new UnsupportedOperationException("getUnderstoodHeaders() is not implemented by HeaderList");
+    }
+
+    @Override
+    public boolean isUnderstood(Header header) {
+        return isUnderstood(header.getNamespaceURI(), header.getLocalPart());
+    }
+
+    @Override
+    public boolean isUnderstood(String nsUri, String localName) {
+        for (int i = 0; i < size(); i++) {
+            Header h = get(i);
+            if (h.getLocalPart().equals(localName) && h.getNamespaceURI().equals(nsUri)) {
+                return isUnderstood(i);
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public boolean isUnderstood(QName name) {
+        return isUnderstood(name.getNamespaceURI(), name.getLocalPart());
+    }
+
+    @Override
+    public Set<QName> getNotUnderstoodHeaders(Set<String> roles, Set<QName> knownHeaders, WSBinding binding) {
+        Set<QName> notUnderstoodHeaders = null;
+        if (roles == null) {
+            roles = new HashSet<String>();
+        }
+        SOAPVersion effectiveSoapVersion = getEffectiveSOAPVersion(binding);
+        roles.add(effectiveSoapVersion.implicitRole);
+        for (int i = 0; i < size(); i++) {
+            if (!isUnderstood(i)) {
+                Header header = get(i);
+                if (!header.isIgnorable(effectiveSoapVersion, roles)) {
+                    QName qName = new QName(header.getNamespaceURI(), header.getLocalPart());
+                    if (binding == null) {
+                        //if binding is null, no further checks needed...we already
+                        //know this header is not understood from the isUnderstood
+                        //check above
+                        if (notUnderstoodHeaders == null) {
+                            notUnderstoodHeaders = new HashSet<QName>();
+                        }
+                        notUnderstoodHeaders.add(qName);
+                    } else {
+                        // if the binding is not null, see if the binding can understand it
+                        if (binding instanceof SOAPBindingImpl && !((SOAPBindingImpl) binding).understandsHeader(qName)) {
+                            if (!knownHeaders.contains(qName)) {
+                                //logger.info("Element not understood=" + qName);
+                                if (notUnderstoodHeaders == null) {
+                                    notUnderstoodHeaders = new HashSet<QName>();
+                                }
+                                notUnderstoodHeaders.add(qName);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return notUnderstoodHeaders;
+    }
+
+    private SOAPVersion getEffectiveSOAPVersion(WSBinding binding) {
+        SOAPVersion mySOAPVersion = (soapVersion != null) ? soapVersion : binding.getSOAPVersion();
+        if (mySOAPVersion == null) {
+            mySOAPVersion = SOAPVersion.SOAP_11;
+        }
+        return mySOAPVersion;
+    }
+
+    public void setSoapVersion(SOAPVersion soapVersion) {
+       this.soapVersion = soapVersion;
+    }
+
+    @Override
+    public Iterator<Header> getHeaders() {
+        return iterator();
+    }
+
+    @Override
+    public List<Header> asList() {
+        return this;
     }
 }

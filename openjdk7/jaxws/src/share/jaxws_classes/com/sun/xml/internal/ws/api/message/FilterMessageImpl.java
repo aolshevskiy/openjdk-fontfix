@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,8 @@ import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLPort;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+
 import org.xml.sax.ContentHandler;
 import org.xml.sax.ErrorHandler;
 import org.xml.sax.SAXException;
@@ -71,7 +73,7 @@ public class FilterMessageImpl extends Message {
         return delegate.hasHeaders();
     }
 
-    public @NotNull HeaderList getHeaders() {
+    public @NotNull MessageHeaders getHeaders() {
         return delegate.getHeaders();
     }
 
@@ -126,8 +128,12 @@ public class FilterMessageImpl extends Message {
     public <T> T readPayloadAsJAXB(Unmarshaller unmarshaller) throws JAXBException {
         return (T)delegate.readPayloadAsJAXB(unmarshaller);
     }
-
+    /** @deprecated */
     public <T> T readPayloadAsJAXB(Bridge<T> bridge) throws JAXBException {
+        return delegate.readPayloadAsJAXB(bridge);
+    }
+
+    public <T> T readPayloadAsJAXB(XMLBridge<T> bridge) throws JAXBException {
         return delegate.readPayloadAsJAXB(bridge);
     }
 
@@ -161,5 +167,9 @@ public class FilterMessageImpl extends Message {
 
     public @NotNull String getID(AddressingVersion av, SOAPVersion sv) {
         return delegate.getID(av, sv);
+    }
+
+    public SOAPVersion getSOAPVersion() {
+        return delegate.getSOAPVersion();
     }
 }

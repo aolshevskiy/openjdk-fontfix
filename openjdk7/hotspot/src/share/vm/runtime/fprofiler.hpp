@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,19 +25,8 @@
 #ifndef SHARE_VM_RUNTIME_FPROFILER_HPP
 #define SHARE_VM_RUNTIME_FPROFILER_HPP
 
+#include "utilities/macros.hpp"
 #include "runtime/timer.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
 
 // a simple flat profiler for Java
 
@@ -65,14 +54,15 @@ public:
   // For now, the only thread-specific region is the class loader.
   enum Region { noRegion, classLoaderRegion, extraRegion, maxRegion };
 
-  ThreadProfilerMark(Region);
-  ~ThreadProfilerMark();
+  ThreadProfilerMark(Region)  NOT_FPROF_RETURN;
+  ~ThreadProfilerMark()       NOT_FPROF_RETURN;
 
 private:
   ThreadProfiler* _pp;
   Region _r;
 };
 
+#if INCLUDE_FPROF
 
 class IntervalData VALUE_OBJ_CLASS_SPEC {
   // Just to keep these things all together
@@ -118,27 +108,29 @@ public:
   static void print_header(outputStream* st);
   void print_data(outputStream* st);
 };
+#endif // INCLUDE_FPROF
 
 class ThreadProfiler: public CHeapObj<mtInternal> {
 public:
-  ThreadProfiler();
-  ~ThreadProfiler();
+  ThreadProfiler()    NOT_FPROF_RETURN;
+  ~ThreadProfiler()   NOT_FPROF_RETURN;
 
   // Resets the profiler
-  void reset();
+  void reset()        NOT_FPROF_RETURN;
 
   // Activates the profiler for a certain thread
-  void engage();
+  void engage()       NOT_FPROF_RETURN;
 
   // Deactivates the profiler
-  void disengage();
+  void disengage()    NOT_FPROF_RETURN;
 
   // Prints the collected profiling information
-  void print(const char* thread_name);
+  void print(const char* thread_name) NOT_FPROF_RETURN;
 
   // Garbage Collection Support
-  void oops_do(OopClosure* f);
+  void oops_do(OopClosure* f)         NOT_FPROF_RETURN;
 
+#if INCLUDE_FPROF
 private:
   // for recording ticks.
   friend class ProfilerNode;
@@ -151,9 +143,9 @@ private:
 private:
   void record_interpreted_tick(JavaThread* thread, frame fr, TickPosition where, int* ticks);
   void record_compiled_tick   (JavaThread* thread, frame fr, TickPosition where);
-  void interpreted_update(methodOop method, TickPosition where);
-  void compiled_update   (methodOop method, TickPosition where);
-  void stub_update       (methodOop method, const char* name, TickPosition where);
+  void interpreted_update(Method* method, TickPosition where);
+  void compiled_update   (Method* method, TickPosition where);
+  void stub_update       (Method* method, const char* name, TickPosition where);
   void adapter_update    (TickPosition where);
 
   void runtime_stub_update(const CodeBlob* stub, const char* name, TickPosition where);
@@ -222,37 +214,39 @@ private:
   IntervalData* interval_data_ref() {
     return &_interval_data;
   }
+#endif // INCLUDE_FPROF
 };
 
 class FlatProfiler: AllStatic {
 public:
-  static void reset() ;
-  static void engage(JavaThread* mainThread, bool fullProfile) ;
-  static void disengage() ;
-  static void print(int unused) ;
-  static bool is_active();
+  static void reset() NOT_FPROF_RETURN ;
+  static void engage(JavaThread* mainThread, bool fullProfile) NOT_FPROF_RETURN ;
+  static void disengage() NOT_FPROF_RETURN ;
+  static void print(int unused) NOT_FPROF_RETURN ;
+  static bool is_active() NOT_FPROF_RETURN_(false) ;
 
   // This is NULL if each thread has its own thread profiler,
   // else this is the single thread profiler used by all threads.
   // In particular it makes a difference during garbage collection,
   // where you only want to traverse each thread profiler once.
-  static ThreadProfiler* get_thread_profiler();
+  static ThreadProfiler* get_thread_profiler() NOT_FPROF_RETURN_(NULL);
 
   // Garbage Collection Support
-  static void oops_do(OopClosure* f) ;
+  static void oops_do(OopClosure* f) NOT_FPROF_RETURN ;
 
   // Support for disassembler to inspect the PCRecorder
 
   // Returns the start address for a given pc
   // NULL is returned if the PCRecorder is inactive
-  static address bucket_start_for(address pc);
+  static address bucket_start_for(address pc) NOT_FPROF_RETURN_(NULL);
 
   enum { MillisecsPerTick = 10 };   // ms per profiling ticks
 
   // Returns the number of ticks recorded for the bucket
   // pc belongs to.
-  static int bucket_count_for(address pc);
+  static int bucket_count_for(address pc) NOT_FPROF_RETURN_(0);
 
+#if INCLUDE_FPROF
 
  private:
   static bool full_profile() {
@@ -319,6 +313,7 @@ public:
   static void interval_reset();       // reset interval data.
   enum {interval_print_size = 10};
   static IntervalData* interval_data;
+#endif // INCLUDE_FPROF
 };
 
 #endif // SHARE_VM_RUNTIME_FPROFILER_HPP

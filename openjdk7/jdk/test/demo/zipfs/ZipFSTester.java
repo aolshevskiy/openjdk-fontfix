@@ -29,6 +29,7 @@ import java.nio.file.spi.*;
 import java.nio.file.attribute.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.*;
 
 import static java.nio.file.StandardOpenOption.*;
@@ -48,6 +49,7 @@ public class ZipFSTester {
             test0(fs);
             test1(fs);
             test2(fs);   // more tests
+            testTime(Paths.get(args[0]));
         }
     }
 
@@ -138,13 +140,30 @@ public class ZipFSTester {
             Path dst3 = Paths.get(tmpName + "_Tmp");
             Files.move(dst2, dst3);
             checkEqual(src, dst3);
+            if (Files.exists(dst2))
+                throw new RuntimeException("Failed!");
+
+            // copyback + move
+            Files.copy(dst3, dst);
+            Path dst4 = getPathWithParents(fs, tmpName + "_Tmp0");
+            Files.move(dst, dst4);
+            checkEqual(src, dst4);
 
             // delete
-            if (Files.exists(dst2))
+            Files.delete(dst4);
+            if (Files.exists(dst4))
                 throw new RuntimeException("Failed!");
             Files.delete(dst3);
             if (Files.exists(dst3))
                 throw new RuntimeException("Failed!");
+
+            // move (existing entry)
+            Path dst5 = fs.getPath("META-INF/MANIFEST.MF");
+            if (Files.exists(dst5)) {
+                Path dst6 = fs.getPath("META-INF/MANIFEST.MF_TMP");
+                Files.move(dst5, dst6);
+                walk(fs.getPath("/"));
+            }
 
             // newInputStream on dir
             Path parent = dst2.getParent();
@@ -318,6 +337,45 @@ public class ZipFSTester {
         Files.delete(fs1Path);
         Files.delete(fs2Path);
         Files.delete(fs3Path);
+    }
+
+    // test file stamp
+    static void testTime(Path src) throws Exception {
+        BasicFileAttributes attrs = Files
+                        .getFileAttributeView(src, BasicFileAttributeView.class)
+                        .readAttributes();
+        // create a new filesystem, copy this file into it
+        Map<String, Object> env = new HashMap<String, Object>();
+        env.put("create", "true");
+        Path fsPath = getTempPath();
+        FileSystem fs = newZipFileSystem(fsPath, env);
+
+        System.out.println("test copy with timestamps...");
+        // copyin
+        Path dst = getPathWithParents(fs, "me");
+        Files.copy(src, dst, COPY_ATTRIBUTES);
+        checkEqual(src, dst);
+        System.out.println("mtime: " + attrs.lastModifiedTime());
+        System.out.println("ctime: " + attrs.creationTime());
+        System.out.println("atime: " + attrs.lastAccessTime());
+        System.out.println(" ==============>");
+        BasicFileAttributes dstAttrs = Files
+                        .getFileAttributeView(dst, BasicFileAttributeView.class)
+                        .readAttributes();
+        System.out.println("mtime: " + dstAttrs.lastModifiedTime());
+        System.out.println("ctime: " + dstAttrs.creationTime());
+        System.out.println("atime: " + dstAttrs.lastAccessTime());
+
+        // 1-second granularity
+        if (attrs.lastModifiedTime().to(TimeUnit.SECONDS) !=
+            dstAttrs.lastModifiedTime().to(TimeUnit.SECONDS) ||
+            attrs.lastAccessTime().to(TimeUnit.SECONDS) !=
+            dstAttrs.lastAccessTime().to(TimeUnit.SECONDS) ||
+            attrs.creationTime().to(TimeUnit.SECONDS) !=
+            dstAttrs.creationTime().to(TimeUnit.SECONDS)) {
+            throw new RuntimeException("Timestamp Copy Failed!");
+        }
+        Files.delete(fsPath);
     }
 
     private static FileSystem newZipFileSystem(Path path, Map<String, ?> env)
@@ -540,6 +598,20 @@ public class ZipFSTester {
                 bbSrc.flip();
                 bbDst.flip();
             }
+
+            // Check if source read position is at the end
+            if (chSrc.position() != chSrc.size()) {
+                System.out.printf("src[%s]: size=%d, position=%d%n",
+                                  chSrc.toString(), chSrc.size(), chSrc.position());
+                throw new RuntimeException("CHECK FAILED!");
+            }
+
+            // Check if destination read position is at the end
+            if (chDst.position() != chDst.size()) {
+                System.out.printf("dst[%s]: size=%d, position=%d%n",
+                                  chDst.toString(), chDst.size(), chDst.position());
+                throw new RuntimeException("CHECK FAILED!");
+            }
         } catch (IOException x) {
             x.printStackTrace();
         }
@@ -587,6 +659,20 @@ public class ZipFSTester {
                 dstCh.write(bb);
                 bb.clear();
             }
+
+            // Check if source read position is at the end
+            if (srcCh.position() != srcCh.size()) {
+                System.out.printf("src[%s]: size=%d, position=%d%n",
+                                  srcCh.toString(), srcCh.size(), srcCh.position());
+                throw new RuntimeException("CHECK FAILED!");
+            }
+
+            // Check if destination write position is at the end
+            if (dstCh.position() != dstCh.size()) {
+                System.out.printf("dst[%s]: size=%d, position=%d%n",
+                                  dstCh.toString(), dstCh.size(), dstCh.position());
+                throw new RuntimeException("CHECK FAILED!");
+            }
         }
     }
 
@@ -616,10 +702,17 @@ public class ZipFSTester {
 
         try (SeekableByteChannel sbc = Files.newByteChannel(path)) {
             System.out.printf("   sbc[0]: pos=%d, size=%d%n", sbc.position(), sbc.size());
+            if (sbc.position() != 0) {
+                throw new RuntimeException("CHECK FAILED!");
+            }
+
             bb = ByteBuffer.allocate((int)sbc.size());
             n = sbc.read(bb);
             System.out.printf("   sbc[1]: read=%d, pos=%d, size=%d%n",
                               n, sbc.position(), sbc.size());
+            if (sbc.position() != sbc.size()) {
+                throw new RuntimeException("CHECK FAILED!");
+            }
             bb2 = ByteBuffer.allocate((int)sbc.size());
         }
 
@@ -629,10 +722,16 @@ public class ZipFSTester {
             sbc.position(N);
             System.out.printf("   sbc[2]: pos=%d, size=%d%n",
                               sbc.position(), sbc.size());
+            if (sbc.position() != N) {
+                throw new RuntimeException("CHECK FAILED!");
+            }
             bb2.limit(100);
             n = sbc.read(bb2);
             System.out.printf("   sbc[3]: read=%d, pos=%d, size=%d%n",
                               n, sbc.position(), sbc.size());
+            if (n < 0 || sbc.position() != (N + n)) {
+                throw new RuntimeException("CHECK FAILED!");
+            }
             System.out.printf("   sbc[4]: bb[%d]=%d, bb1[0]=%d%n",
                               N, bb.get(N) & 0xff, bb2.get(0) & 0xff);
         }

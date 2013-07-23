@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,7 +28,7 @@ package com.sun.xml.internal.ws.encoding.xml;
 import com.sun.istack.internal.NotNull;
 import com.sun.xml.internal.bind.api.Bridge;
 import com.sun.xml.internal.ws.api.SOAPVersion;
-import com.sun.xml.internal.ws.api.WSBinding;
+import com.sun.xml.internal.ws.api.WSFeatureList;
 import com.sun.xml.internal.ws.api.message.*;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLPort;
 import com.sun.xml.internal.ws.api.pipe.Codec;
@@ -58,6 +58,7 @@ import javax.xml.stream.XMLStreamWriter;
 import javax.xml.transform.Source;
 import javax.xml.transform.stream.StreamSource;
 import javax.xml.ws.WebServiceException;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -75,7 +76,7 @@ public final class XMLMessage {
     /*
      * Construct a message given a content type and an input stream.
      */
-    public static Message create(final String ct, InputStream in, WSBinding binding) {
+    public static Message create(final String ct, InputStream in, WSFeatureList f) {
         Message data;
         try {
             in = StreamUtils.hasSomeData(in);
@@ -87,9 +88,9 @@ public final class XMLMessage {
                 final ContentType contentType = new ContentType(ct);
                 final int contentTypeId = identifyContentType(contentType);
                 if ((contentTypeId & MIME_MULTIPART_FLAG) != 0) {
-                    data = new XMLMultiPart(ct, in, binding);
+                    data = new XMLMultiPart(ct, in, f);
                 } else if ((contentTypeId & PLAIN_XML_FLAG) != 0) {
-                    data = new XmlContent(ct, in, binding);
+                    data = new XmlContent(ct, in, f);
                 } else {
                     data = new UnknownContent(ct, in);
                 }
@@ -111,11 +112,11 @@ public final class XMLMessage {
             Messages.createUsingPayload(source, SOAPVersion.SOAP_11);
     }
 
-    public static Message create(DataSource ds, WSBinding binding) {
+    public static Message create(DataSource ds, WSFeatureList f) {
         try {
             return (ds == null) ?
                 Messages.createEmpty(SOAPVersion.SOAP_11) :
-                create(ds.getContentType(), ds.getInputStream(), binding);
+                create(ds.getContentType(), ds.getInputStream(), f);
         } catch(IOException ioe) {
             throw new WebServiceException(ioe);
         }
@@ -229,13 +230,15 @@ public final class XMLMessage {
         private boolean consumed;
         private Message delegate;
         private final HeaderList headerList;
-        private final WSBinding binding;
+//      private final WSBinding binding;
+        private WSFeatureList features;
 
-        public XmlContent(String ct, InputStream in, WSBinding binding) {
+        public XmlContent(String ct, InputStream in, WSFeatureList f) {
             super(SOAPVersion.SOAP_11);
             dataSource = new XmlDataSource(ct, in);
-            this.headerList = new HeaderList();
-            this.binding = binding;
+            this.headerList = new HeaderList(SOAPVersion.SOAP_11);
+//            this.binding = binding;
+            features = f;
         }
 
         private Message getMessage() {
@@ -254,14 +257,14 @@ public final class XMLMessage {
 
         public DataSource getDataSource() {
             return hasUnconsumedDataSource() ? dataSource :
-                XMLMessage.getDataSource(getMessage(), binding);
+                XMLMessage.getDataSource(getMessage(), features);
         }
 
         public boolean hasHeaders() {
             return false;
         }
 
-        public @NotNull HeaderList getHeaders() {
+        public @NotNull MessageHeaders getHeaders() {
             return headerList;
         }
 
@@ -300,7 +303,7 @@ public final class XMLMessage {
         public <T> T readPayloadAsJAXB(Unmarshaller unmarshaller) throws JAXBException {
             return (T)getMessage().readPayloadAsJAXB(unmarshaller);
         }
-
+        /** @deprecated */
         public <T> T readPayloadAsJAXB(Bridge<T> bridge) throws JAXBException {
             return getMessage().readPayloadAsJAXB(bridge);
         }
@@ -344,14 +347,16 @@ public final class XMLMessage {
         private final DataSource dataSource;
         private final StreamingAttachmentFeature feature;
         private Message delegate;
-        private final HeaderList headerList = new HeaderList();
-        private final WSBinding binding;
+        private HeaderList headerList;// = new HeaderList();
+//      private final WSBinding binding;
+        private final WSFeatureList features;
 
-        public XMLMultiPart(final String contentType, final InputStream is, WSBinding binding) {
+        public XMLMultiPart(final String contentType, final InputStream is, WSFeatureList f) {
             super(SOAPVersion.SOAP_11);
+            headerList = new HeaderList(SOAPVersion.SOAP_11);
             dataSource = createDataSource(contentType, is);
-            this.feature = binding.getFeature(StreamingAttachmentFeature.class);
-            this.binding = binding;
+            this.feature = f.get(StreamingAttachmentFeature.class);
+            this.features = f;
         }
 
         private Message getMessage() {
@@ -376,14 +381,14 @@ public final class XMLMessage {
 
         public DataSource getDataSource() {
             return hasUnconsumedDataSource() ? dataSource :
-                XMLMessage.getDataSource(getMessage(), binding);
+                XMLMessage.getDataSource(getMessage(), features);
         }
 
         public boolean hasHeaders() {
             return false;
         }
 
-        public @NotNull HeaderList getHeaders() {
+        public @NotNull MessageHeaders getHeaders() {
             return headerList;
         }
 
@@ -492,7 +497,7 @@ public final class XMLMessage {
         public UnknownContent(DataSource ds) {
             super(SOAPVersion.SOAP_11);
             this.ds = ds;
-            this.headerList = new HeaderList();
+            this.headerList = new HeaderList(SOAPVersion.SOAP_11);
         }
 
         /*
@@ -526,7 +531,7 @@ public final class XMLMessage {
             return false;
         }
 
-        public HeaderList getHeaders() {
+        public MessageHeaders getHeaders() {
             return headerList;
         }
 
@@ -560,7 +565,7 @@ public final class XMLMessage {
 
     }
 
-    public static DataSource getDataSource(Message msg, WSBinding binding) {
+    public static DataSource getDataSource(Message msg, WSFeatureList f) {
         if (msg == null)
             return null;
         if (msg instanceof MessageDataSource) {
@@ -570,9 +575,10 @@ public final class XMLMessage {
             if (atts != null && !atts.isEmpty()) {
                 final ByteArrayBuffer bos = new ByteArrayBuffer();
                 try {
-                    Codec codec = new XMLHTTPBindingCodec(binding);
-                    com.sun.xml.internal.ws.api.pipe.ContentType ct = codec.getStaticContentType(new Packet(msg));
-                    codec.encode(new Packet(msg), bos);
+                    Codec codec = new XMLHTTPBindingCodec(f);
+                    Packet packet = new Packet(msg);
+                    com.sun.xml.internal.ws.api.pipe.ContentType ct = codec.getStaticContentType(packet);
+                    codec.encode(packet, bos);
                     return createDataSource(ct.getContentType(), bos.newInputStream());
                 } catch(IOException ioe) {
                     throw new WebServiceException(ioe);

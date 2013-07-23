@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,21 +46,27 @@ public class CompileTask extends VMObject {
     Type type      = db.lookupType("CompileTask");
     methodField = type.getAddressField("_method");
     osrBciField = new CIntField(type.getCIntegerField("_osr_bci"), 0);
+    compLevelField = new CIntField(type.getCIntegerField("_comp_level"), 0);
   }
 
   private static AddressField methodField;
   private static CIntField osrBciField;
+  private static CIntField compLevelField;
 
   public CompileTask(Address addr) {
     super(addr);
   }
 
   public Method method() {
-    OopHandle oh =  methodField.getValue(getAddress()).getOopHandleAt(0);
-    return (Method)VM.getVM().getObjectHeap().newOop(oh);
+    Address oh =  methodField.getValue(getAddress());
+    return (Method)Metadata.instantiateWrapperFor(oh);
   }
 
   public int osrBci() {
     return (int)osrBciField.getValue(getAddress());
+  }
+
+  public int compLevel() {
+      return (int)compLevelField.getValue(getAddress());
   }
 }

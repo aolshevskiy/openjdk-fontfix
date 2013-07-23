@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,7 @@
 #import "QueuingApplicationDelegate.h"
 #import "AWTIconData.h"
 
+
 static BOOL sUsingDefaultNIB = YES;
 static NSString *SHARED_FRAMEWORK_BUNDLE = @"/System/Library/Frameworks/JavaVM.framework";
 static id <NSApplicationDelegate> applicationDelegate = nil;
@@ -54,6 +55,7 @@ AWT_ASSERT_APPKIT_THREAD;
     fApplicationName = nil;
     dummyEventTimestamp = 0.0;
     seenDummyEventLock = nil;
+
 
     // NSApplication will call _RegisterApplication with the application's bundle, but there may not be one.
     // So, we need to call it ourselves to ensure the app is set up properly.
@@ -160,7 +162,6 @@ AWT_ASSERT_APPKIT_THREAD;
         char mainClassEnvVar[80];
         snprintf(mainClassEnvVar, sizeof(mainClassEnvVar), "JAVA_MAIN_CLASS_%d", getpid());
         char *mainClass = getenv(mainClassEnvVar);
-
         if (mainClass != NULL) {
             fApplicationName = [NSString stringWithUTF8String:mainClass];
             unsetenv(mainClassEnvVar);
@@ -265,7 +266,7 @@ AWT_ASSERT_APPKIT_THREAD;
     } 
 
     // If no icon file was specified or we failed to get the icon image
-    // and we need to get an icon, then use the default icon
+    // and there is no bundle's icon, then use the default icon
     if (iconImage == nil) {
         NSString* bundleIcon = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleIconFile"];
         if (bundleIcon == nil) {

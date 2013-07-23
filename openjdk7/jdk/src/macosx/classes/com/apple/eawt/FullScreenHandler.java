@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,14 +32,17 @@ import java.util.List;
 import javax.swing.RootPaneContainer;
 
 import com.apple.eawt.AppEvent.FullScreenEvent;
+import sun.awt.SunToolkit;
+
+import java.lang.annotation.Native;
 
 final class FullScreenHandler {
     private static final String CLIENT_PROPERTY = "com.apple.eawt.event.internalFullScreenHandler";
 
-    static final int FULLSCREEN_WILL_ENTER = 1;
-    static final int FULLSCREEN_DID_ENTER = 2;
-    static final int FULLSCREEN_WILL_EXIT = 3;
-    static final int FULLSCREEN_DID_EXIT = 4;
+    @Native static final int FULLSCREEN_WILL_ENTER = 1;
+    @Native static final int FULLSCREEN_DID_ENTER = 2;
+    @Native static final int FULLSCREEN_WILL_EXIT = 3;
+    @Native static final int FULLSCREEN_DID_EXIT = 4;
 
     // installs a private instance of the handler, if necessary
     static void addFullScreenListenerTo(final RootPaneContainer window, final FullScreenListener listener) {
@@ -73,7 +76,7 @@ final class FullScreenHandler {
     static void handleFullScreenEventFromNative(final Window window, final int type) {
         if (!(window instanceof RootPaneContainer)) return; // handles null
 
-        EventQueue.invokeLater(new Runnable() {
+        SunToolkit.executeOnEventHandlerThread(window, new Runnable() {
             public void run() {
                 final FullScreenHandler handler = getHandlerFor((RootPaneContainer)window);
                 if (handler != null) handler.notifyListener(new FullScreenEvent(window), type);

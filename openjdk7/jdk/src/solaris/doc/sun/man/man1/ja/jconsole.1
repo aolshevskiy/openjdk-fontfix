@@ -19,11 +19,11 @@
 ." or visit www.oracle.com if you need additional information or have any
 ." questions.
 ."
-.TH jconsole 1 "05 Jul 2012"
+.TH jconsole 1 "07 May 2011"
 
 .LP
 .SH "Ì¾Á°"
-jconsole \- Java´Æ»ë¤ª¤è¤Ó´ÉÍý¥³¥ó¥½¡¼¥ë
+jconsole \- Java ´Æ»ë¤ª¤è¤Ó´ÉÍý¥³¥ó¥½¡¼¥ë
 .LP
 .RS 3
 .TP 2
@@ -67,49 +67,49 @@ connection = pid | host:port | jmxUrl
 .RS 3
 .TP 2
 o
-\f2pid\fP¥í¡¼¥«¥ë¤ÎJava VM¤Î¥×¥í¥»¥¹ID¡£Java VM¤Ï¡¢jconsole¤ò¼Â¹Ô¤·¤Æ¤¤¤ë¥æ¡¼¥¶¡¼ID¤ÈÆ±¤¸¥æ¡¼¥¶¡¼ID¤ò»ÈÍÑ¤·¤Æ¼Â¹Ô¤¹¤ëÉ¬Í×¤¬¤¢¤ê¤Þ¤¹¡£¾ÜºÙ¤Ï¡¢
+\f2pid\fP¥í¡¼¥«¥ë¤Î Java VM ¤Î¥×¥í¥»¥¹ ID¡£Java VM ¤Ï¡¢jconsole ¤ò¼Â¹Ô¤·¤Æ¤¤¤ë¥æ¡¼¥¶¡¼ ID ¤ÈÆ±¤¸¥æ¡¼¥¶¡¼ ID ¤ò»ÈÍÑ¤·¤Æ¼Â¹Ô¤¹¤ëÉ¬Í×¤¬¤¢¤ê¤Þ¤¹¡£¾ÜºÙ¤Ë¤Ä¤¤¤Æ¤Ï¡¢
 .na
-\f2JMX¤Î´Æ»ë¤ª¤è¤Ó´ÉÍý\fP @
+\f2¡ÖJMX ´Æ»ë¤ª¤è¤Ó´ÉÍý¡×\fP @
 .fi
-http://docs.oracle.com/javase/7/docs/technotes/guides/management/agent.html¤ò»²¾È¤·¤Æ¤¯¤À¤µ¤¤¡£ 
+http://java.sun.com/javase/6/docs/technotes/guides/management/agent.html¤ò»²¾È¤·¤Æ¤¯¤À¤µ¤¤¡£ 
 .TP 2
 o
-\f2host\fP:\f2port\fP: Java VM¤ò¼Â¹Ô¤·¤Æ¤¤¤ë¥Û¥¹¥È¡¦¥·¥¹¥Æ¥à¤ÎÌ¾Á°¤È¡¢Java VM¤òµ¯Æ°¤·¤¿¤È¤­¤Ë¥·¥¹¥Æ¥à¡¦¥×¥í¥Ñ¥Æ¥£\f2com.sun.management.jmxremote.port\fP¤Ç»ØÄê¤·¤¿¥Ý¡¼¥ÈÈÖ¹æ¡£¾ÜºÙ¤Ï¡¢
+\f2host\fP:\f2port\fP Java VM ¤¬¼Â¹Ô¤·¤Æ¤¤¤ë¥Û¥¹¥È¥·¥¹¥Æ¥à¤ÎÌ¾Á°¤È¡¢JVM ¤òµ¯Æ°¤·¤¿¤È¤­¤Ë¥·¥¹¥Æ¥à¥×¥í¥Ñ¥Æ¥£¡¼ \f2com.sun.management.jmxremote.port\fP ¤Ç»ØÄê¤·¤¿¥Ý¡¼¥ÈÈÖ¹æ¡£¾ÜºÙ¤Ë¤Ä¤¤¤Æ¤Ï¡¢
 .na
-\f2JMX¤Î´Æ»ë¤ª¤è¤Ó´ÉÍý\fP @
+\f2¡ÖJMX ´Æ»ë¤ª¤è¤Ó´ÉÍý¡×\fP @
 .fi
-http://docs.oracle.com/javase/7/docs/technotes/guides/management/agent.html¤ò»²¾È¤·¤Æ¤¯¤À¤µ¤¤¡£ 
+http://java.sun.com/javase/6/docs/technotes/guides/management/agent.html¤ò»²¾È¤·¤Æ¤¯¤À¤µ¤¤¡£ 
 .TP 2
 o
-\f2jmxUrl\fP: 
+\f2jmxUrl\fP ÀÜÂ³Àè¤Î JMX ¥¨¡¼¥¸¥§¥ó¥È¤Î¥¢¥É¥ì¥¹¡£¤³¤ì¤Ë¤Ä¤¤¤Æ¤Ï¡¢
 .na
 \f2JMXServiceURL\fP @
 .fi
-http://docs.oracle.com/javase/7/docs/api/javax/management/remote/JMXServiceURL.html¤Ëµ­½Ò¤µ¤ì¤Æ¤¤¤ëÀÜÂ³Àè¤ÎJMX¥¨¡¼¥¸¥§¥ó¥È¤Î¥¢¥É¥ì¥¹¡£ 
+http://java.sun.com/javase/6/docs/api/javax/management/remote/JMXServiceURL.html ¤ò»²¾È¤·¤Æ¤¯¤À¤µ¤¤¡£ 
 .RE
 .RE
 
 .LP
-.SH "ÀâÌÀ"
+.SH " ÀâÌÀ"
 .LP
 .LP
-\f3jconsole\fP¥³¥Þ¥ó¥É¤Ï¡¢¥í¡¼¥«¥ë¡¦¥Þ¥·¥ó¤Þ¤¿¤Ï¥ê¥â¡¼¥È¡¦¥Þ¥·¥ó¾å¤ÎJava¥¢¥×¥ê¥±¡¼¥·¥ç¥ó¤È²¾ÁÛ¥Þ¥·¥ó¤Î´Æ»ë¤È´ÉÍý¤ò¹Ô¤¦¥°¥é¥Õ¥£¥«¥ë¡¦¥³¥ó¥½¡¼¥ë¡¦¥Ä¡¼¥ë¤òµ¯Æ°¤·¤Þ¤¹¡£
+\f3jconsole\fP ¥³¥Þ¥ó¥É¤Ï¡¢¥í¡¼¥«¥ë¥Þ¥·¥ó¤Þ¤¿¤Ï¥ê¥â¡¼¥È¥Þ¥·¥ó¾å¤Î Java ¥¢¥×¥ê¥±¡¼¥·¥ç¥ó¤È²¾ÁÛ¥Þ¥·¥ó¤Î´Æ»ë¤È´ÉÍý¤ò¹Ô¤¦¥°¥é¥Õ¥£¥«¥ë¥³¥ó¥½¡¼¥ë¥Ä¡¼¥ë¤òµ¯Æ°¤·¤Þ¤¹¡£
 .LP
 .LP
-Windows¾å¤Ç¤Ï¡¢\f3jconsole\fP¤Ï¥³¥ó¥½¡¼¥ë¡¦¥¦¥£¥ó¥É¥¦¤È´ØÏ¢ÉÕ¤±¤é¤ì¤Æ¤¤¤Þ¤»¤ó¡£¤¿¤À¤·¡¢¤Ê¤ó¤é¤«¤ÎÍýÍ³¤Ç\f3jconsole\fP¥³¥Þ¥ó¥É¤¬¼ºÇÔ¤¹¤ë¤È¡¢¥¨¥é¡¼¾ðÊó¤ò¼¨¤¹¥À¥¤¥¢¥í¥°¡¦¥Ü¥Ã¥¯¥¹¤¬É½¼¨¤µ¤ì¤Þ¤¹¡£
+Windows ¾å¤Ç¤Ï¡¢\f3jconsole\fP ¤Ï¥³¥ó¥½¡¼¥ë¥¦¥£¥ó¥É¥¦¤È´ØÏ¢ÉÕ¤±¤é¤ì¤Æ¤¤¤Þ¤»¤ó¡£¤¿¤À¤·¡¢¤Ê¤ó¤é¤«¤ÎÍýÍ³¤Ç \f3jconsole\fP ¥³¥Þ¥ó¥É¤¬¼ºÇÔ¤¹¤ë¤È¡¢¥¨¥é¡¼¾ðÊó¤ò¼¨¤¹¥À¥¤¥¢¥í¥°¥Ü¥Ã¥¯¥¹¤¬É½¼¨¤µ¤ì¤Þ¤¹¡£
 .LP
 .SH "¥ª¥×¥·¥ç¥ó"
 .LP
 .RS 3
 .TP 3
 \-interval=n 
-¹¹¿·´Ö³Ö¤ò\f2n\fPÉÃ¤ËÀßÄê¤·¤Þ¤¹(¥Ç¥Õ¥©¥ë¥È¤Ï4ÉÃ)¡£ 
+¹¹¿·´Ö³Ö¤ò \f2n\fP ÉÃ¤ËÀßÄê¤·¤Þ¤¹ (¥Ç¥Õ¥©¥ë¥È¤Ï 4 ÉÃ)¡£ 
 .TP 3
 \-notile 
-ºÇ½é¤Ë¥¦¥£¥ó¥É¥¦¤ò¥¿¥¤¥ê¥ó¥°¤·¤Þ¤»¤ó(Ê£¿ôÀÜÂ³¤Î¾ì¹ç)¡£ 
+ºÇ½é¤Ë¥¦¥£¥ó¥É¥¦¤ò¥¿¥¤¥ê¥ó¥°¤·¤Þ¤»¤ó (Ê£¿ô¤ÎÀÜÂ³¤Î¤¿¤á)¡£ 
 .TP 3
 \-pluginpath plugins 
-JConsole¥×¥é¥°¥¤¥ó¤Î¸¡º÷Àè¤È¤Ê¤ë¥Ç¥£¥ì¥¯¥È¥ê¤Þ¤¿¤ÏJAR¥Õ¥¡¥¤¥ë¤Î¥ê¥¹¥È¤ò»ØÄê¤·¤Þ¤¹¡£\f2plugins\fP¥Ñ¥¹¤Ë¤Ï¡¢¼¡¤ÎÌ¾Á°¤Î¥×¥í¥Ð¥¤¥À¹½À®¥Õ¥¡¥¤¥ë¤ò´Þ¤á¤Æ¤¯¤À¤µ¤¤¡£
+JConsole ¥×¥é¥°¥¤¥ó¤Î¸¡º÷Àè¤È¤Ê¤ë¥Ç¥£¥ì¥¯¥È¥ê¤Þ¤¿¤Ï JAR ¥Õ¥¡¥¤¥ë¤Î¥ê¥¹¥È¤ò»ØÄê¤·¤Þ¤¹¡£\f2plugins\fP ¥Ñ¥¹¤Ë¤Ï¡¢¼¡¤ÎÌ¾Á°¤Î¥×¥í¥Ð¥¤¥À¹½À®¥Õ¥¡¥¤¥ë¤ò´Þ¤á¤Æ¤¯¤À¤µ¤¤¡£
 .br
 .nf
 \f3
@@ -118,20 +118,21 @@ JConsole¥×¥é¥°¥¤¥ó¤Î¸¡º÷Àè¤È¤Ê¤ë¥Ç¥£¥ì¥¯¥È¥ê¤Þ¤¿¤ÏJAR¥Õ¥¡¥¤¥ë¤Î¥ê¥¹¥È¤ò»ØÄê¤·¤Þ¤
 .fl
 \fP
 .fi
+.LP
 ¤³¤ì¤Ë¤Ï¡¢
 .na
 \f2com.sun.tools.jconsole.JConsolePlugin\fP @
 .fi
-http://docs.oracle.com/javase/7/docs/jdk/api/jconsole/spec/com/sun/tools/jconsole/JConsolePlugin.html¥¯¥é¥¹¤ò¼ÂÁõ¤¹¤ë¥¯¥é¥¹¤Î´°Á´½¤¾þ¥¯¥é¥¹Ì¾¤ò»ØÄê¤¹¤ë¹Ô¤¬¡¢¥×¥é¥°¥¤¥ó¤´¤È¤Ë1¹Ô¤º¤Ä´Þ¤Þ¤ì¤Æ¤¤¤Þ¤¹¡£ 
+http://java.sun.com/javase/6/docs/jdk/api/jconsole/spec/com/sun/tools/jconsole/JConsolePlugin.html ¥¯¥é¥¹¤ò¼ÂÁõ¤¹¤ë¥¯¥é¥¹¤Î´°Á´½¤¾þ¥¯¥é¥¹Ì¾¤ò»ØÄê¤¹¤ë¹Ô¤¬¡¢¥×¥é¥°¥¤¥ó¤´¤È¤Ë 1 ¹Ô¤º¤Ä´Þ¤Þ¤ì¤Æ¤¤¤Þ¤¹¡£  
 .TP 3
 \-version 
 ¥Ð¡¼¥¸¥ç¥ó¾ðÊó¤ò½ÐÎÏ¤·¤Æ½ªÎ»¤·¤Þ¤¹¡£ 
 .TP 3
 \-help 
-¥Ø¥ë¥×¡¦¥á¥Ã¥»¡¼¥¸¤ò½ÐÎÏ¤·¤Æ½ªÎ»¤·¤Þ¤¹¡£ 
+¥Ø¥ë¥×¥á¥Ã¥»¡¼¥¸¤ò½ÐÎÏ¤·¤Æ½ªÎ»¤·¤Þ¤¹¡£ 
 .TP 3
 \-J<flag> 
-jconsole¤¬¼Â¹Ô¤µ¤ì¤Æ¤¤¤ëJava²¾ÁÛ¥Þ¥·¥ó¤Ë<flag>¤òÅÏ¤·¤Þ¤¹¡£ 
+jconsole ¤¬¼Â¹Ô¤µ¤ì¤Æ¤¤¤ë Java ²¾ÁÛ¥Þ¥·¥ó¤Ë <flag> ¤òÅÏ¤·¤Þ¤¹¡£ 
 .RE
 
 .LP
@@ -141,15 +142,15 @@ jconsole¤¬¼Â¹Ô¤µ¤ì¤Æ¤¤¤ëJava²¾ÁÛ¥Þ¥·¥ó¤Ë<flag>¤òÅÏ¤·¤Þ¤¹¡£
 .TP 2
 o
 .na
-\f2JConsole¤Î»ÈÍÑ\fP @
+\f2JConsole ¤Î»ÈÍÑ\fP @
 .fi
-http://docs.oracle.com/javase/7/docs/technotes/guides/management/jconsole.html 
+http://java.sun.com/javase/6/docs/technotes/guides/management/jconsole.html 
 .TP 2
 o
 .na
-\f2Java¥×¥é¥Ã¥È¥Õ¥©¡¼¥à¤Î´Æ»ë¤ª¤è¤Ó´ÉÍý\fP @
+\f2¡ÖJava ¥×¥é¥Ã¥È¥Õ¥©¡¼¥à¤Î´Æ»ë¤ª¤è¤Ó´ÉÍý¡×\fP @
 .fi
-http://docs.oracle.com/javase/7/docs/technotes/guides/management/index.html 
+http://java.sun.com/javase/6/docs/technotes/guides/management/index.html 
 .RE
 
 .LP

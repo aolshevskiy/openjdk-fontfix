@@ -50,6 +50,18 @@ import java.util.Date;
  * <a href="doc-files/net-properties.html#Proxies">Proxy settings</a> as well as
  * <a href="doc-files/net-properties.html#MiscHTTP"> various other settings</a>.
  * </P>
+ * <p>
+ * <b>Security permissions</b>
+ * <p>
+ * If a security manager is installed, and if a method is called which results in an
+ * attempt to open a connection, the caller must possess either:-
+ * <ul><li>a "connect" {@link SocketPermission} to the host/port combination of the
+ * destination URL or</li>
+ * <li>a {@link HttpURLPermission} that permits this request.</li>
+ * </ul><p>
+ * If automatic redirection is enabled, and this request is redirected to another
+ * destination, then the caller must also have permission to connect to the
+ * redirected host/URL.
  *
  * @see     java.net.HttpURLConnection#disconnect()
  * @since JDK1.1
@@ -97,7 +109,7 @@ abstract public class HttpURLConnection extends URLConnection {
      * server. In this case, {@link #getHeaderField(int) getHeaderField(0)} returns the status
      * line, but <code>getHeaderFieldKey(0)</code> returns null.
      *
-     * @param   n   an index, where n >=0.
+     * @param   n   an index, where {@code n >=0}.
      * @return  the key for the <code>n</code><sup>th</sup> header field,
      *          or <code>null</code> if the key does not exist.
      */
@@ -248,7 +260,7 @@ abstract public class HttpURLConnection extends URLConnection {
      * {@link #getHeaderFieldKey getHeaderFieldKey} method to iterate through all
      * the headers in the message.
      *
-     * @param   n   an index, where n>=0.
+     * @param   n   an index, where {@code n>=0}.
      * @return  the value of the <code>n</code><sup>th</sup> header field,
      *          or <code>null</code> if the value does not exist.
      * @see     java.net.HttpURLConnection#getHeaderFieldKey(int)
@@ -535,6 +547,7 @@ abstract public class HttpURLConnection extends URLConnection {
         return responseMessage;
     }
 
+    @SuppressWarnings("deprecation")
     public long getHeaderFieldDate(String name, long Default) {
         String dateString = getHeaderField(name);
         try {

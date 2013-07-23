@@ -172,7 +172,7 @@ class XCheckboxPeer extends XComponentPeer implements CheckboxPeer {
             Checkbox cb = (Checkbox) e.getSource();
 
             if (cb.contains(e.getX(), e.getY())) {
-                if (log.isLoggable(PlatformLogger.FINER)) {
+                if (log.isLoggable(PlatformLogger.Level.FINER)) {
                     log.finer("mousePressed() on " + target.getName() + " : armed = " + armed + ", pressed = " + pressed
                               + ", selected = " + selected + ", enabled = " + isEnabled());
                 }
@@ -190,7 +190,7 @@ class XCheckboxPeer extends XComponentPeer implements CheckboxPeer {
     }
 
     public void mouseReleased(MouseEvent e) {
-        if (log.isLoggable(PlatformLogger.FINER)) {
+        if (log.isLoggable(PlatformLogger.Level.FINER)) {
             log.finer("mouseReleased() on " + target.getName() + ": armed = " + armed + ", pressed = " + pressed
                       + ", selected = " + selected + ", enabled = " + isEnabled());
         }
@@ -215,7 +215,7 @@ class XCheckboxPeer extends XComponentPeer implements CheckboxPeer {
     }
 
     public void mouseEntered(MouseEvent e) {
-        if (log.isLoggable(PlatformLogger.FINER)) {
+        if (log.isLoggable(PlatformLogger.Level.FINER)) {
             log.finer("mouseEntered() on " + target.getName() + ": armed = " + armed + ", pressed = " + pressed
                       + ", selected = " + selected + ", enabled = " + isEnabled());
         }
@@ -226,7 +226,7 @@ class XCheckboxPeer extends XComponentPeer implements CheckboxPeer {
     }
 
     public void mouseExited(MouseEvent e) {
-        if (log.isLoggable(PlatformLogger.FINER)) {
+        if (log.isLoggable(PlatformLogger.Level.FINER)) {
             log.finer("mouseExited() on " + target.getName() + ": armed = " + armed + ", pressed = " + pressed
                       + ", selected = " + selected + ", enabled = " + isEnabled());
         }
@@ -297,40 +297,33 @@ class XCheckboxPeer extends XComponentPeer implements CheckboxPeer {
 
         double fsize = (double) checkBoxSize;
         myCheckMark = AffineTransform.getScaleInstance(fsize / MASTER_SIZE, fsize / MASTER_SIZE).createTransformedShape(MASTER_CHECKMARK);
-
     }
+    @Override
+    void paintPeer(final Graphics g) {
+        //layout();
+        Dimension size = getPeerSize();
+        Font f = getPeerFont();
+        flush();
+        g.setColor(getPeerBackground());   // erase the existing button
+        g.fillRect(0,0, size.width, size.height);
+        if (label != null) {
+            g.setFont(f);
+            paintText(g, textRect, label);
+        }
 
-    public void paint(Graphics g) {
-        if (g != null) {
-            //layout();
-            Dimension size = getPeerSize();
-            Font f = getPeerFont();
-
-            flush();
-            g.setColor(getPeerBackground());   // erase the existing button
-            g.fillRect(0,0, size.width, size.height);
-
-            if (label != null) {
-                g.setFont(f);
-                paintText(g, textRect, label);
-            }
-
-            if (hasFocus()) {
-                paintFocus(g,
-                           focusRect.x,
-                           focusRect.y,
-                           focusRect.width,
-                           focusRect.height);
-            }
-
-            // Paint the checkbox or radio button
-            if (checkBoxGroup == null) {
-                paintCheckbox(g, cbX, cbY, checkBoxSize, checkBoxSize);
-            }
-            else {
-                paintRadioButton(g, cbX, cbY, checkBoxSize, checkBoxSize);
-            }
-
+        if (hasFocus()) {
+            paintFocus(g,
+                       focusRect.x,
+                       focusRect.y,
+                       focusRect.width,
+                       focusRect.height);
+        }
+        // Paint the checkbox or radio button
+        if (checkBoxGroup == null) {
+            paintCheckbox(g, cbX, cbY, checkBoxSize, checkBoxSize);
+        }
+        else {
+            paintRadioButton(g, cbX, cbY, checkBoxSize, checkBoxSize);
         }
         flush();
     }

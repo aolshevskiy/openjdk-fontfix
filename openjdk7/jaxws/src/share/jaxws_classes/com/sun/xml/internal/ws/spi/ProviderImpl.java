@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@ package com.sun.xml.internal.ws.spi;
 
 import com.sun.xml.internal.ws.api.BindingID;
 import com.sun.xml.internal.ws.api.WSService;
+import com.sun.xml.internal.ws.api.ServiceSharedFeatureMarker;
 import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
 import com.sun.xml.internal.ws.api.addressing.WSEndpointReference;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLPort;
@@ -98,11 +99,16 @@ public class ProviderImpl extends Provider {
 
     public ServiceDelegate createServiceDelegate( URL wsdlDocumentLocation, QName serviceName, Class serviceClass,
                                                   WebServiceFeature ... features) {
-        if (features.length > 0) {
+        for (WebServiceFeature feature : features) {
+            if (!(feature instanceof ServiceSharedFeatureMarker))
             throw new WebServiceException("Doesn't support any Service specific features");
         }
-        return new WSServiceDelegate(wsdlDocumentLocation, serviceName, serviceClass);
+        return new WSServiceDelegate(wsdlDocumentLocation, serviceName, serviceClass, features);
     }
+
+    public ServiceDelegate createServiceDelegate( Source wsdlSource, QName serviceName, Class serviceClass) {
+        return new WSServiceDelegate(wsdlSource, serviceName, serviceClass);
+   }
 
     @Override
     public Endpoint createAndPublishEndpoint(String address,
@@ -161,7 +167,7 @@ public class ProviderImpl extends Provider {
         WSEndpointReference.Metadata metadata = wsepr.getMetaData();
         WSService service;
         if(metadata.getWsdlSource() != null)
-            service = new WSServiceDelegate(metadata.getWsdlSource(), metadata.getServiceName(), Service.class);
+            service = (WSService) createServiceDelegate(metadata.getWsdlSource(), metadata.getServiceName(), Service.class);
         else
             throw new WebServiceException("WSDL metadata is missing in EPR");
         return service.getPort(wsepr, clazz, webServiceFeatures);
@@ -232,6 +238,10 @@ public class ProviderImpl extends Provider {
             } catch (Exception e) {
                 throw new IllegalStateException(ProviderApiMessages.ERROR_WSDL(wsdlDocumentLocation),e);
             }
+        }
+        //wcf3.0/3.5 rejected empty metadata element.
+        if (metadata != null && metadata.size() == 0) {
+           metadata = null;
         }
         return new WSEndpointReference(
             AddressingVersion.fromSpecClass(W3CEndpointReference.class),

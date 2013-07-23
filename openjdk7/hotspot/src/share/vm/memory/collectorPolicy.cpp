@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,72 +37,54 @@
 #include "runtime/globals_extension.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/java.hpp"
+#include "runtime/thread.inline.hpp"
 #include "runtime/vmThread.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/concurrentMarkSweep/cmsAdaptiveSizePolicy.hpp"
 #include "gc_implementation/concurrentMarkSweep/cmsGCAdaptivePolicyCounters.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 // CollectorPolicy methods.
 
 void CollectorPolicy::initialize_flags() {
-  if (PermSize > MaxPermSize) {
-    MaxPermSize = PermSize;
-  }
-  PermSize = MAX2(min_alignment(), align_size_down_(PermSize, min_alignment()));
-  // Don't increase Perm size limit above specified.
-  MaxPermSize = align_size_down(MaxPermSize, max_alignment());
-  if (PermSize > MaxPermSize) {
-    PermSize = MaxPermSize;
+  assert(max_alignment() >= min_alignment(),
+      err_msg("max_alignment: " SIZE_FORMAT " less than min_alignment: " SIZE_FORMAT,
+          max_alignment(), min_alignment()));
+  assert(max_alignment() % min_alignment() == 0,
+      err_msg("max_alignment: " SIZE_FORMAT " not aligned by min_alignment: " SIZE_FORMAT,
+          max_alignment(), min_alignment()));
+
+  if (MaxHeapSize < InitialHeapSize) {
+    vm_exit_during_initialization("Incompatible initial and maximum heap sizes specified");
   }
 
-  MinPermHeapExpansion = MAX2(min_alignment(), align_size_down_(MinPermHeapExpansion, min_alignment()));
-  MaxPermHeapExpansion = MAX2(min_alignment(), align_size_down_(MaxPermHeapExpansion, min_alignment()));
+  if (MetaspaceSize > MaxMetaspaceSize) {
+    MaxMetaspaceSize = MetaspaceSize;
+  }
+  MetaspaceSize = MAX2(min_alignment(), align_size_down_(MetaspaceSize, min_alignment()));
+  // Don't increase Metaspace size limit above specified.
+  MaxMetaspaceSize = align_size_down(MaxMetaspaceSize, max_alignment());
+  if (MetaspaceSize > MaxMetaspaceSize) {
+    MetaspaceSize = MaxMetaspaceSize;
+  }
+
+  MinMetaspaceExpansion = MAX2(min_alignment(), align_size_down_(MinMetaspaceExpansion, min_alignment()));
+  MaxMetaspaceExpansion = MAX2(min_alignment(), align_size_down_(MaxMetaspaceExpansion, min_alignment()));
 
   MinHeapDeltaBytes = align_size_up(MinHeapDeltaBytes, min_alignment());
 
-  SharedReadOnlySize = align_size_up(SharedReadOnlySize, max_alignment());
-  SharedReadWriteSize = align_size_up(SharedReadWriteSize, max_alignment());
-  SharedMiscDataSize = align_size_up(SharedMiscDataSize, max_alignment());
-
-  assert(PermSize    % min_alignment() == 0, "permanent space alignment");
-  assert(MaxPermSize % max_alignment() == 0, "maximum permanent space alignment");
-  assert(SharedReadOnlySize % max_alignment() == 0, "read-only space alignment");
-  assert(SharedReadWriteSize % max_alignment() == 0, "read-write space alignment");
-  assert(SharedMiscDataSize % max_alignment() == 0, "misc-data space alignment");
-  if (PermSize < M) {
-    vm_exit_during_initialization("Too small initial permanent heap");
+  assert(MetaspaceSize    % min_alignment() == 0, "metapace alignment");
+  assert(MaxMetaspaceSize % max_alignment() == 0, "maximum metaspace alignment");
+  if (MetaspaceSize < 256*K) {
+    vm_exit_during_initialization("Too small initial Metaspace size");
   }
 }
 
 void CollectorPolicy::initialize_size_info() {
-  // User inputs from -mx and ms are aligned
-  set_initial_heap_byte_size(InitialHeapSize);
-  if (initial_heap_byte_size() == 0) {
-    set_initial_heap_byte_size(NewSize + OldSize);
-  }
-  set_initial_heap_byte_size(align_size_up(_initial_heap_byte_size,
-                                           min_alignment()));
-
-  set_min_heap_byte_size(Arguments::min_heap_size());
-  if (min_heap_byte_size() == 0) {
-    set_min_heap_byte_size(NewSize + OldSize);
-  }
-  set_min_heap_byte_size(align_size_up(_min_heap_byte_size,
-                                       min_alignment()));
-
+  // User inputs from -mx and ms must be aligned
+  set_min_heap_byte_size(align_size_up(Arguments::min_heap_size(), min_alignment()));
+  set_initial_heap_byte_size(align_size_up(InitialHeapSize, min_alignment()));
   set_max_heap_byte_size(align_size_up(MaxHeapSize, max_alignment()));
 
   // Check heap parameter properties
@@ -131,18 +113,6 @@ void CollectorPolicy::initialize_size_info() {
     gclog_or_tty->print_cr("Minimum heap " SIZE_FORMAT "  Initial heap "
       SIZE_FORMAT "  Maximum heap " SIZE_FORMAT,
       min_heap_byte_size(), initial_heap_byte_size(), max_heap_byte_size());
-  }
-}
-
-void CollectorPolicy::initialize_perm_generation(PermGen::Name pgnm) {
-  _permanent_generation =
-    new PermanentGenerationSpec(pgnm, PermSize, MaxPermSize,
-                                SharedReadOnlySize,
-                                SharedReadWriteSize,
-                                SharedMiscDataSize,
-                                SharedMiscCodeSize);
-  if (_permanent_generation == NULL) {
-    vm_exit_during_initialization("Unable to allocate gen spec");
   }
 }
 
@@ -197,11 +167,11 @@ size_t GenCollectorPolicy::bound_minus_alignment(size_t desired_size,
 void GenCollectorPolicy::initialize_size_policy(size_t init_eden_size,
                                                 size_t init_promo_size,
                                                 size_t init_survivor_size) {
-  const double max_gc_minor_pause_sec = ((double) MaxGCMinorPauseMillis)/1000.0;
+  const double max_gc_pause_sec = ((double) MaxGCPauseMillis)/1000.0;
   _size_policy = new AdaptiveSizePolicy(init_eden_size,
                                         init_promo_size,
                                         init_survivor_size,
-                                        max_gc_minor_pause_sec,
+                                        max_gc_pause_sec,
                                         GCTimeRatio);
 }
 
@@ -230,9 +200,6 @@ void GenCollectorPolicy::initialize_flags() {
   // All sizes must be multiples of the generation granularity.
   set_min_alignment((uintx) Generation::GenGrain);
   set_max_alignment(compute_max_alignment());
-  assert(max_alignment() >= min_alignment() &&
-         max_alignment() % min_alignment() == 0,
-         "invalid alignment constraints");
 
   CollectorPolicy::initialize_flags();
 
@@ -262,9 +229,60 @@ void TwoGenerationCollectorPolicy::initialize_flags() {
   GenCollectorPolicy::initialize_flags();
 
   OldSize = align_size_down(OldSize, min_alignment());
-  if (NewSize + OldSize > MaxHeapSize) {
-    MaxHeapSize = NewSize + OldSize;
+
+  if (FLAG_IS_CMDLINE(OldSize) && FLAG_IS_DEFAULT(NewSize)) {
+    // NewRatio will be used later to set the young generation size so we use
+    // it to calculate how big the heap should be based on the requested OldSize
+    // and NewRatio.
+    assert(NewRatio > 0, "NewRatio should have been set up earlier");
+    size_t calculated_heapsize = (OldSize / NewRatio) * (NewRatio + 1);
+
+    calculated_heapsize = align_size_up(calculated_heapsize, max_alignment());
+    MaxHeapSize = calculated_heapsize;
+    InitialHeapSize = calculated_heapsize;
   }
+  MaxHeapSize = align_size_up(MaxHeapSize, max_alignment());
+
+  // adjust max heap size if necessary
+  if (NewSize + OldSize > MaxHeapSize) {
+    if (FLAG_IS_CMDLINE(MaxHeapSize)) {
+      // somebody set a maximum heap size with the intention that we should not
+      // exceed it. Adjust New/OldSize as necessary.
+      uintx calculated_size = NewSize + OldSize;
+      double shrink_factor = (double) MaxHeapSize / calculated_size;
+      // align
+      NewSize = align_size_down((uintx) (NewSize * shrink_factor), min_alignment());
+      // OldSize is already aligned because above we aligned MaxHeapSize to
+      // max_alignment(), and we just made sure that NewSize is aligned to
+      // min_alignment(). In initialize_flags() we verified that max_alignment()
+      // is a multiple of min_alignment().
+      OldSize = MaxHeapSize - NewSize;
+    } else {
+      MaxHeapSize = NewSize + OldSize;
+    }
+  }
+  // need to do this again
+  MaxHeapSize = align_size_up(MaxHeapSize, max_alignment());
+
+  // adjust max heap size if necessary
+  if (NewSize + OldSize > MaxHeapSize) {
+    if (FLAG_IS_CMDLINE(MaxHeapSize)) {
+      // somebody set a maximum heap size with the intention that we should not
+      // exceed it. Adjust New/OldSize as necessary.
+      uintx calculated_size = NewSize + OldSize;
+      double shrink_factor = (double) MaxHeapSize / calculated_size;
+      // align
+      NewSize = align_size_down((uintx) (NewSize * shrink_factor), min_alignment());
+      // OldSize is already aligned because above we aligned MaxHeapSize to
+      // max_alignment(), and we just made sure that NewSize is aligned to
+      // min_alignment(). In initialize_flags() we verified that max_alignment()
+      // is a multiple of min_alignment().
+      OldSize = MaxHeapSize - NewSize;
+    } else {
+      MaxHeapSize = NewSize + OldSize;
+    }
+  }
+  // need to do this again
   MaxHeapSize = align_size_up(MaxHeapSize, max_alignment());
 
   always_do_update_barrier = UseConcMarkSweepGC;
@@ -414,14 +432,15 @@ void GenCollectorPolicy::initialize_size_info() {
 // keeping it simple also seems a worthwhile goal.
 bool TwoGenerationCollectorPolicy::adjust_gen0_sizes(size_t* gen0_size_ptr,
                                                      size_t* gen1_size_ptr,
-                                                     size_t heap_size,
-                                                     size_t min_gen0_size) {
+                                                     const size_t heap_size,
+                                                     const size_t min_gen1_size) {
   bool result = false;
+
   if ((*gen1_size_ptr + *gen0_size_ptr) > heap_size) {
-    if (((*gen0_size_ptr + OldSize) > heap_size) &&
-       (heap_size - min_gen0_size) >= min_alignment()) {
-      // Adjust gen0 down to accomodate OldSize
-      *gen0_size_ptr = heap_size - min_gen0_size;
+    if ((heap_size < (*gen0_size_ptr + min_gen1_size)) &&
+        (heap_size >= min_gen1_size + min_alignment())) {
+      // Adjust gen0 down to accommodate min_gen1_size
+      *gen0_size_ptr = heap_size - min_gen1_size;
       *gen0_size_ptr =
         MAX2((uintx)align_size_down(*gen0_size_ptr, min_alignment()),
              min_alignment());
@@ -548,7 +567,7 @@ HeapWord* GenCollectorPolicy::mem_allocate_work(size_t size,
 
   // Loop until the allocation is satisified,
   // or unsatisfied after GC.
-  for (int try_count = 1; /* return or throw */; try_count += 1) {
+  for (int try_count = 1, gclocker_stalled_count = 0; /* return or throw */; try_count += 1) {
     HandleMark hm; // discard any handles allocated in each iteration
 
     // First allocation attempt is lock-free.
@@ -592,6 +611,10 @@ HeapWord* GenCollectorPolicy::mem_allocate_work(size_t size,
           }
         }
 
+        if (gclocker_stalled_count > GCLockerRetryAllocationCount) {
+          return NULL; // we didn't get to do a GC and we didn't get any memory
+        }
+
         // If this thread is not in a jni critical section, we stall
         // the requestor until the critical section has cleared and
         // GC allowed. When the critical section clears, a GC is
@@ -603,6 +626,7 @@ HeapWord* GenCollectorPolicy::mem_allocate_work(size_t size,
           MutexUnlocker mul(Heap_lock);
           // Wait for JNI critical section to be exited
           GC_locker::stall_until_clear();
+          gclocker_stalled_count += 1;
           continue;
         } else {
           if (CheckJNICalls) {
@@ -636,7 +660,7 @@ HeapWord* GenCollectorPolicy::mem_allocate_work(size_t size,
 
       const bool limit_exceeded = size_policy()->gc_overhead_limit_exceeded();
       const bool softrefs_clear = all_soft_refs_clear();
-      assert(!limit_exceeded || softrefs_clear, "Should have been cleared");
+
       if (limit_exceeded && softrefs_clear) {
         *gc_overhead_limit_was_exceeded = true;
         size_policy()->set_gc_overhead_limit_exceeded(false);
@@ -728,7 +752,7 @@ HeapWord* GenCollectorPolicy::satisfy_failed_allocation(size_t size,
   // free memory should be here, especially if they are expensive. If this
   // attempt fails, an OOM exception will be thrown.
   {
-    IntFlagSetting flag_change(MarkSweepAlwaysCompactCount, 1); // Make sure the heap is fully compacted
+    UIntFlagSetting flag_change(MarkSweepAlwaysCompactCount, 1); // Make sure the heap is fully compacted
 
     gch->do_collection(true             /* full */,
                        true             /* clear_all_soft_refs */,
@@ -751,6 +775,81 @@ HeapWord* GenCollectorPolicy::satisfy_failed_allocation(size_t size,
   // complete compaction phase than we've tried so far might be
   // appropriate.
   return NULL;
+}
+
+MetaWord* CollectorPolicy::satisfy_failed_metadata_allocation(
+                                                 ClassLoaderData* loader_data,
+                                                 size_t word_size,
+                                                 Metaspace::MetadataType mdtype) {
+  uint loop_count = 0;
+  uint gc_count = 0;
+  uint full_gc_count = 0;
+
+  assert(!Heap_lock->owned_by_self(), "Should not be holding the Heap_lock");
+
+  do {
+    MetaWord* result = NULL;
+    if (GC_locker::is_active_and_needs_gc()) {
+      // If the GC_locker is active, just expand and allocate.
+      // If that does not succeed, wait if this thread is not
+      // in a critical section itself.
+      result =
+        loader_data->metaspace_non_null()->expand_and_allocate(word_size,
+                                                               mdtype);
+      if (result != NULL) {
+        return result;
+      }
+      JavaThread* jthr = JavaThread::current();
+      if (!jthr->in_critical()) {
+        // Wait for JNI critical section to be exited
+        GC_locker::stall_until_clear();
+        // The GC invoked by the last thread leaving the critical
+        // section will be a young collection and a full collection
+        // is (currently) needed for unloading classes so continue
+        // to the next iteration to get a full GC.
+        continue;
+      } else {
+        if (CheckJNICalls) {
+          fatal("Possible deadlock due to allocating while"
+                " in jni critical section");
+        }
+        return NULL;
+      }
+    }
+
+    {  // Need lock to get self consistent gc_count's
+      MutexLocker ml(Heap_lock);
+      gc_count      = Universe::heap()->total_collections();
+      full_gc_count = Universe::heap()->total_full_collections();
+    }
+
+    // Generate a VM operation
+    VM_CollectForMetadataAllocation op(loader_data,
+                                       word_size,
+                                       mdtype,
+                                       gc_count,
+                                       full_gc_count,
+                                       GCCause::_metadata_GC_threshold);
+    VMThread::execute(&op);
+
+    // If GC was locked out, try again.  Check
+    // before checking success because the prologue
+    // could have succeeded and the GC still have
+    // been locked out.
+    if (op.gc_locked()) {
+      continue;
+    }
+
+    if (op.prologue_succeeded()) {
+      return op.result();
+    }
+    loop_count++;
+    if ((QueuedAllocationWarningCount > 0) &&
+        (loop_count % QueuedAllocationWarningCount == 0)) {
+      warning("satisfy_failed_metadata_allocation() retries %d times \n\t"
+              " size=%d", loop_count, word_size);
+    }
+  } while (true);  // Until a GC is done
 }
 
 // Return true if any of the following is true:
@@ -778,12 +877,11 @@ MarkSweepPolicy::MarkSweepPolicy() {
 }
 
 void MarkSweepPolicy::initialize_generations() {
-  initialize_perm_generation(PermGen::MarkSweepCompact);
-  _generations = new GenerationSpecPtr[number_of_generations()];
+  _generations = NEW_C_HEAP_ARRAY3(GenerationSpecPtr, number_of_generations(), mtGC, 0, AllocFailStrategy::RETURN_NULL);
   if (_generations == NULL)
     vm_exit_during_initialization("Unable to allocate gen spec");
 
-  if (UseParNewGC && ParallelGCThreads > 0) {
+  if (UseParNewGC) {
     _generations[0] = new GenerationSpec(Generation::ParNew, _initial_gen0_size, _max_gen0_size);
   } else {
     _generations[0] = new GenerationSpec(Generation::DefNew, _initial_gen0_size, _max_gen0_size);
@@ -796,10 +894,9 @@ void MarkSweepPolicy::initialize_generations() {
 
 void MarkSweepPolicy::initialize_gc_policy_counters() {
   // initialize the policy counters - 2 collectors, 3 generations
-  if (UseParNewGC && ParallelGCThreads > 0) {
+  if (UseParNewGC) {
     _gc_policy_counters = new GCPolicyCounters("ParNew:MSC", 2, 3);
-  }
-  else {
+  } else {
     _gc_policy_counters = new GCPolicyCounters("Copy:MSC", 2, 3);
   }
 }

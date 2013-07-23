@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -134,10 +134,8 @@ public class LocalVirtualMachine {
         try {
             host = MonitoredHost.getMonitoredHost(new HostIdentifier((String)null));
             vms = host.activeVms();
-        } catch (java.net.URISyntaxException sx) {
-            throw new InternalError(sx.getMessage());
-        } catch (MonitorException mx) {
-            throw new InternalError(mx.getMessage());
+        } catch (java.net.URISyntaxException | MonitorException x) {
+            throw new InternalError(x.getMessage(), x);
         }
         for (Object vmid: vms) {
             if (vmid instanceof Integer) {

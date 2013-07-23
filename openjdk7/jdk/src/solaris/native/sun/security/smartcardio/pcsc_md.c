@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,8 +32,6 @@
 
 #include <winscard.h>
 
-#include <jni_util.h>
-
 #include "sun_security_smartcardio_PlatformPCSC.h"
 
 #include "pcsc_md.h"
@@ -50,12 +48,39 @@ FPTR_SCardBeginTransaction scardBeginTransaction;
 FPTR_SCardEndTransaction scardEndTransaction;
 FPTR_SCardControl scardControl;
 
+/*
+ * Throws a Java Exception by name
+ */
+void throwByName(JNIEnv *env, const char *name, const char *msg)
+{
+    jclass cls = (*env)->FindClass(env, name);
+
+    if (cls != 0) /* Otherwise an exception has already been thrown */
+        (*env)->ThrowNew(env, cls, msg);
+}
+
+/*
+ * Throws java.lang.NullPointerException
+ */
+void throwNullPointerException(JNIEnv *env, const char *msg)
+{
+    throwByName(env, "java/lang/NullPointerException", msg);
+}
+
+/*
+ * Throws java.io.IOException
+ */
+void throwIOException(JNIEnv *env, const char *msg)
+{
+    throwByName(env, "java/io/IOException", msg);
+}
+
 void *findFunction(JNIEnv *env, void *hModule, char *functionName) {
     void *fAddress = dlsym(hModule, functionName);
     if (fAddress == NULL) {
         char errorMessage[256];
         snprintf(errorMessage, sizeof(errorMessage), "Symbol not found: %s", functionName);
-        JNU_ThrowNullPointerException(env, errorMessage);
+        throwNullPointerException(env, errorMessage);
         return NULL;
     }
     return fAddress;
@@ -68,7 +93,7 @@ JNIEXPORT void JNICALL Java_sun_security_smartcardio_PlatformPCSC_initialize
     (*env)->ReleaseStringUTFChars(env, jLibName, libName);
 
     if (hModule == NULL) {
-        JNU_ThrowIOException(env, dlerror());
+        throwIOException(env, dlerror());
         return;
     }
     scardEstablishContext = (FPTR_SCardEstablishContext)findFunction(env, hModule, "SCardEstablishContext");

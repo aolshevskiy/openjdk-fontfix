@@ -45,6 +45,7 @@ import sun.java2d.pipe.Region;
 import sun.java2d.pipe.RenderBuffer;
 import sun.java2d.pipe.RenderQueue;
 import static sun.java2d.pipe.BufferedOpCodes.*;
+import java.lang.annotation.Native;
 
 class OGLBlitLoops {
 
@@ -187,12 +188,12 @@ class OGLBlitLoops {
      * createPackedParams().  (They are also used at the native level when
      * unpacking the params.)
      */
-    private static final int OFFSET_SRCTYPE = 16;
-    private static final int OFFSET_HINT    =  8;
-    private static final int OFFSET_TEXTURE =  3;
-    private static final int OFFSET_RTT     =  2;
-    private static final int OFFSET_XFORM   =  1;
-    private static final int OFFSET_ISOBLIT =  0;
+    @Native private static final int OFFSET_SRCTYPE = 16;
+    @Native private static final int OFFSET_HINT    =  8;
+    @Native private static final int OFFSET_TEXTURE =  3;
+    @Native private static final int OFFSET_RTT     =  2;
+    @Native private static final int OFFSET_XFORM   =  1;
+    @Native private static final int OFFSET_ISOBLIT =  0;
 
     /**
      * Packs the given parameters into a single int value in order to save
@@ -791,10 +792,10 @@ class OGLAnyCompositeBlit extends Blit {
 
         // convert source to IntArgbPre
         SurfaceData dstBuffer = convertFrom(convertdst, dst, dx, dy, w, h,
-                                            cachedDst, BufferedImage.TYPE_INT_ARGB_PRE);
+                          cachedDst, BufferedImage.TYPE_INT_ARGB_PRE);
 
         Blit performop = Blit.getFromCache(src.getSurfaceType(),
-        CompositeType.Any, dstBuffer.getSurfaceType());
+                CompositeType.Any, dstBuffer.getSurfaceType());
 
         performop.Blit(src, dstBuffer, comp, clip,
                        sx, sy, 0, 0, w, h);
@@ -806,9 +807,9 @@ class OGLAnyCompositeBlit extends Blit {
 
         // now blit the buffer back to the destination
         convertdst = Blit.getFromCache(dstBuffer.getSurfaceType(),
-                                       CompositeType.SrcNoEa,
-                                       dst.getSurfaceType());
+                                            CompositeType.SrcNoEa,
+                                            dst.getSurfaceType());
         convertdst.Blit(dstBuffer, dst, AlphaComposite.Src,
-                        clip, 0, 0, dx, dy, w, h);
+                 clip, 0, 0, dx, dy, w, h);
     }
 }

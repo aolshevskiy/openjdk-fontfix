@@ -30,11 +30,12 @@ import java.io.ObjectInputStream;
 import java.lang.ref.SoftReference;
 import java.security.AccessController;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.SimpleTimeZone;
 import java.util.TimeZone;
 
@@ -78,19 +79,6 @@ public class ZoneInfo extends TimeZone {
     // this bit field is reserved for abbreviation support
     private static final long ABBR_MASK = 0xf00L;
     private static final int TRANSITION_NSHIFT = 12;
-
-    // Flag for supporting JDK backward compatible IDs, such as "EST".
-    static final boolean USE_OLDMAPPING;
-    static {
-      String oldmapping = AccessController.doPrivileged(
-          new sun.security.action.GetPropertyAction("sun.timezone.ids.oldmapping", "false")).toLowerCase(Locale.ROOT);
-      USE_OLDMAPPING = (oldmapping.equals("yes") || oldmapping.equals("true"));
-    }
-
-    // IDs having conflicting data between Olson and JDK 1.1
-    static final String[] conflictingIDs = {
-        "EST", "MST", "HST"
-    };
 
     private static final CalendarSystem gcal = CalendarSystem.getGregorianCalendar();
 
@@ -323,7 +311,7 @@ public class ZoneInfo extends TimeZone {
         return offset;
     }
 
-    private final int getTransitionIndex(long date, int type) {
+    private int getTransitionIndex(long date, int type) {
         int low = 0;
         int high = transitions.length - 1;
 
@@ -522,7 +510,7 @@ public class ZoneInfo extends TimeZone {
         SimpleTimeZone tz = getLastRule();
         if (tz != null) {
             return tz.inDaylightTime(date);
-        }
+       }
         return false;
     }
 
@@ -573,17 +561,7 @@ public class ZoneInfo extends TimeZone {
      * @return an array of time zone IDs.
      */
     public static String[] getAvailableIDs() {
-        List<String> idList = ZoneInfoFile.getZoneIDs();
-        List<String> excluded = ZoneInfoFile.getExcludedZones();
-        if (excluded != null) {
-            // List all zones from the idList and excluded lists
-            List<String> list = new ArrayList<String>(idList.size() + excluded.size());
-            list.addAll(idList);
-            list.addAll(excluded);
-            idList = list;
-        }
-        String[] ids = new String[idList.size()];
-        return idList.toArray(ids);
+        return ZoneInfoFile.getZoneIds();
     }
 
     /**
@@ -596,45 +574,7 @@ public class ZoneInfo extends TimeZone {
      * @return an array of time zone IDs.
      */
     public static String[] getAvailableIDs(int rawOffset) {
-        String[] result;
-        List<String> matched = new ArrayList<String>();
-        List<String> IDs = ZoneInfoFile.getZoneIDs();
-        int[] rawOffsets = ZoneInfoFile.getRawOffsets();
-
-    loop:
-        for (int index = 0; index < rawOffsets.length; index++) {
-            if (rawOffsets[index] == rawOffset) {
-                byte[] indices = ZoneInfoFile.getRawOffsetIndices();
-                for (int i = 0; i < indices.length; i++) {
-                    if (indices[i] == index) {
-                        matched.add(IDs.get(i++));
-                        while (i < indices.length && indices[i] == index) {
-                            matched.add(IDs.get(i++));
-                        }
-                        break loop;
-                    }
-                }
-            }
-        }
-
-        // We need to add any zones from the excluded zone list that
-        // currently have the same GMT offset as the specified
-        // rawOffset. The zones returned by this method may not be
-        // correct as of return to the caller if any GMT offset
-        // transition is happening during this GMT offset checking...
-        List<String> excluded = ZoneInfoFile.getExcludedZones();
-        if (excluded != null) {
-            for (String id : excluded) {
-                TimeZone zi = getTimeZone(id);
-                if (zi != null && zi.getRawOffset() == rawOffset) {
-                    matched.add(id);
-                }
-            }
-        }
-
-        result = new String[matched.size()];
-        matched.toArray(result);
-        return result;
+        return ZoneInfoFile.getZoneIds(rawOffset);
     }
 
     /**
@@ -646,44 +586,7 @@ public class ZoneInfo extends TimeZone {
      * time zone of the ID.
      */
     public static TimeZone getTimeZone(String ID) {
-        String givenID = null;
-
-        /*
-         * If old JDK compatibility is specified, get the old alias
-         * name.
-         */
-        if (USE_OLDMAPPING) {
-            String compatibleID = TzIDOldMapping.MAP.get(ID);
-            if (compatibleID != null) {
-                givenID = ID;
-                ID = compatibleID;
-            }
-        }
-
-        ZoneInfo zi = ZoneInfoFile.getZoneInfo(ID);
-        if (zi == null) {
-            // if we can't create an object for the ID, try aliases.
-            try {
-                Map<String, String> map = getAliasTable();
-                String alias = ID;
-                while ((alias = map.get(alias)) != null) {
-                    zi = ZoneInfoFile.getZoneInfo(alias);
-                    if (zi != null) {
-                        zi.setID(ID);
-                        zi = ZoneInfoFile.addToCache(ID, zi);
-                        zi = (ZoneInfo) zi.clone();
-                        break;
-                    }
-                }
-            } catch (Exception e) {
-                // ignore exceptions
-            }
-        }
-
-        if (givenID != null && zi != null) {
-            zi.setID(givenID);
-        }
-        return zi;
+        return ZoneInfoFile.getZoneInfo(ID);
     }
 
     private transient SimpleTimeZone lastRule;
@@ -812,18 +715,6 @@ public class ZoneInfo extends TimeZone {
         return (checksum == ((ZoneInfo)other).checksum);
     }
 
-    private static SoftReference<Map<String, String>> aliasTable;
-
-    static Map<String, String> getCachedAliasTable() {
-        Map<String, String> aliases = null;
-
-        SoftReference<Map<String, String>> cache = aliasTable;
-        if (cache != null) {
-            aliases = cache.get();
-        }
-        return aliases;
-    }
-
     /**
      * Returns a Map from alias time zone IDs to their standard
      * time zone IDs.
@@ -832,21 +723,8 @@ public class ZoneInfo extends TimeZone {
      *    to their standard time zone IDs, or null if
      *    <code>ZoneInfoMappings</code> file is not available.
      */
-    public synchronized static Map<String, String> getAliasTable() {
-        Map<String, String> aliases = getCachedAliasTable();
-        if (aliases == null) {
-            aliases = ZoneInfoFile.getZoneAliases();
-            if (aliases != null) {
-                if (!USE_OLDMAPPING) {
-                    // Remove the conflicting IDs from the alias table.
-                    for (String key : conflictingIDs) {
-                        aliases.remove(key);
-                    }
-                }
-                aliasTable = new SoftReference<Map<String, String>>(aliases);
-            }
-        }
-        return aliases;
+    public static Map<String, String> getAliasTable() {
+         return ZoneInfoFile.getAliasMap();
     }
 
     private void readObject(ObjectInputStream stream)

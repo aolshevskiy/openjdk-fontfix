@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -126,6 +126,14 @@ class HeapWord {
  public:
   char* value() { return i; }
 #endif
+};
+
+// Analogous opaque struct for metadata allocated from
+// metaspaces.
+class MetaWord {
+  friend class VMStructs;
+ private:
+  char* i;
 };
 
 // HeapWordSize must be 2^LogHeapWordSize.
@@ -272,6 +280,10 @@ inline size_t pointer_delta(const void* left,
 inline size_t pointer_delta(const HeapWord* left, const HeapWord* right) {
   return pointer_delta(left, right, sizeof(HeapWord));
 }
+// A version specialized for MetaWord*'s.
+inline size_t pointer_delta(const MetaWord* left, const MetaWord* right) {
+  return pointer_delta(left, right, sizeof(MetaWord));
+}
 
 //
 // ANSI C++ does not allow casting from one pointer type to a function pointer
@@ -316,6 +328,13 @@ const int max_method_code_size = 64*K - 1;  // JVM spec, 2nd ed. section 4.8.1 (
 
 
 //----------------------------------------------------------------------------------------------------
+// Default and minimum StringTableSize values
+
+const int defaultStringTableSize = NOT_LP64(1009) LP64_ONLY(60013);
+const int minimumStringTableSize=1009;
+
+
+//----------------------------------------------------------------------------------------------------
 // HotSwap - for JVMTI   aka Class File Replacement and PopFrame
 //
 // Determines whether on-the-fly class replacement and frame popping are enabled.
@@ -335,6 +354,14 @@ extern int MinObjAlignmentInBytesMask;
 extern int LogMinObjAlignment;
 extern int LogMinObjAlignmentInBytes;
 
+const int LogKlassAlignmentInBytes = 3;
+const int LogKlassAlignment        = LogKlassAlignmentInBytes - LogHeapWordSize;
+const int KlassAlignmentInBytes    = 1 << LogKlassAlignmentInBytes;
+const int KlassAlignment           = KlassAlignmentInBytes / HeapWordSize;
+
+// Klass encoding metaspace max size
+const uint64_t KlassEncodingMetaspaceMax = (uint64_t(max_juint) + 1) << LogKlassAlignmentInBytes;
+
 // Machine dependent stuff
 
 #ifdef TARGET_ARCH_x86
@@ -353,6 +380,14 @@ extern int LogMinObjAlignmentInBytes;
 # include "globalDefinitions_ppc.hpp"
 #endif
 
+/*
+ * If a platform does not support native stack walking
+ * the platform specific globalDefinitions (above)
+ * can set PLATFORM_NATIVE_STACK_WALKING_SUPPORTED to 0
+ */
+#ifndef PLATFORM_NATIVE_STACK_WALKING_SUPPORTED
+#define PLATFORM_NATIVE_STACK_WALKING_SUPPORTED 1
+#endif
 
 // The byte alignment to be used by Arena::Amalloc.  See bugid 4169348.
 // Note: this value must be a power of 2
@@ -392,6 +427,24 @@ inline bool is_object_aligned(intptr_t addr) {
 inline intptr_t align_object_offset(intptr_t offset) {
   return align_size_up(offset, HeapWordsPerLong);
 }
+
+// Clamp an address to be within a specific page
+// 1. If addr is on the page it is returned as is
+// 2. If addr is above the page_address the start of the *next* page will be returned
+// 3. Otherwise, if addr is below the page_address the start of the page will be returned
+inline address clamp_address_in_page(address addr, address page_address, intptr_t page_size) {
+  if (align_size_down(intptr_t(addr), page_size) == align_size_down(intptr_t(page_address), page_size)) {
+    // address is in the specified page, just return it as is
+    return addr;
+  } else if (addr > page_address) {
+    // address is above specified page, return start of next page
+    return (address)align_size_down(intptr_t(page_address), page_size) + page_size;
+  } else {
+    // address is below specified page, return start of page
+    return (address)align_size_down(intptr_t(page_address), page_size);
+  }
+}
+
 
 // The expected size in bytes of a cache line, used to pad data structures.
 #define DEFAULT_CACHE_LINE_SIZE 64
@@ -469,21 +522,23 @@ void basic_types_init(); // cannot define here; uses assert
 
 // NOTE: replicated in SA in vm/agent/sun/jvm/hotspot/runtime/BasicType.java
 enum BasicType {
-  T_BOOLEAN  =  4,
-  T_CHAR     =  5,
-  T_FLOAT    =  6,
-  T_DOUBLE   =  7,
-  T_BYTE     =  8,
-  T_SHORT    =  9,
-  T_INT      = 10,
-  T_LONG     = 11,
-  T_OBJECT   = 12,
-  T_ARRAY    = 13,
-  T_VOID     = 14,
-  T_ADDRESS  = 15,
-  T_NARROWOOP= 16,
-  T_CONFLICT = 17, // for stack value type with conflicting contents
-  T_ILLEGAL  = 99
+  T_BOOLEAN     =  4,
+  T_CHAR        =  5,
+  T_FLOAT       =  6,
+  T_DOUBLE      =  7,
+  T_BYTE        =  8,
+  T_SHORT       =  9,
+  T_INT         = 10,
+  T_LONG        = 11,
+  T_OBJECT      = 12,
+  T_ARRAY       = 13,
+  T_VOID        = 14,
+  T_ADDRESS     = 15,
+  T_NARROWOOP   = 16,
+  T_METADATA    = 17,
+  T_NARROWKLASS = 18,
+  T_CONFLICT    = 19, // for stack value type with conflicting contents
+  T_ILLEGAL     = 99
 };
 
 inline bool is_java_primitive(BasicType t) {
@@ -531,18 +586,19 @@ extern size_t lcm(size_t a, size_t b);
 
 // NOTE: replicated in SA in vm/agent/sun/jvm/hotspot/runtime/BasicType.java
 enum BasicTypeSize {
-  T_BOOLEAN_size = 1,
-  T_CHAR_size    = 1,
-  T_FLOAT_size   = 1,
-  T_DOUBLE_size  = 2,
-  T_BYTE_size    = 1,
-  T_SHORT_size   = 1,
-  T_INT_size     = 1,
-  T_LONG_size    = 2,
-  T_OBJECT_size  = 1,
-  T_ARRAY_size   = 1,
-  T_NARROWOOP_size = 1,
-  T_VOID_size    = 0
+  T_BOOLEAN_size     = 1,
+  T_CHAR_size        = 1,
+  T_FLOAT_size       = 1,
+  T_DOUBLE_size      = 2,
+  T_BYTE_size        = 1,
+  T_SHORT_size       = 1,
+  T_INT_size         = 1,
+  T_LONG_size        = 2,
+  T_OBJECT_size      = 1,
+  T_ARRAY_size       = 1,
+  T_NARROWOOP_size   = 1,
+  T_NARROWKLASS_size = 1,
+  T_VOID_size        = 0
 };
 
 
@@ -554,23 +610,24 @@ extern BasicType type2wfield[T_CONFLICT+1];
 
 // size in bytes
 enum ArrayElementSize {
-  T_BOOLEAN_aelem_bytes = 1,
-  T_CHAR_aelem_bytes    = 2,
-  T_FLOAT_aelem_bytes   = 4,
-  T_DOUBLE_aelem_bytes  = 8,
-  T_BYTE_aelem_bytes    = 1,
-  T_SHORT_aelem_bytes   = 2,
-  T_INT_aelem_bytes     = 4,
-  T_LONG_aelem_bytes    = 8,
+  T_BOOLEAN_aelem_bytes     = 1,
+  T_CHAR_aelem_bytes        = 2,
+  T_FLOAT_aelem_bytes       = 4,
+  T_DOUBLE_aelem_bytes      = 8,
+  T_BYTE_aelem_bytes        = 1,
+  T_SHORT_aelem_bytes       = 2,
+  T_INT_aelem_bytes         = 4,
+  T_LONG_aelem_bytes        = 8,
 #ifdef _LP64
-  T_OBJECT_aelem_bytes  = 8,
-  T_ARRAY_aelem_bytes   = 8,
+  T_OBJECT_aelem_bytes      = 8,
+  T_ARRAY_aelem_bytes       = 8,
 #else
-  T_OBJECT_aelem_bytes  = 4,
-  T_ARRAY_aelem_bytes   = 4,
+  T_OBJECT_aelem_bytes      = 4,
+  T_ARRAY_aelem_bytes       = 4,
 #endif
-  T_NARROWOOP_aelem_bytes = 4,
-  T_VOID_aelem_bytes    = 0
+  T_NARROWOOP_aelem_bytes   = 4,
+  T_NARROWKLASS_aelem_bytes = 4,
+  T_VOID_aelem_bytes        = 0
 };
 
 extern int _type2aelembytes[T_CONFLICT+1]; // maps a BasicType to nof bytes used by its array element
@@ -785,6 +842,10 @@ inline bool is_highest_tier_compile(int comp_level) {
   return comp_level == CompLevel_highest_tier;
 }
 
+inline bool is_compile(int comp_level) {
+  return is_c1_compile(comp_level) || is_c2_compile(comp_level);
+}
+
 //----------------------------------------------------------------------------------------------------
 // 'Forward' declarations of frequently used classes
 // (in order to reduce interface dependencies & reduce
@@ -842,6 +903,7 @@ class PeriodicTask;
 class JavaCallWrapper;
 
 class   oopDesc;
+class   metaDataOopDesc;
 
 class NativeCall;
 
@@ -899,6 +961,7 @@ const int      freeBlockPad     = 0xBA;                     // value used to pad
 const int      uninitBlockPad   = 0xF1;                     // value used to zap newly malloc'd blocks.
 const intptr_t badJNIHandleVal  = (intptr_t) CONST64(0xFEFEFEFEFEFEFEFE); // value used to zap jni handle area
 const juint    badHeapWordVal   = 0xBAADBABE;               // value used to zap heap after GC
+const juint    badMetaWordVal   = 0xBAADFADE;               // value used to zap metadata heap after GC
 const int      badCodeHeapNewVal= 0xCC;                     // value used to zap Code heap at allocation
 const int      badCodeHeapFreeVal = 0xDD;                   // value used to zap Code heap at deallocation
 
@@ -1206,6 +1269,14 @@ inline int build_int_from_shorts( jushort low, jushort high ) {
 
 #define PTR64_FORMAT           "0x%016" PRIx64
 
+// Format jlong, if necessary
+#ifndef JLONG_FORMAT
+#define JLONG_FORMAT           INT64_FORMAT
+#endif
+#ifndef JULONG_FORMAT
+#define JULONG_FORMAT          UINT64_FORMAT
+#endif
+
 // Format pointers which change size between 32- and 64-bit.
 #ifdef  _LP64
 #define INTPTR_FORMAT "0x%016" PRIxPTR
@@ -1235,5 +1306,24 @@ inline int build_int_from_shorts( jushort low, jushort high ) {
 # endif /* ASSERT */
 
 #define ARRAY_SIZE(array) (sizeof(array)/sizeof((array)[0]))
+
+// Dereference vptr
+// All C++ compilers that we know of have the vtbl pointer in the first
+// word.  If there are exceptions, this function needs to be made compiler
+// specific.
+static inline void* dereference_vptr(void* addr) {
+  return *(void**)addr;
+}
+
+
+#ifndef PRODUCT
+
+// For unit testing only
+class GlobalDefinitions {
+public:
+  static void test_globals();
+};
+
+#endif // PRODUCT
 
 #endif // SHARE_VM_UTILITIES_GLOBALDEFINITIONS_HPP

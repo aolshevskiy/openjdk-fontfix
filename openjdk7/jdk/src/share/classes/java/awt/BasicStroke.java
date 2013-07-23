@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
 package java.awt;
 
 import java.beans.ConstructorProperties;
+
+import java.lang.annotation.Native;
 
 /**
  * The <code>BasicStroke</code> class defines a basic set of rendering
@@ -115,39 +117,39 @@ public class BasicStroke implements Stroke {
      * Joins path segments by extending their outside edges until
      * they meet.
      */
-    public final static int JOIN_MITER = 0;
+    @Native public final static int JOIN_MITER = 0;
 
     /**
      * Joins path segments by rounding off the corner at a radius
      * of half the line width.
      */
-    public final static int JOIN_ROUND = 1;
+    @Native public final static int JOIN_ROUND = 1;
 
     /**
      * Joins path segments by connecting the outer corners of their
      * wide outlines with a straight segment.
      */
-    public final static int JOIN_BEVEL = 2;
+    @Native public final static int JOIN_BEVEL = 2;
 
     /**
      * Ends unclosed subpaths and dash segments with no added
      * decoration.
      */
-    public final static int CAP_BUTT = 0;
+    @Native public final static int CAP_BUTT = 0;
 
     /**
      * Ends unclosed subpaths and dash segments with a round
      * decoration that has a radius equal to half of the width
      * of the pen.
      */
-    public final static int CAP_ROUND = 1;
+    @Native public final static int CAP_ROUND = 1;
 
     /**
      * Ends unclosed subpaths and dash segments with a square
      * projection that extends beyond the end of the segment
      * to a distance equal to half of the line width.
      */
-    public final static int CAP_SQUARE = 2;
+    @Native public final static int CAP_SQUARE = 2;
 
     float width;
 

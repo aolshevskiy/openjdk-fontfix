@@ -43,7 +43,7 @@
 
 static void *awtHandle = NULL;
 
-typedef JNIEXPORT jint JNICALL JNI_OnLoad_type(JavaVM *vm, void *reserved);
+typedef jint JNICALL JNI_OnLoad_type(JavaVM *vm, void *reserved);
 
 /* Initialize the Java VM instance variable when the library is
    first loaded */
@@ -73,18 +73,38 @@ JNIEXPORT jboolean JNICALL AWTIsHeadless() {
     return isHeadless;
 }
 
+/*
+ * Pathnames to the various awt toolkits
+ */
+
+
+#ifdef MACOSX
+  #define XAWT_PATH "/libawt_xawt.dylib"
+  #define LWAWT_PATH "/libawt_lwawt.dylib"
+  #define DEFAULT_PATH LWAWT_PATH
+  #define HEADLESS_PATH "/libawt_headless.dylib"
+#else
+  #define XAWT_PATH "/libawt_xawt.so"
+  #define DEFAULT_PATH XAWT_PATH
+  #define HEADLESS_PATH "/libawt_headless.so"
+#endif
+
 jint
 AWT_OnLoad(JavaVM *vm, void *reserved)
 {
     Dl_info dlinfo;
     char buf[MAXPATHLEN];
     int32_t len;
-    char *p, *tk = 0;
+    char *p, *tk;
     JNI_OnLoad_type *JNI_OnLoad_ptr;
     struct utsname name;
     JNIEnv *env = (JNIEnv *)JNU_GetEnv(vm, JNI_VERSION_1_2);
     void *v;
     char *envvar;
+    int xt_before_xm = 0;
+    int XAWT = 0;
+    jstring toolkit = NULL;
+    jstring propname = NULL;
     jstring fmanager = NULL;
     jstring fmProp = NULL;
 
@@ -102,53 +122,70 @@ AWT_OnLoad(JavaVM *vm, void *reserved)
     p = strrchr(buf, '/');
 
     /*
-     * 1. Set the "sun.font.fontmanager" system property,
-     * 2. Choose the library image name.
+     * The code below is responsible for:
+     * 1. Loading appropriate awt library, i.e. libawt_xawt or libawt_headless
+     * 2. Setting "awt.toolkit" system property to use the appropriate Java toolkit class,
+     *    (if user has specified the toolkit in env varialble)
      */
 
+    propname = (*env)->NewStringUTF(env, "awt.toolkit");
     fmProp = (*env)->NewStringUTF(env, "sun.font.fontmanager");
+    tk = DEFAULT_PATH; /* default value, may be changed below */
+
     /* Check if toolkit is specified in env variable */
-#ifdef MACOSX
     envvar = getenv("AWT_TOOLKIT");
-    if (envvar && strstr(envvar, "XToolkit")) {
-#endif
+    if (envvar && (strstr(envvar, "XToolkit"))) {
+        toolkit = (*env)->NewStringUTF(env, "sun.awt.X11.XToolkit");
+        tk = XAWT_PATH;
         fmanager = (*env)->NewStringUTF(env, "sun.awt.X11FontManager");
-        tk = "/xawt/libmawt";
 #ifdef MACOSX
     } else {
         fmanager = (*env)->NewStringUTF(env, "sun.font.CFontManager");
-        tk = "/lwawt/liblwawt";
-    }
+        tk = LWAWT_PATH;
 #endif
+    }
+    /* If user specified toolkit then set java system property */
+    if (toolkit && propname) {
+        JNU_CallStaticMethodByName (env,
+                    NULL,
+                    "java/lang/System",
+                    "setProperty",
+                    "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                    propname,toolkit);
+    }
     if (fmanager && fmProp) {
-        JNU_CallStaticMethodByName(env, NULL, "java/lang/System", "setProperty",
-                                   "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-                                   fmProp, fmanager);
+        JNU_CallStaticMethodByName (env,
+                    NULL,
+                    "java/lang/System",
+                        "setProperty",
+                    "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                    fmProp, fmanager);
     }
 
     /* Calculate library name to load */
-#ifndef MACOSX
     if (AWTIsHeadless()) {
-        strcpy(p, "/headless/libmawt");
-    } else if (tk) {
-#endif
-        strcpy(p, tk);
-#ifndef MACOSX
+        tk = HEADLESS_PATH;
     }
-#endif
+    strncpy(p, tk, MAXPATHLEN-len-1);
 
-#ifdef MACOSX
-    strcat(p, ".dylib");
-#else
-    strcat(p, ".so");
-#endif
-
-    if (tk) {
-        JNU_CallStaticMethodByName(env, NULL, "java/lang/System", "load",
-                                   "(Ljava/lang/String;)V",
-                                   JNU_NewStringPlatform(env, buf));
-            awtHandle = dlopen(buf, RTLD_LAZY | RTLD_GLOBAL);
+    if (toolkit) {
+        (*env)->DeleteLocalRef(env, toolkit);
     }
+    if (propname) {
+        (*env)->DeleteLocalRef(env, propname);
+    }
+    if (fmProp) {
+        (*env)->DeleteLocalRef(env, fmProp);
+    }
+    if (fmanager) {
+        (*env)->DeleteLocalRef(env, fmanager);
+    }
+
+    JNU_CallStaticMethodByName(env, NULL, "java/lang/System", "load",
+                               "(Ljava/lang/String;)V",
+                               JNU_NewStringPlatform(env, buf));
+
+    awtHandle = dlopen(buf, RTLD_LAZY | RTLD_GLOBAL);
 
     return JNI_VERSION_1_2;
 }
@@ -162,14 +199,14 @@ JNI_OnLoad(JavaVM *vm, void *reserved)
 /*
  * This entry point must remain in libawt.so as part of a contract
  * with the CDE variant of Java Media Framework. (sdtjmplay)
- * Reflect this call over to the correct libmawt.so.
+ * Reflect this call over to the correct libawt_<toolkit>.so.
  */
 JNIEXPORT void JNICALL
 Java_sun_awt_motif_XsessionWMcommand(JNIEnv *env, jobject this,
                                      jobject frame, jstring jcommand)
 {
     /* type of the old backdoor function */
-    typedef JNIEXPORT void JNICALL
+    typedef void JNICALL
         XsessionWMcommand_type(JNIEnv *env, jobject this,
                                jobject frame, jstring jcommand);
 
@@ -192,12 +229,12 @@ Java_sun_awt_motif_XsessionWMcommand(JNIEnv *env, jobject this,
 /*
  * This entry point must remain in libawt.so as part of a contract
  * with the CDE variant of Java Media Framework. (sdtjmplay)
- * Reflect this call over to the correct libmawt.so.
+ * Reflect this call over to the correct libawt_<toolkit>.so.
  */
 JNIEXPORT void JNICALL
 Java_sun_awt_motif_XsessionWMcommand_New(JNIEnv *env, jobjectArray jargv)
 {
-    typedef JNIEXPORT void JNICALL
+    typedef void JNICALL
         XsessionWMcommand_New_type(JNIEnv *env, jobjectArray jargv);
 
     static XsessionWMcommand_New_type *XsessionWMcommand = NULL;
@@ -251,11 +288,7 @@ return_type name arglist                                                \
 
 /*
  * These entry point must remain in libawt.so ***for Java Plugin ONLY***
- * Reflect this call over to the correct libmawt.so.
- */
-
-/*
- * TODO: implement for LWCToolkit, MacOSX
+ * Reflect this call over to the correct libawt_<toolkit>.so.
  */
 
 REFLECT_VOID_FUNCTION(getAwtLockFunctions,

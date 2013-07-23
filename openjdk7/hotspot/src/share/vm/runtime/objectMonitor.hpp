@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -312,6 +312,18 @@ public:
  public:
   static int Knob_Verbose;
   static int Knob_SpinLimit;
+  void* operator new (size_t size) {
+    return AllocateHeap(size, mtInternal);
+  }
+  void* operator new[] (size_t size) {
+    return operator new (size);
+  }
+  void operator delete(void* p) {
+    FreeHeap(p, mtInternal);
+  }
+  void operator delete[] (void *p) {
+    operator delete(p);
+  }
 };
 
 #undef TEVENT

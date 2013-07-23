@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,11 +27,14 @@ package com.sun.tools.internal.ws.wscompile;
 
 import com.sun.codemodel.internal.CodeWriter;
 import com.sun.codemodel.internal.writer.ProgressCodeWriter;
+import com.sun.istack.internal.tools.DefaultAuthenticator;
 import com.sun.tools.internal.ws.ToolVersion;
 import com.sun.tools.internal.ws.api.TJavaGeneratorExtension;
 import com.sun.tools.internal.ws.processor.generator.CustomExceptionGenerator;
+import com.sun.tools.internal.ws.processor.generator.GeneratorBase;
 import com.sun.tools.internal.ws.processor.generator.SeiGenerator;
 import com.sun.tools.internal.ws.processor.generator.ServiceGenerator;
+import com.sun.tools.internal.ws.processor.generator.JwsImplGenerator;
 import com.sun.tools.internal.ws.processor.model.Model;
 import com.sun.tools.internal.ws.processor.modeler.wsdl.ConsoleErrorReporter;
 import com.sun.tools.internal.ws.processor.modeler.wsdl.WSDLModeler;
@@ -53,9 +56,11 @@ import javax.xml.stream.*;
 import javax.xml.ws.EndpointContext;
 import java.io.*;
 import java.util.*;
-import java.net.Authenticator;
+import java.text.MessageFormat;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
+import org.xml.sax.Locator;
+import org.xml.sax.SAXException;
 
 /**
  * @author Vivek Pandey
@@ -68,7 +73,7 @@ public class WsimportTool {
     /**
      * Wsimport specific options
      */
-    private final WsimportOptions options = new WsimportOptions();
+    protected WsimportOptions options = new WsimportOptions();
 
     public WsimportTool(OutputStream out) {
         this(out, null);
@@ -79,132 +84,121 @@ public class WsimportTool {
         this.container = container;
     }
 
-    public boolean run(String[] args) {
-        class Listener extends WsimportListener {
-            ConsoleErrorReporter cer = new ConsoleErrorReporter(out == null ? new PrintStream(new NullStream()) : out);
+    protected class Listener extends WsimportListener {
+        ConsoleErrorReporter cer = new ConsoleErrorReporter(out == null ? new PrintStream(new NullStream()) : out);
 
-            @Override
-            public void generatedFile(String fileName) {
-                message(fileName);
-            }
+        @Override
+        public void generatedFile(String fileName) {
+            message(fileName);
+        }
 
-            @Override
-            public void message(String msg) {
-                out.println(msg);
-            }
+        @Override
+        public void message(String msg) {
+            out.println(msg);
+        }
 
-            @Override
-            public void error(SAXParseException exception) {
-                cer.error(exception);
-            }
+        @Override
+        public void error(SAXParseException exception) {
+            cer.error(exception);
+        }
 
-            @Override
-            public void fatalError(SAXParseException exception) {
-                cer.fatalError(exception);
-            }
+        @Override
+        public void fatalError(SAXParseException exception) {
+            cer.fatalError(exception);
+        }
 
-            @Override
-            public void warning(SAXParseException exception) {
-                cer.warning(exception);
-            }
+        @Override
+        public void warning(SAXParseException exception) {
+            cer.warning(exception);
+        }
 
-            @Override
-            public void debug(SAXParseException exception) {
-                cer.debug(exception);
-            }
+        @Override
+        public void debug(SAXParseException exception) {
+            cer.debug(exception);
+        }
 
-            @Override
-            public void info(SAXParseException exception) {
-                cer.info(exception);
-            }
+        @Override
+        public void info(SAXParseException exception) {
+            cer.info(exception);
+        }
 
-            public void enableDebugging(){
-                cer.enableDebugging();
+        public void enableDebugging(){
+            cer.enableDebugging();
+        }
+    }
+
+    protected class Receiver extends ErrorReceiverFilter {
+
+        private Listener listener;
+
+        public Receiver(Listener listener) {
+            super(listener);
+            this.listener = listener;
+        }
+
+        @Override
+        public void info(SAXParseException exception) {
+            if (options.verbose)
+                super.info(exception);
+        }
+
+        @Override
+        public void warning(SAXParseException exception) {
+            if (!options.quiet)
+                super.warning(exception);
+        }
+
+        @Override
+        public void pollAbort() throws AbortException {
+            if (listener.isCanceled())
+                throw new AbortException();
+        }
+
+        @Override
+        public void debug(SAXParseException exception){
+            if(options.debugMode){
+                listener.debug(exception);
             }
         }
-        final Listener listener = new Listener();
-        ErrorReceiverFilter receiver = new ErrorReceiverFilter(listener) {
-            public void info(SAXParseException exception) {
-                if (options.verbose)
-                    super.info(exception);
-            }
+    }
 
-            public void warning(SAXParseException exception) {
-                if (!options.quiet)
-                    super.warning(exception);
-            }
+    public boolean run(String[] args) {
+        Listener listener = new Listener();
+        Receiver receiver = new Receiver(listener);
+        return run(args, listener, receiver);
+    }
 
-            @Override
-            public void pollAbort() throws AbortException {
-                if (listener.isCanceled())
-                    throw new AbortException();
-            }
-
-            @Override
-            public void debug(SAXParseException exception){
-                if(options.debugMode){
-                    listener.debug(exception);
-                }
-            }
-        };
-
+    protected boolean run(String[] args, Listener listener,
+                       Receiver receiver) {
         for (String arg : args) {
             if (arg.equals("-version")) {
-                listener.message(ToolVersion.VERSION.BUILD_VERSION);
+                listener.message(
+                        WscompileMessages.WSIMPORT_VERSION(ToolVersion.VERSION.MAJOR_VERSION));
+                return true;
+            }
+            if (arg.equals("-fullversion")) {
+                listener.message(
+                        WscompileMessages.WSIMPORT_FULLVERSION(ToolVersion.VERSION.toString()));
                 return true;
             }
         }
+
         try {
-            options.parseArguments(args);
-            options.validate();
-            if(options.debugMode)
-                listener.enableDebugging();
-            options.parseBindings(receiver);
+            parseArguments(args, listener, receiver);
 
             try {
-                if( !options.quiet )
-                    listener.message(WscompileMessages.WSIMPORT_PARSING_WSDL());
+                Model wsdlModel = buildWsdlModel(listener, receiver);
+                if (wsdlModel == null)
+                   return false;
 
-                //set auth info
-                //if(options.authFile != null)
-                    Authenticator.setDefault(new DefaultAuthenticator(receiver, options.authFile));
+                if (!generateCode(listener, receiver, wsdlModel, true))
+                   return false;
 
-                MetadataFinder forest = new MetadataFinder(new WSDLInternalizationLogic(), options, receiver);
-                forest.parseWSDL();
-                if (forest.isMexMetadata)
-                    receiver.reset();
-
-                WSDLModeler wsdlModeler = new WSDLModeler(options, receiver,forest);
-                Model wsdlModel = wsdlModeler.buildModel();
-                if (wsdlModel == null) {
-                    listener.message(WsdlMessages.PARSING_PARSE_FAILED());
-                    return false;
-                }
-
-                if(options.clientjar != null) {
-                    if( !options.quiet )
-                        listener.message(WscompileMessages.WSIMPORT_FETCHING_METADATA());
-                    options.wsdlLocation = new WSDLFetcher(options,listener).fetchWsdls(forest);
-                }
-
-                //generated code
-                if( !options.quiet )
-                    listener.message(WscompileMessages.WSIMPORT_GENERATING_CODE());
-
-                TJavaGeneratorExtension[] genExtn = ServiceFinder.find(TJavaGeneratorExtension.class).toArray();
-                CustomExceptionGenerator.generate(wsdlModel,  options, receiver);
-                SeiGenerator.generate(wsdlModel, options, receiver, genExtn);
-                if(receiver.hadError()){
-                    throw new AbortException();
-                }
-                ServiceGenerator.generate(wsdlModel, options, receiver);
-                CodeWriter cw = new WSCodeWriter(options.sourceDir, options);
-                if (options.verbose)
-                    cw = new ProgressCodeWriter(cw, out);
-                options.getCodeModel().build(cw);
+                /* Not so fast!
             } catch(AbortException e){
                 //error might have been reported
-                return false;
+                 *
+                 */
             }catch (IOException e) {
                 receiver.error(e);
                 return false;
@@ -212,7 +206,6 @@ public class WsimportTool {
                 receiver.error(e);
                 return false;
             }
-
             if (!options.nocompile){
                 if(!compileGeneratedClasses(receiver, listener)){
                     listener.message(WscompileMessages.WSCOMPILE_COMPILATION_FAILED());
@@ -230,6 +223,7 @@ public class WsimportTool {
                 receiver.error(e);
                 return false;
             }
+
         } catch (Options.WeAreDone done) {
             usage(done.getOptions());
         } catch (BadCommandLineException e) {
@@ -241,7 +235,9 @@ public class WsimportTool {
             return false;
         } finally{
             deleteGeneratedFiles();
-
+            if (!options.disableAuthenticator) {
+                DefaultAuthenticator.reset();
+            }
         }
         if(receiver.hadError()) {
             return false;
@@ -258,11 +254,12 @@ public class WsimportTool {
             synchronized (generatedFiles) {
                 for (File file : generatedFiles) {
                     if (!file.getName().endsWith(".java")) {
-                        file.delete();
+                        boolean deleted = file.delete();
+                        if (options.verbose && !deleted) {
+                            System.out.println(MessageFormat.format("{0} could not be deleted.", file));
+                        }
                         trackedRootPackages.add(file.getParentFile());
-
                     }
-
                 }
             }
             //remove empty package dirs
@@ -270,7 +267,10 @@ public class WsimportTool {
 
                 while(pkg.list() != null && pkg.list().length ==0 && !pkg.equals(options.destDir)) {
                     File parentPkg = pkg.getParentFile();
-                    pkg.delete();
+                    boolean deleted = pkg.delete();
+                    if (options.verbose && !deleted) {
+                        System.out.println(MessageFormat.format("{0} could not be deleted.", pkg));
+                    }
                     pkg = parentPkg;
                 }
             }
@@ -278,7 +278,6 @@ public class WsimportTool {
         if(!options.keep) {
             options.removeGeneratedFiles();
         }
-
     }
 
     private void addClassesToGeneratedFiles() throws IOException {
@@ -291,7 +290,7 @@ public class WsimportTool {
                 File classDir = new File(options.destDir,relativeDir);
                 if(classDir.exists()) {
                     classDir.listFiles(new FilenameFilter() {
-
+                        @Override
                         public boolean accept(File dir, String name) {
                             if(name.equals(className+".class") || (name.startsWith(className+"$") && name.endsWith(".class"))) {
                                 trackedClassFiles.add(new File(dir,name));
@@ -314,85 +313,188 @@ public class WsimportTool {
             zipFile = new File(options.destDir, options.clientjar);
         }
 
-        if (zipFile.exists()) {
-            //TODO
-        }
-        FileOutputStream fos = null;
-        if( !options.quiet )
+        FileOutputStream fos;
+        if (!options.quiet) {
             listener.message(WscompileMessages.WSIMPORT_ARCHIVING_ARTIFACTS(zipFile));
+        }
 
-
+        BufferedInputStream bis = null;
+        FileInputStream fi = null;
         fos = new FileOutputStream(zipFile);
         JarOutputStream jos = new JarOutputStream(fos);
-
-        String base = options.destDir.getCanonicalPath();
-        for(File f: options.getGeneratedFiles()) {
-            //exclude packaging the java files in the jar
-            if(f.getName().endsWith(".java")) {
-                continue;
+        try {
+            String base = options.destDir.getCanonicalPath();
+            for(File f: options.getGeneratedFiles()) {
+                //exclude packaging the java files in the jar
+                if(f.getName().endsWith(".java")) {
+                    continue;
+                }
+                if(options.verbose) {
+                    listener.message(WscompileMessages.WSIMPORT_ARCHIVE_ARTIFACT(f, options.clientjar));
+                }
+                String entry = f.getCanonicalPath().substring(base.length()+1);
+                fi = new FileInputStream(f);
+                bis = new BufferedInputStream(fi);
+                JarEntry jarEntry = new JarEntry(entry);
+                jos.putNextEntry(jarEntry);
+                int bytesRead;
+                byte[] buffer = new byte[1024];
+                while ((bytesRead = bis.read(buffer)) != -1) {
+                    jos.write(buffer, 0, bytesRead);
+                }
             }
-            if(options.verbose) {
-                listener.message(WscompileMessages.WSIMPORT_ARCHIVE_ARTIFACT(f, options.clientjar));
+        } finally {
+            try {
+                if (bis != null) {
+                    bis.close();
+                }
+            } finally {
+                if (jos != null) {
+                    jos.close();
+                }
+                if (fi != null) {
+                    fi.close();
+                }
             }
-            String entry = f.getCanonicalPath().substring(base.length()+1);
-            BufferedInputStream bis = new BufferedInputStream(
-                            new FileInputStream(f));
-            JarEntry jarEntry = new JarEntry(entry);
-            jos.putNextEntry(jarEntry);
-            int bytesRead;
-            byte[] buffer = new byte[1024];
-            while ((bytesRead = bis.read(buffer)) != -1) {
-                jos.write(buffer, 0, bytesRead);
-            }
-            bis.close();
-
         }
-
-        jos.close();
-
     }
 
-    /*
-    private void jarArtifacts() throws IOException {
-        File zipFile = new File(options.clientjar);
-        if(!zipFile.isAbsolute()) {
-            zipFile = new File(options.destDir, options.clientjar);
-        }
-
-        if (zipFile.exists()) {
-            //TODO
-        }
-        FileOutputStream fos = null;
-
-        fos = new FileOutputStream(zipFile);
-        JarOutputStream jos = new JarOutputStream(fos);
-        addFileToJar(jos, options.destDir, "");
-        jos.close();
+    protected void parseArguments(String[] args, Listener listener,
+                                  Receiver receiver) throws BadCommandLineException {
+        options.parseArguments(args);
+        options.validate();
+        if (options.debugMode)
+            listener.enableDebugging();
+        options.parseBindings(receiver);
     }
 
-    private void addFileToJar(JarOutputStream jos, File file, String name) throws IOException {
-        if(file.isDirectory()) {
-           for(File f: file.listFiles()) {
-               String entryName = name.equals("")?f.getName():name+"/"+f.getName();
-               addFileToJar(jos,f,entryName);
-           }
+    protected Model buildWsdlModel(Listener listener, final Receiver receiver)
+            throws BadCommandLineException, XMLStreamException, IOException {
+        //set auth info
+        //if(options.authFile != null)
+        if (!options.disableAuthenticator) {
+            class AuthListener implements DefaultAuthenticator.Receiver {
+
+                private final boolean isFatal;
+
+                AuthListener(boolean isFatal) {
+                    this.isFatal = isFatal;
+                }
+
+                @Override
+                public void onParsingError(String text, Locator loc) {
+                    error(new SAXParseException(WscompileMessages.WSIMPORT_ILLEGAL_AUTH_INFO(text), loc));
+                }
+
+                @Override
+                public void onError(Exception e, Locator loc) {
+                    if (e instanceof FileNotFoundException) {
+                        error(new SAXParseException(WscompileMessages.WSIMPORT_AUTH_FILE_NOT_FOUND(
+                                loc.getSystemId(), WsimportOptions.defaultAuthfile), null));
+                    } else {
+                        error(new SAXParseException(WscompileMessages.WSIMPORT_FAILED_TO_PARSE(loc.getSystemId(),e.getMessage()), loc));
+                    }
+                }
+
+                private void error(SAXParseException e) {
+                    if (isFatal) {
+                        receiver.error(e);
+                    } else {
+                        receiver.debug(e);
+                    }
+                }
+            }
+
+            DefaultAuthenticator da = DefaultAuthenticator.getAuthenticator();
+            if (options.proxyAuth != null) {
+                da.setProxyAuth(options.proxyAuth);
+            }
+            if (options.authFile != null) {
+                da.setAuth(options.authFile, new AuthListener(true));
+            } else {
+                da.setAuth(new File(WsimportOptions.defaultAuthfile), new AuthListener(false));
+            }
+        }
+
+        if (!options.quiet) {
+            listener.message(WscompileMessages.WSIMPORT_PARSING_WSDL());
+        }
+
+        MetadataFinder forest = new MetadataFinder(new WSDLInternalizationLogic(), options, receiver);
+        forest.parseWSDL();
+        if (forest.isMexMetadata)
+            receiver.reset();
+
+        WSDLModeler wsdlModeler = new WSDLModeler(options, receiver,forest);
+        Model wsdlModel = wsdlModeler.buildModel();
+        if (wsdlModel == null) {
+            listener.message(WsdlMessages.PARSING_PARSE_FAILED());
+        }
+
+        if(options.clientjar != null) {
+            if( !options.quiet )
+                listener.message(WscompileMessages.WSIMPORT_FETCHING_METADATA());
+            options.wsdlLocation = new WSDLFetcher(options,listener).fetchWsdls(forest);
+        }
+
+        return wsdlModel;
+    }
+
+    protected boolean generateCode(Listener listener, Receiver receiver,
+                                   Model wsdlModel, boolean generateService)
+                                   throws IOException {
+        //generated code
+        if( !options.quiet )
+            listener.message(WscompileMessages.WSIMPORT_GENERATING_CODE());
+
+        TJavaGeneratorExtension[] genExtn = ServiceFinder.find(TJavaGeneratorExtension.class).toArray();
+        CustomExceptionGenerator.generate(wsdlModel,  options, receiver);
+            SeiGenerator.generate(wsdlModel, options, receiver, genExtn);
+        if(receiver.hadError()){
+            throw new AbortException();
+        }
+        if (generateService)
+        {
+            ServiceGenerator.generate(wsdlModel, options, receiver);
+        }
+        for (GeneratorBase g : ServiceFinder.find(GeneratorBase.class)) {
+            g.init(wsdlModel, options, receiver);
+            g.doGeneration();
+        }
+
+        List<String> implFiles = null;
+       if (options.isGenerateJWS) {
+                implFiles = JwsImplGenerator.generate(wsdlModel, options, receiver);
+       }
+
+        for (Plugin plugin: options.activePlugins) {
+            try {
+                plugin.run(wsdlModel, options, receiver);
+            } catch (SAXException sex) {
+                // fatal error. error should have been reported
+                return false;
+            }
+        }
+
+        CodeWriter cw;
+        if (options.filer != null) {
+            cw = new FilerCodeWriter(options.sourceDir, options);
         } else {
-            if(name.equals(options.clientjar)) {
-                return;
-            }
-            BufferedInputStream bis = new BufferedInputStream(
-                            new FileInputStream(file));
-            JarEntry entry = new JarEntry(name);
-            jos.putNextEntry(entry);
-            int bytesRead;
-            byte[] buffer = new byte[1024];
-            while ((bytesRead = bis.read(buffer)) != -1) {
-                jos.write(buffer, 0, bytesRead);
-            }
-            bis.close();
+            cw = new WSCodeWriter(options.sourceDir, options);
         }
+
+        if (options.verbose)
+            cw = new ProgressCodeWriter(cw, out);
+        options.getCodeModel().build(cw);
+
+        if (options.isGenerateJWS) {
+                //move Impl files to implDestDir
+                return JwsImplGenerator.moveToImplDestDir(implFiles, options, receiver);
+       }
+
+       return true;
     }
-    */
+
     public void setEntityResolver(EntityResolver resolver){
         this.options.entityResolver = resolver;
     }
@@ -409,7 +511,6 @@ public class WsimportTool {
         }
     }
 
-
     protected boolean compileGeneratedClasses(ErrorReceiver receiver, WsimportListener listener){
         List<String> sourceFiles = new ArrayList<String>();
 
@@ -424,7 +525,7 @@ public class WsimportTool {
             String classpathString = createClasspathString();
             boolean bootCP = useBootClasspath(EndpointContext.class) || useBootClasspath(JAXBPermission.class);
             String[] args = new String[4 + (bootCP ? 1 : 0) + (options.debug ? 1 : 0)
-                    + sourceFiles.size()];
+                    + (options.encoding != null ? 2 : 0) + sourceFiles.size()];
             args[0] = "-d";
             args[1] = classDir;
             args[2] = "-classpath";
@@ -438,13 +539,19 @@ public class WsimportTool {
             if (options.debug) {
                 args[baseIndex++] = "-g";
             }
+
+            if (options.encoding != null) {
+                args[baseIndex++] = "-encoding";
+                args[baseIndex++] = options.encoding;
+            }
+
             for (int i = 0; i < sourceFiles.size(); ++i) {
                 args[baseIndex + i] = sourceFiles.get(i);
             }
 
             listener.message(WscompileMessages.WSIMPORT_COMPILING_CODE());
             if(options.verbose){
-                StringBuffer argstr = new StringBuffer();
+                StringBuilder argstr = new StringBuilder();
                 for(String arg:args){
                     argstr.append(arg).append(" ");
                 }
@@ -458,11 +565,12 @@ public class WsimportTool {
     }
 
     private String createClasspathString() {
-        String classpathStr = System.getProperty("java.class.path");
+        StringBuilder classpathStr = new StringBuilder(System.getProperty("java.class.path"));
         for(String s: options.cmdlineJars) {
-            classpathStr = classpathStr+File.pathSeparator+new File(s);
+            classpathStr.append(File.pathSeparator);
+            classpathStr.append(new File(s).toString());
         }
-        return classpathStr;
+        return classpathStr.toString();
     }
 
     protected void usage(Options options) {

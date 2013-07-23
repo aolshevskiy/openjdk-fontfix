@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,9 @@ import com.sun.xml.internal.ws.server.ServerRtException;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Logger;
@@ -87,16 +89,29 @@ final class ServerMgr {
                     logger.fine("Creating HTTP Context at = "+path);
                     HttpContext context = server.createContext(path);
                     server.start();
+
+                    // we have to get actual inetAddress from server, which can differ from the original in some cases.
+                    // e.g. A port number of zero will let the system pick up an ephemeral port in a bind operation,
+                    // or IP: 0.0.0.0 - which is used to monitor network traffic from any valid IP address
+                    inetAddress = server.getAddress();
+
                     logger.fine("HTTP server started = "+inetAddress);
-                    state = new ServerState(server);
+                    state = new ServerState(server, path);
                     servers.put(inetAddress, state);
                     return context;
                 }
             }
             server = state.getServer();
+
+            if (state.getPaths().contains(url.getPath())) {
+              String err = "Context with URL path "+url.getPath()+ " already exists on the server "+server.getAddress();
+              logger.fine(err);
+              throw new IllegalArgumentException(err);
+            }
+
             logger.fine("Creating HTTP Context at = "+url.getPath());
             HttpContext context = server.createContext(url.getPath());
-            state.oneMoreContext();
+            state.oneMoreContext(url.getPath());
             return context;
         } catch(Exception e) {
             throw new ServerRtException("server.rt.err",e );
@@ -118,7 +133,7 @@ final class ServerMgr {
                 servers.remove(inetAddress);
             } else {
                 state.getServer().removeContext(context);
-                state.oneLessContext();
+                state.oneLessContext(context.getPath());
             }
         }
     }
@@ -126,26 +141,34 @@ final class ServerMgr {
     private static final class ServerState {
         private final HttpServer server;
         private int instances;
+        private Set<String> paths = new HashSet<String>();
 
-        ServerState(HttpServer server) {
+        ServerState(HttpServer server, String path) {
             this.server = server;
             this.instances = 1;
+            paths.add(path);
         }
 
         public HttpServer getServer() {
             return server;
         }
 
-        public void oneMoreContext() {
+        public void oneMoreContext(String path) {
             ++instances;
+            paths.add(path);
         }
 
-        public void oneLessContext() {
+        public void oneLessContext(String path) {
             --instances;
+            paths.remove(path);
         }
 
         public int noOfContexts() {
             return instances;
+        }
+
+        public Set<String> getPaths() {
+          return paths;
         }
     }
 }

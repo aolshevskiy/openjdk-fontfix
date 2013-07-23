@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,8 +37,7 @@ import java.security.SecureRandomSpi;
 public final class PRNG extends SecureRandomSpi
     implements java.io.Serializable {
 
-    // TODO - generate the serialVersionUID
-    //private static final long serialVersionUID = XXX;
+    private static final long serialVersionUID = 4129268715132691532L;
 
     /*
      * The CryptGenRandom function fills a buffer with cryptographically random
@@ -59,6 +58,7 @@ public final class PRNG extends SecureRandomSpi
      *
      * @param seed the seed.
      */
+    @Override
     protected void engineSetSeed(byte[] seed) {
         if (seed != null) {
             generateSeed(-1, seed);
@@ -70,6 +70,7 @@ public final class PRNG extends SecureRandomSpi
      *
      * @param bytes the array to be filled in with random bytes.
      */
+    @Override
     protected void engineNextBytes(byte[] bytes) {
         if (bytes != null) {
             if (generateSeed(0, bytes) == null) {
@@ -86,6 +87,7 @@ public final class PRNG extends SecureRandomSpi
      *
      * @return the seed bytes.
      */
+    @Override
     protected byte[] engineGenerateSeed(int numBytes) {
         byte[] seed = generateSeed(numBytes, null);
 

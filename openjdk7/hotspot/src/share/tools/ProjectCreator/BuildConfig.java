@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -65,6 +65,7 @@ class BuildConfig {
         String sourceBase = getFieldString(null, "SourceBase");
         String buildSpace = getFieldString(null, "BuildSpace");
         String outDir = buildBase;
+        String jdkTargetRoot = getFieldString(null, "JdkTargetRoot");
 
         put("Id", flavourBuild);
         put("OutputDir", outDir);
@@ -72,6 +73,7 @@ class BuildConfig {
         put("BuildBase", buildBase);
         put("BuildSpace", buildSpace);
         put("OutputDll", outDir + Util.sep + outDll);
+        put("JdkTargetRoot", jdkTargetRoot);
 
         context = new String [] {flavourBuild, flavour, build, null};
     }

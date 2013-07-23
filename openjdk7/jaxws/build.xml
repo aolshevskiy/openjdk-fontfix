@@ -48,7 +48,7 @@
     <path id="src.dir.id">
       <pathelement path="${jaxws.src.dir}"/>
       <pathelement path="${jaf.src.dir}"/>
-    </path> 
+    </path>
 
     <!-- Initialization of directories needed for build. -->
     <target name="init">
@@ -73,12 +73,12 @@
             unless="javac.jar.exists">
         <echo message="WARNING: Cannot find ${javac.jar}"/>
     </target>
-
+    
     <!-- Create src.zip. -->
     <target name="-dist-src-zip" depends="init">
         <zip file="${dist.src.zip}" basedir="${jaxws.src.dir}"/>
         <zip file="${dist.src.zip}" basedir="${jaf.src.dir}" update="true"/>
-    </target> 
+    </target>
 
     <!-- Creation of distribution files to jdk build process. -->
     <target name="dist"
@@ -116,16 +116,20 @@
         </replaceregexp>
 
         <mkdir dir="${build.classes.dir}/META-INF/services"/>
+        <copy todir="${build.classes.dir}/META-INF"
+            file="${jaf.src.dir}/META-INF/mailcap.default"/>
+        <copy todir="${build.classes.dir}/META-INF"
+            file="${jaf.src.dir}/META-INF/mimetypes.default"/>
+        <copy todir="${build.classes.dir}/META-INF/services"
+            file="${jaxws.src.dir}/com/sun/tools/etc/META-INF/services/com.sun.tools.internal.ws.wscompile.Plugin"/>
         <copy todir="${build.classes.dir}/META-INF/services"
             file="${jaxws.src.dir}/com/sun/tools/etc/META-INF/services/com.sun.tools.internal.xjc.Plugin"/>
-        <copy todir="${build.classes.dir}/META-INF/services"
-            file="${jaxws.src.dir}/com/sun/tools/etc/META-INF/services/com.sun.mirror.apt.AnnotationProcessorFactory"/>
         <mkdir dir="${build.classes.dir}/com/sun/tools/internal/xjc/runtime"/>
         <copy todir="${build.classes.dir}/com/sun/tools/internal/xjc/runtime">
             <fileset dir="${jaxws.src.dir}/com/sun/tools/internal/xjc/runtime"
                 includes="**/*.java"
                 excludes="**/*.package.html"/>
-        </copy> 
+        </copy>
     </target>
 
     <!-- Build (compilation) of sources to class files. -->

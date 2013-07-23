@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,8 +23,7 @@
  */
 
 #include "precompiled.hpp"
-#include "asm/assembler.inline.hpp"
-#include "assembler_x86.inline.hpp"
+#include "asm/macroAssembler.hpp"
 #include "code/relocInfo.hpp"
 #include "nativeInst_x86.hpp"
 #include "oops/oop.inline.hpp"
@@ -47,10 +46,19 @@ void Relocation::pd_set_data_value(address x, intptr_t o, bool verify_only) {
     }
   } else if (which == Assembler::narrow_oop_operand) {
     address disp = Assembler::locate_operand(addr(), which);
+    // both compressed oops and compressed classes look the same
+    if (Universe::heap()->is_in_reserved((oop)x)) {
     if (verify_only) {
       assert(*(uint32_t*) disp == oopDesc::encode_heap_oop((oop)x), "instructions must match");
     } else {
       *(int32_t*) disp = oopDesc::encode_heap_oop((oop)x);
+    }
+  } else {
+      if (verify_only) {
+        assert(*(uint32_t*) disp == oopDesc::encode_klass((Klass*)x), "instructions must match");
+      } else {
+        *(int32_t*) disp = oopDesc::encode_klass((Klass*)x);
+      }
     }
   } else {
     // Note:  Use runtime_call_type relocations for call32_operand.
@@ -137,12 +145,9 @@ address* Relocation::pd_address_in_code() {
   assert(which == Assembler::disp32_operand ||
          which == Assembler::call32_operand ||
          which == Assembler::imm_operand, "format unpacks ok");
-  if (which != Assembler::imm_operand) {
-    // The "address" in the code is a displacement can't return it as
-    // and address* since it is really a jint*
-    ShouldNotReachHere();
-    return NULL;
-  }
+  // The "address" in the code is a displacement can't return it as
+  // and address* since it is really a jint*
+  guarantee(which == Assembler::imm_operand, "must be immediate operand");
 #else
   assert(which == Assembler::disp32_operand || which == Assembler::imm_operand, "format unpacks ok");
 #endif // AMD64
@@ -170,30 +175,6 @@ address Relocation::pd_get_address_from_code() {
   }
 #endif // AMD64
   return *pd_address_in_code();
-}
-
-int Relocation::pd_breakpoint_size() {
-  // minimum breakpoint size, in short words
-  return NativeIllegalInstruction::instruction_size / sizeof(short);
-}
-
-void Relocation::pd_swap_in_breakpoint(address x, short* instrs, int instrlen) {
-  Untested("pd_swap_in_breakpoint");
-  if (instrs != NULL) {
-    assert(instrlen * sizeof(short) == NativeIllegalInstruction::instruction_size, "enough instrlen in reloc. data");
-    for (int i = 0; i < instrlen; i++) {
-      instrs[i] = ((short*)x)[i];
-    }
-  }
-  NativeIllegalInstruction::insert(x);
-}
-
-
-void Relocation::pd_swap_out_breakpoint(address x, short* instrs, int instrlen) {
-  Untested("pd_swap_out_breakpoint");
-  assert(NativeIllegalInstruction::instruction_size == sizeof(short), "right address unit for update");
-  NativeInstruction* ni = nativeInstruction_at(x);
-  *(short*)ni->addr_at(0) = instrs[0];
 }
 
 void poll_Relocation::fix_relocation_after_move(const CodeBuffer* src, CodeBuffer* dest) {
@@ -238,4 +219,7 @@ void poll_return_Relocation::fix_relocation_after_move(const CodeBuffer* src, Co
     * disp = (int32_t)new_disp;
   }
 #endif // _LP64
+}
+
+void metadata_Relocation::pd_fix_value(address x) {
 }

@@ -138,7 +138,7 @@ class SolarisWatchService
 
         // map of entries in directory; created lazily; accessed only by
         // poller thread.
-        private Map<Path,EntryNode> children;
+        private Map<Path,EntryNode> children = new HashMap<>();
 
         SolarisWatchKey(SolarisWatchService watcher,
                         UnixPath dir,
@@ -177,6 +177,10 @@ class SolarisWatchService
             this.events = events;
         }
 
+        Map<Path,EntryNode> children() {
+            return children;
+        }
+
         @Override
         public boolean isValid() {
             return events != null;
@@ -192,8 +196,6 @@ class SolarisWatchService
 
         @Override
         public void addChild(Path name, EntryNode node) {
-            if (children == null)
-                children = new HashMap<Path,EntryNode>();
             children.put(name, node);
         }
 
@@ -204,9 +206,7 @@ class SolarisWatchService
 
         @Override
         public EntryNode getChild(Path name) {
-            if (children != null)
-                return children.get(name);
-            return null;
+            return children.get(name);
         }
     }
 
@@ -291,12 +291,15 @@ class SolarisWatchService
                 return new NotDirectoryException(dir.getPathForExceptionMessage());
             }
 
-            // return existing watch key after updating events if already
-            // registered
+            // if already registered then update the events and return existing key
             UnixFileKey fileKey = attrs.fileKey();
             SolarisWatchKey watchKey = fileKey2WatchKey.get(fileKey);
             if (watchKey != null) {
-                updateEvents(watchKey, events);
+                try {
+                    updateEvents(watchKey, events);
+                } catch (UnixException x) {
+                    return x.asIOException(dir);
+                }
                 return watchKey;
             }
 
@@ -314,9 +317,26 @@ class SolarisWatchService
             fileKey2WatchKey.put(fileKey, watchKey);
 
             // register all entries in directory
-            registerChildren(dir, watchKey, false);
+            registerChildren(dir, watchKey, false, false);
 
             return watchKey;
+        }
+
+        // release resources for single entry
+        void releaseChild(EntryNode node) {
+            long object = node.object();
+            if (object != 0L) {
+               object2Node.remove(object);
+               releaseObject(object, true);
+               node.setObject(0L);
+           }
+        }
+
+        // release resources for entries in directory
+        void releaseChildren(SolarisWatchKey key) {
+           for (EntryNode node: key.children().values()) {
+               releaseChild(node);
+           }
         }
 
         // cancel single key
@@ -326,15 +346,8 @@ class SolarisWatchService
            if (key.isValid()) {
                fileKey2WatchKey.remove(key.getFileKey());
 
-               // release resources for entries in directory
-               if (key.children != null) {
-                   for (Map.Entry<Path,EntryNode> entry: key.children.entrySet()) {
-                       EntryNode node = entry.getValue();
-                       long object = node.object();
-                       object2Node.remove(object);
-                       releaseObject(object, true);
-                   }
-               }
+               // release resources for entries
+               releaseChildren(key);
 
                // release resources for directory
                long object = key.object();
@@ -486,7 +499,8 @@ class SolarisWatchService
         void processDirectoryEvents(SolarisWatchKey key, int mask) {
             if ((mask & (FILE_MODIFIED | FILE_ATTRIB)) != 0) {
                 registerChildren(key.getDirectory(), key,
-                    key.events().contains(StandardWatchEventKinds.ENTRY_CREATE));
+                    key.events().contains(StandardWatchEventKinds.ENTRY_CREATE),
+                    key.events().contains(StandardWatchEventKinds.ENTRY_DELETE));
             }
         }
 
@@ -509,125 +523,155 @@ class SolarisWatchService
                 key.signalEvent(StandardWatchEventKinds.ENTRY_MODIFY, node.name());
             }
 
-            // entry removed
-            if (((mask & (FILE_REMOVED)) != 0) &&
-                events.contains(StandardWatchEventKinds.ENTRY_DELETE))
-            {
-                // Due to 6636438/6636412 we may get a remove event for cases
-                // where a rmdir/unlink/rename is attempted but fails. Until
-                // this issue is resolved we re-lstat the file to check if it
-                // exists. If it exists then we ignore the event. To keep the
-                // workaround simple we don't check the st_ino so it isn't
-                // effective when the file is replaced.
-                boolean removed = true;
-                try {
-                    UnixFileAttributes
-                        .get(key.getDirectory().resolve(node.name()), false);
-                    removed = false;
-                } catch (UnixException x) { }
 
-                if (removed)
-                    key.signalEvent(StandardWatchEventKinds.ENTRY_DELETE, node.name());
-            }
             return false;
         }
 
         /**
          * Registers all entries in the given directory
          *
-         * The {@code sendEvents} parameter indicates if ENTRY_CREATE events
-         * should be queued when new entries are found. When initially
-         * registering a directory then will always be false. When re-scanning
-         * a directory then it depends on if the event is enabled or not.
+         * The {@code sendCreateEvents} and {@code sendDeleteEvents} parameters
+         * indicates if ENTRY_CREATE and ENTRY_DELETE events should be queued
+         * when new entries are found. When initially registering a directory
+         * they will always be false. When re-scanning a directory then it
+         * depends on if the events are enabled or not.
          */
         void registerChildren(UnixPath dir,
                               SolarisWatchKey parent,
-                              boolean sendEvents)
+                              boolean sendCreateEvents,
+                              boolean sendDeleteEvents)
         {
-            // if the ENTRY_MODIFY event is not enabled then we don't need
-            // modification events for entries in the directory
-            int events = FILE_NOFOLLOW;
-            if (parent.events().contains(StandardWatchEventKinds.ENTRY_MODIFY))
-                events |= (FILE_MODIFIED | FILE_ATTRIB);
+            boolean isModifyEnabled =
+                parent.events().contains(StandardWatchEventKinds.ENTRY_MODIFY) ;
 
-            DirectoryStream<Path> stream = null;
-            try {
-                stream = Files.newDirectoryStream(dir);
-            } catch (IOException x) {
-                // nothing we can do
-                return;
+            // reset visited flag on entries so that we can detect file deletes
+            for (EntryNode node: parent.children().values()) {
+                node.setVisited(false);
             }
-            try {
+
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
                 for (Path entry: stream) {
                     Path name = entry.getFileName();
 
                     // skip entry if already registered
-                    if (parent.getChild(name) != null)
+                    EntryNode node = parent.getChild(name);
+                    if (node != null) {
+                        node.setVisited(true);
                         continue;
-
-                    // send ENTRY_CREATE if enabled
-                    if (sendEvents) {
-                        parent.signalEvent(StandardWatchEventKinds.ENTRY_CREATE, name);
                     }
 
-                    // register it
+                    // new entry found
+
                     long object = 0L;
-                    try {
-                        object = registerImpl((UnixPath)entry, events);
-                    } catch (UnixException x) {
-                        // can't register so ignore for now.
-                        continue;
+                    int errno = 0;
+                    boolean addNode = false;
+
+                    // if ENTRY_MODIFY enabled then we register the entry for events
+                    if (isModifyEnabled) {
+                        try {
+                            UnixPath path = (UnixPath)entry;
+                            int events = (FILE_NOFOLLOW | FILE_MODIFIED | FILE_ATTRIB);
+                            object = registerImpl(path, events);
+                            addNode = true;
+                        } catch (UnixException x) {
+                            errno = x.errno();
+                        }
+                    } else {
+                        addNode = true;
                     }
 
-                    // create node
-                    EntryNode node = new EntryNode(object, entry.getFileName(), parent);
-                    // tell the parent about it
-                    parent.addChild(entry.getFileName(), node);
-                    object2Node.put(object, node);
+                    if (addNode) {
+                        // create node
+                        node = new EntryNode(object, (UnixPath)entry.getFileName(), parent);
+                        node.setVisited(true);
+                        // tell the parent about it
+                        parent.addChild(entry.getFileName(), node);
+                        if (object != 0L)
+                            object2Node.put(object, node);
+                    }
+
+                    // send ENTRY_CREATE event for the new file
+                    // send ENTRY_DELETE event for files that were deleted immediately
+                    boolean deleted = (errno == ENOENT);
+                    if (sendCreateEvents && (addNode || deleted))
+                        parent.signalEvent(StandardWatchEventKinds.ENTRY_CREATE, name);
+                    if (sendDeleteEvents && deleted)
+                        parent.signalEvent(StandardWatchEventKinds.ENTRY_DELETE, name);
+
                 }
-            } catch (ConcurrentModificationException x) {
-                // error during iteration which we ignore for now
-            } finally {
-                try {
-                    stream.close();
-                } catch (IOException x) { }
+            } catch (DirectoryIteratorException | IOException x) {
+                // queue OVERFLOW event so that user knows to re-scan directory
+                parent.signalEvent(StandardWatchEventKinds.OVERFLOW, null);
+                return;
+            }
+
+            // clean-up and send ENTRY_DELETE events for any entries that were
+            // not found
+            Iterator<Map.Entry<Path,EntryNode>> iterator =
+                parent.children().entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<Path,EntryNode> entry = iterator.next();
+                EntryNode node = entry.getValue();
+                if (!node.isVisited()) {
+                    long object = node.object();
+                    if (object != 0L) {
+                        object2Node.remove(object);
+                        releaseObject(object, true);
+                    }
+                    if (sendDeleteEvents)
+                        parent.signalEvent(StandardWatchEventKinds.ENTRY_DELETE, node.name());
+                    iterator.remove();
+                }
             }
         }
 
         /**
-         * Update watch key's events. Where the ENTRY_MODIFY changes then we
-         * need to update the events of registered children.
+         * Update watch key's events. If ENTRY_MODIFY changes to be enabled
+         * then register each file in the direcory; If ENTRY_MODIFY changed to
+         * be disabled then unregister each file.
          */
-        void updateEvents(SolarisWatchKey key, Set<? extends WatchEvent.Kind<?>> events) {
+        void updateEvents(SolarisWatchKey key, Set<? extends WatchEvent.Kind<?>> events)
+            throws UnixException
+        {
+
             // update events, rembering if ENTRY_MODIFY was previously
             // enabled or disabled.
-            boolean wasModifyEnabled = key.events()
+            boolean oldModifyEnabled = key.events()
                 .contains(StandardWatchEventKinds.ENTRY_MODIFY);
             key.setEvents(events);
 
             // check if ENTRY_MODIFY has changed
-            boolean isModifyEnabled = events
+            boolean newModifyEnabled = events
                 .contains(StandardWatchEventKinds.ENTRY_MODIFY);
-            if (wasModifyEnabled == isModifyEnabled) {
-                return;
-            }
-
-            // if changed then update events of children
-            if (key.children != null) {
-                int ev = FILE_NOFOLLOW;
-                if (isModifyEnabled)
-                    ev |= (FILE_MODIFIED | FILE_ATTRIB);
-
-                for (Map.Entry<Path,EntryNode> entry: key.children.entrySet()) {
-                    long object = entry.getValue().object();
-                    try {
-                        portAssociate(port,
-                                      PORT_SOURCE_FILE,
-                                      object,
-                                      ev);
-                    } catch (UnixException x) {
-                        // nothing we can do.
+            if (newModifyEnabled != oldModifyEnabled) {
+                UnixException ex = null;
+                for (EntryNode node: key.children().values()) {
+                    if (newModifyEnabled) {
+                        // register
+                        UnixPath path = key.getDirectory().resolve(node.name());
+                        int ev = (FILE_NOFOLLOW | FILE_MODIFIED | FILE_ATTRIB);
+                        try {
+                            long object = registerImpl(path, ev);
+                            object2Node.put(object, node);
+                            node.setObject(object);
+                        } catch (UnixException x) {
+                            // if file has been deleted then it will be detected
+                            // as a FILE_MODIFIED event on the directory
+                            if (x.errno() != ENOENT) {
+                                ex = x;
+                                break;
+                            }
+                        }
+                    } else {
+                        // unregister
+                        releaseChild(node);
                     }
+                }
+
+                // an error occured
+                if (ex != null) {
+                    releaseChildren(key);
+                    throw ex;
                 }
             }
         }
@@ -715,11 +759,12 @@ class SolarisWatchService
      * An implementation of a node that is an entry in a directory.
      */
     private static class EntryNode implements Node {
-        private final long object;
-        private final Path name;
+        private long object;
+        private final UnixPath name;
         private final DirectoryNode parent;
+        private boolean visited;
 
-        EntryNode(long object, Path name, DirectoryNode parent) {
+        EntryNode(long object, UnixPath name, DirectoryNode parent) {
             this.object = object;
             this.name = name;
             this.parent = parent;
@@ -730,12 +775,24 @@ class SolarisWatchService
             return object;
         }
 
-        Path name() {
+        void setObject(long ptr) {
+            this.object = ptr;
+        }
+
+        UnixPath name() {
             return name;
         }
 
         DirectoryNode parent() {
             return parent;
+        }
+
+        boolean isVisited() {
+            return visited;
+        }
+
+        void setVisited(boolean v) {
+            this.visited = v;
         }
     }
 

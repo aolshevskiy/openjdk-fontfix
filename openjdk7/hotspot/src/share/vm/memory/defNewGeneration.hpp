@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,7 +45,7 @@ class DefNewGeneration: public Generation {
 
 protected:
   Generation* _next_gen;
-  int         _tenuring_threshold;   // Tenuring threshold for next collection.
+  uint        _tenuring_threshold;   // Tenuring threshold for next collection.
   ageTable    _age_table;
   // Size of object to pretenure in words; command line provides bytes
   size_t      _pretenure_size_threshold_words;
@@ -97,8 +97,8 @@ protected:
   Stack<markOop, mtGC> _preserved_marks_of_objs;
 
   // Promotion failure handling
-  OopClosure *_promo_failure_scan_stack_closure;
-  void set_promo_failure_scan_stack_closure(OopClosure *scan_stack_closure) {
+  ExtendedOopClosure *_promo_failure_scan_stack_closure;
+  void set_promo_failure_scan_stack_closure(ExtendedOopClosure *scan_stack_closure) {
     _promo_failure_scan_stack_closure = scan_stack_closure;
   }
 
@@ -128,7 +128,9 @@ protected:
     _should_allocate_from_space = true;
   }
 
- protected:
+  // Tenuring
+  void adjust_desired_tenuring_threshold();
+
   // Spaces
   EdenSpace*       _eden_space;
   ContiguousSpace* _from_space;
@@ -154,7 +156,6 @@ protected:
     Generation* _g;
   public:
     IsAliveClosure(Generation* g);
-    void do_object(oop p);
     bool do_object_b(oop p);
   };
 
@@ -251,7 +252,6 @@ protected:
 
   // Iteration
   void object_iterate(ObjectClosure* blk);
-  void object_iterate_since_last_GC(ObjectClosure* cl);
 
   void younger_refs_iterate(OopsInGenClosure* cl);
 
@@ -333,7 +333,7 @@ protected:
                                 bool parallel = false);
 
   oop copy_to_survivor_space(oop old);
-  int tenuring_threshold() { return _tenuring_threshold; }
+  uint tenuring_threshold() { return _tenuring_threshold; }
 
   // Performance Counter support
   void update_counters();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -348,7 +348,8 @@ public class MessageFormat extends Format {
     private static final long serialVersionUID = 6479157306784022952L;
 
     /**
-     * Constructs a MessageFormat for the default locale and the
+     * Constructs a MessageFormat for the default
+     * {@link java.util.Locale.Category#FORMAT FORMAT} locale and the
      * specified pattern.
      * The constructor first sets the locale, then parses the pattern and
      * creates a list of subformats for the format elements contained in it.
@@ -422,6 +423,7 @@ public class MessageFormat extends Format {
      * @param pattern the pattern for this message format
      * @exception IllegalArgumentException if the pattern is invalid
      */
+    @SuppressWarnings("fallthrough") // fallthrough in switch is expected, suppress it
     public void applyPattern(String pattern) {
             StringBuilder[] segments = new StringBuilder[4];
             // Allocate only segments[SEG_RAW] here. The rest are
@@ -897,7 +899,7 @@ public class MessageFormat extends Format {
      */
     public AttributedCharacterIterator formatToCharacterIterator(Object arguments) {
         StringBuffer result = new StringBuffer();
-        ArrayList iterators = new ArrayList();
+        ArrayList<AttributedCharacterIterator> iterators = new ArrayList<>();
 
         if (arguments == null) {
             throw new NullPointerException(
@@ -908,7 +910,7 @@ public class MessageFormat extends Format {
             return createAttributedCharacterIterator("");
         }
         return createAttributedCharacterIterator(
-                     (AttributedCharacterIterator[])iterators.toArray(
+                     iterators.toArray(
                      new AttributedCharacterIterator[iterators.size()]));
     }
 
@@ -1074,14 +1076,14 @@ public class MessageFormat extends Format {
         MessageFormat other = (MessageFormat) super.clone();
 
         // clone arrays. Can't do with utility because of bug in Cloneable
-        other.formats = (Format[]) formats.clone(); // shallow clone
+        other.formats = formats.clone(); // shallow clone
         for (int i = 0; i < formats.length; ++i) {
             if (formats[i] != null)
                 other.formats[i] = (Format)formats[i].clone();
         }
         // for primitives or immutables, shallow clone is enough
-        other.offsets = (int[]) offsets.clone();
-        other.argumentNumbers = (int[]) argumentNumbers.clone();
+        other.offsets = offsets.clone();
+        other.argumentNumbers = argumentNumbers.clone();
 
         return other;
     }
@@ -1224,7 +1226,7 @@ public class MessageFormat extends Format {
      *            expected by the format element(s) that use it.
      */
     private StringBuffer subformat(Object[] arguments, StringBuffer result,
-                                   FieldPosition fp, List characterIterators) {
+                                   FieldPosition fp, List<AttributedCharacterIterator> characterIterators) {
         // note: this implementation assumes a fast substring & index.
         // if this is not true, would be better to append chars one by one.
         int lastOffset = 0;

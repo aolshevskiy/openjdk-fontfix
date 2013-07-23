@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,13 +42,11 @@ define_pd_global(intx, VMThreadStackSize,        512);
 #endif // AMD64
 
 define_pd_global(intx, CompilerThreadStackSize,  0);
-define_pd_global(intx, SurvivorRatio,            8);
+define_pd_global(uintx, SurvivorRatio,           8);
 
 define_pd_global(uintx, JVMInvokeMethodSlack,    8192);
 
-// Only used on 64 bit platforms
+// Used on 64 bit platforms for UseCompressedOops base address
 define_pd_global(uintx, HeapBaseMinAddress,      2*G);
-// Only used on 64 bit Windows platforms
-define_pd_global(bool, UseVectoredExceptions,    false);
 
 #endif // OS_CPU_BSD_X86_VM_GLOBALS_BSD_X86_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,12 +29,14 @@
 #include "services/runtimeService.hpp"
 #include "utilities/dtrace.hpp"
 #include "utilities/exceptions.hpp"
+#include "utilities/macros.hpp"
 
 #ifndef USDT2
 HS_DTRACE_PROBE_DECL(hs_private, safepoint__begin);
 HS_DTRACE_PROBE_DECL(hs_private, safepoint__end);
 #endif /* !USDT2 */
 
+#if INCLUDE_MANAGEMENT
 TimeStamp RuntimeService::_app_timer;
 TimeStamp RuntimeService::_safepoint_timer;
 PerfCounter*  RuntimeService::_sync_time_ticks = NULL;
@@ -101,6 +103,9 @@ void RuntimeService::init() {
     memset((void*) capabilities, '0', len);
     capabilities[len-1] = '\0';
     capabilities[0] = AttachListener::is_attach_supported() ? '1' : '0';
+#if INCLUDE_SERVICES
+    capabilities[1] = '1';
+#endif // INCLUDE_SERVICES
     PerfDataManager::create_string_constant(SUN_RT, "jvmCapabilities",
                                             capabilities, CHECK);
   }
@@ -206,3 +211,5 @@ void RuntimeService::record_thread_interrupt_signaled_count() {
     _thread_interrupt_signaled_count->inc();
   }
 }
+
+#endif // INCLUDE_MANAGEMENT

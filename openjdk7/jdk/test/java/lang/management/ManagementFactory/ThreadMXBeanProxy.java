@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,7 +23,7 @@
 
 /*
  * @test
- * @bug     5086470 6358247
+ * @bug     5086470 6358247 7193302
  * @summary Test type conversion when invoking ThreadMXBean.dumpAllThreads
  *          through proxy.
  *
@@ -172,6 +172,10 @@ public class ThreadMXBeanProxy {
             if (hcode != syncs[0].getIdentityHashCode()) {
                 throw new RuntimeException("LockInfo: " + syncs[0] +
                     " IdentityHashCode not matched. Expected: " + hcode);
+            }
+            LockInfo li = info.getLockInfo();
+            if (li == null) {
+                throw new RuntimeException("Expected non-null LockInfo");
             }
         }
     }

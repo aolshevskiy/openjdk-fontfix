@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,8 @@
 
 #ifndef CPU_X86_VM_FRAME_X86_INLINE_HPP
 #define CPU_X86_VM_FRAME_X86_INLINE_HPP
+
+#include "code/codeCache.hpp"
 
 // Inline functions for Intel frames:
 
@@ -174,14 +176,14 @@ inline intptr_t* frame::interpreter_frame_bcx_addr() const {
 
 // Constant pool cache
 
-inline constantPoolCacheOop* frame::interpreter_frame_cache_addr() const {
+inline ConstantPoolCache** frame::interpreter_frame_cache_addr() const {
   assert(is_interpreted_frame(), "must be interpreted");
   return &(get_interpreterState()->_constants);
 }
 
 // Method
 
-inline methodOop* frame::interpreter_frame_method_addr() const {
+inline Method** frame::interpreter_frame_method_addr() const {
   assert(is_interpreted_frame(), "must be interpreted");
   return &(get_interpreterState()->_method);
 }
@@ -221,14 +223,14 @@ inline intptr_t* frame::interpreter_frame_mdx_addr() const {
 
 // Constant pool cache
 
-inline constantPoolCacheOop* frame::interpreter_frame_cache_addr() const {
-  return (constantPoolCacheOop*)addr_at(interpreter_frame_cache_offset);
+inline ConstantPoolCache** frame::interpreter_frame_cache_addr() const {
+  return (ConstantPoolCache**)addr_at(interpreter_frame_cache_offset);
 }
 
 // Method
 
-inline methodOop* frame::interpreter_frame_method_addr() const {
-  return (methodOop*)addr_at(interpreter_frame_method_offset);
+inline Method** frame::interpreter_frame_method_addr() const {
+  return (Method**)addr_at(interpreter_frame_method_offset);
 }
 
 // top of expression stack
@@ -293,14 +295,18 @@ inline bool frame::volatile_across_calls(Register reg) {
   return true;
 }
 
+inline oop frame::saved_oop_result(RegisterMap* map) const {
+  oop* result_adr = (oop *)map->location(rax->as_VMReg());
+  guarantee(result_adr != NULL, "bad register save location");
 
-
-inline oop frame::saved_oop_result(RegisterMap* map) const       {
-  return *((oop*) map->location(rax->as_VMReg()));
+  return (*result_adr);
 }
 
 inline void frame::set_saved_oop_result(RegisterMap* map, oop obj) {
-  *((oop*) map->location(rax->as_VMReg())) = obj;
+  oop* result_adr = (oop *)map->location(rax->as_VMReg());
+  guarantee(result_adr != NULL, "bad register save location");
+
+  *result_adr = obj;
 }
 
 #endif // CPU_X86_VM_FRAME_X86_INLINE_HPP

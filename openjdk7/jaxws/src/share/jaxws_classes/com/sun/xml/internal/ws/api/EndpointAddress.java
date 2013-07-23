@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,6 @@
  */
 
 package com.sun.xml.internal.ws.api;
-
 
 import com.sun.istack.internal.Nullable;
 
@@ -101,7 +100,7 @@ public final class EndpointAddress {
         this.uri = uri;
         this.stringForm = uri.toString();
         try {
-            this.url = uri.toURL();
+            initURL();
             proxy = chooseProxy();
         } catch (MalformedURLException e) {
             // ignore
@@ -116,10 +115,26 @@ public final class EndpointAddress {
         this.uri = new URI(url);
         this.stringForm = url;
         try {
-            this.url = new URL(url);
+            initURL();
             proxy = chooseProxy();
         } catch (MalformedURLException e) {
             // ignore
+        }
+    }
+
+
+    private void initURL() throws MalformedURLException {
+        String scheme = uri.getScheme();
+        //URI.toURL() only works when scheme is not null.
+        if (scheme == null) {
+            this.url = new URL(uri.toString());
+            return;
+        }
+        scheme =scheme.toLowerCase();
+        if ("http".equals(scheme) || "https".equals(scheme)) {
+            url = new URL(uri.toASCIIString());
+        } else {
+            this.url = uri.toURL();
         }
     }
 
@@ -139,6 +154,7 @@ public final class EndpointAddress {
         ProxySelector sel =
             java.security.AccessController.doPrivileged(
                 new java.security.PrivilegedAction<ProxySelector>() {
+                    @Override
                     public ProxySelector run() {
                         return ProxySelector.getDefault();
                     }
@@ -193,7 +209,6 @@ public final class EndpointAddress {
      *      if the code is written correctly this shall never happen.
      */
     public URLConnection openConnection() throws IOException {
-        assert url!=null : uri+" doesn't have the corresponding URL";
         if (url == null) {
             throw new WebServiceException("URI="+uri+" doesn't have the corresponding URL");
         }
@@ -210,6 +225,7 @@ public final class EndpointAddress {
         return url.openConnection();
     }
 
+    @Override
     public String toString() {
         return stringForm;
     }

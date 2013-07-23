@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,6 @@ import com.sun.xml.internal.ws.binding.WebServiceFeatureList;
 import com.sun.xml.internal.ws.encoding.SOAPBindingCodec;
 import com.sun.xml.internal.ws.encoding.XMLHTTPBindingCodec;
 import com.sun.xml.internal.ws.encoding.soap.streaming.SOAPNamespaceConstants;
-import com.sun.xml.internal.ws.encoding.soap.streaming.SOAP12NamespaceConstants;
 import com.sun.xml.internal.ws.util.ServiceFinder;
 import com.sun.xml.internal.ws.developer.JAXWSProperties;
 
@@ -46,6 +45,7 @@ import javax.xml.ws.handler.Handler;
 import javax.xml.ws.http.HTTPBinding;
 import javax.xml.ws.soap.MTOMFeature;
 import javax.xml.ws.soap.SOAPBinding;
+
 import java.io.UnsupportedEncodingException;
 import java.net.URL;
 import java.net.URLDecoder;
@@ -155,6 +155,7 @@ public abstract class BindingID {
      * @return
      *      Always non-null same value.
      */
+    @Override
     public abstract String toString();
 
     /**
@@ -216,12 +217,14 @@ public abstract class BindingID {
     /**
      * Compares the equality based on {@link #toString()}.
      */
+    @Override
     public boolean equals(Object obj) {
         if(!(obj instanceof BindingID))
             return false;
         return toString().equals(obj.toString());
     }
 
+    @Override
     public int hashCode() {
         return toString().hashCode();
     }
@@ -328,7 +331,7 @@ public abstract class BindingID {
      * Constant that represents SOAP1.2/HTTP.
      */
     public static final SOAPHTTPImpl SOAP12_HTTP = new SOAPHTTPImpl(
-        SOAPVersion.SOAP_12, SOAPBinding.SOAP12HTTP_BINDING, false);
+        SOAPVersion.SOAP_12, SOAPBinding.SOAP12HTTP_BINDING, true);
     /**
      * Constant that represents SOAP1.1/HTTP.
      */
@@ -339,7 +342,7 @@ public abstract class BindingID {
      * Constant that represents SOAP1.2/HTTP.
      */
     public static final SOAPHTTPImpl SOAP12_HTTP_MTOM = new SOAPHTTPImpl(
-        SOAPVersion.SOAP_12, SOAPBinding.SOAP12HTTP_MTOM_BINDING, false, true);
+        SOAPVersion.SOAP_12, SOAPBinding.SOAP12HTTP_MTOM_BINDING, true, true);
     /**
      * Constant that represents SOAP1.1/HTTP.
      */
@@ -351,8 +354,9 @@ public abstract class BindingID {
      * Constant that represents REST.
      */
     public static final BindingID XML_HTTP = new Impl(SOAPVersion.SOAP_11, HTTPBinding.HTTP_BINDING,false) {
+        @Override
         public Codec createEncoder(WSBinding binding) {
-            return new XMLHTTPBindingCodec(binding);
+            return new XMLHTTPBindingCodec(binding.getFeatures());
         }
     };
 
@@ -360,8 +364,9 @@ public abstract class BindingID {
      * Constant that represents REST.
      */
     private static final BindingID REST_HTTP = new Impl(SOAPVersion.SOAP_11, JAXWSProperties.REST_BINDING,true) {
+        @Override
         public Codec createEncoder(WSBinding binding) {
-            return new XMLHTTPBindingCodec(binding);
+            return new XMLHTTPBindingCodec(binding.getFeatures());
         }
     };
 
@@ -376,15 +381,18 @@ public abstract class BindingID {
             this.canGenerateWSDL = canGenerateWSDL;
         }
 
+        @Override
         public SOAPVersion getSOAPVersion() {
             return version;
         }
 
+        @Override
         public String toString() {
             return lexical;
         }
 
         @Deprecated
+        @Override
         public boolean canGenerateWSDL() {
             return canGenerateWSDL;
         }
@@ -397,7 +405,6 @@ public abstract class BindingID {
         /*final*/ Map<String,String> parameters = new HashMap<String,String>();
 
         static final String MTOM_PARAM = "mtom";
-        Boolean mtomSetting = null;
 
         public SOAPHTTPImpl(SOAPVersion version, String lexical, boolean canGenerateWSDL) {
             super(version, lexical, canGenerateWSDL);
@@ -408,11 +415,10 @@ public abstract class BindingID {
             this(version, lexical, canGenerateWSDL);
             String mtomStr = mtomEnabled ? "true" : "false";
             parameters.put(MTOM_PARAM, mtomStr);
-            mtomSetting = mtomEnabled;
         }
 
-        public @NotNull Codec createEncoder(WSBinding binding) {
-            return new SOAPBindingCodec(binding);
+        public @NotNull @Override Codec createEncoder(WSBinding binding) {
+            return new SOAPBindingCodec(binding.getFeatures());
         }
 
         private Boolean isMTOMEnabled() {
@@ -420,6 +426,7 @@ public abstract class BindingID {
             return mtom==null?null:Boolean.valueOf(mtom);
         }
 
+        @Override
         public WebServiceFeatureList createBuiltinFeatureList() {
             WebServiceFeatureList r=super.createBuiltinFeatureList();
             Boolean mtom = isMTOMEnabled();
@@ -428,10 +435,16 @@ public abstract class BindingID {
             return r;
         }
 
+        @Override
         public String getParameter(String parameterName, String defaultValue) {
             if (parameters.get(parameterName) == null)
                 return super.getParameter(parameterName, defaultValue);
             return parameters.get(parameterName);
+        }
+
+        @Override
+        public SOAPHTTPImpl clone() throws CloneNotSupportedException {
+            return (SOAPHTTPImpl) super.clone();
         }
     }
 }

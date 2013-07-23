@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,7 +24,7 @@
 /*
  * @test
  * @bug 4800108
- * @summary verify that precomputed DSA parameters are always used (512, 768, 1024 bit)
+ * @summary verify that precomputed DSA parameters are always used (512, 768, 1024, 2048 bit)
  * @run main/othervm/timeout=15 TestKeyPairGenerator
  */
 
@@ -77,6 +77,10 @@ public class TestKeyPairGenerator {
         kpg.initialize(512);
         kp = kpg.generateKeyPair();
         checkKeyLength(kp, 512);
+
+        kpg.initialize(2048);
+        kp = kpg.generateKeyPair();
+        checkKeyLength(kp, 2048);
 
         long stop = System.currentTimeMillis();
         System.out.println("Time: " + (stop - start) + " ms.");

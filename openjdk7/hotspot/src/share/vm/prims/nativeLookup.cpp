@@ -30,7 +30,7 @@
 #include "memory/resourceArea.hpp"
 #include "memory/universe.inline.hpp"
 #include "oops/instanceKlass.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/symbol.hpp"
 #include "prims/jvm_misc.hpp"
@@ -40,6 +40,7 @@
 #include "runtime/javaCalls.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/signature.hpp"
+#include "utilities/macros.hpp"
 #ifdef TARGET_OS_FAMILY_linux
 # include "os_linux.inline.hpp"
 #endif
@@ -165,8 +166,7 @@ address NativeLookup::lookup_style(methodHandle method, char* pure_name, const c
   // Note: It is critical for bootstrapping that Java_java_lang_ClassLoader_00024NativeLibrary_find
   // gets found the first time around - otherwise an infinite loop can occure. This is
   // another VM/library dependency
-  Handle loader(THREAD,
-                instanceKlass::cast(method->method_holder())->class_loader());
+  Handle loader(THREAD, method->method_holder()->class_loader());
   if (loader.is_null()) {
     entry = lookup_special_native(jni_name);
     if (entry == NULL) {
@@ -328,6 +328,7 @@ address NativeLookup::lookup_critical_entry(methodHandle method) {
 // native implementation again.
 // See SetNativeMethodPrefix in the JVM TI Spec for more details.
 address NativeLookup::lookup_entry_prefixed(methodHandle method, bool& in_base_library, TRAPS) {
+#if INCLUDE_JVMTI
   ResourceMark rm(THREAD);
 
   int prefix_count;
@@ -349,7 +350,7 @@ address NativeLookup::lookup_entry_prefixed(methodHandle method, bool& in_base_l
     TempNewSymbol wrapper_symbol = SymbolTable::probe(wrapper_name, wrapper_name_len);
     if (wrapper_symbol != NULL) {
       KlassHandle kh(method->method_holder());
-      methodOop wrapper_method = Klass::cast(kh())->lookup_method(wrapper_symbol,
+      Method* wrapper_method = kh()->lookup_method(wrapper_symbol,
                                                                   method->signature());
       if (wrapper_method != NULL && !wrapper_method->is_native()) {
         // we found a wrapper method, use its native entry
@@ -358,6 +359,7 @@ address NativeLookup::lookup_entry_prefixed(methodHandle method, bool& in_base_l
       }
     }
   }
+#endif // INCLUDE_JVMTI
   return NULL;
 }
 
@@ -381,17 +383,14 @@ address NativeLookup::lookup_base(methodHandle method, bool& in_base_library, TR
 
 address NativeLookup::lookup(methodHandle method, bool& in_base_library, TRAPS) {
   if (!method->has_native_function()) {
-    address entry =
-        method->intrinsic_id() == vmIntrinsics::_invokeGeneric ?
-            SharedRuntime::native_method_throw_unsupported_operation_exception_entry() :
-            lookup_base(method, in_base_library, CHECK_NULL);
+    address entry = lookup_base(method, in_base_library, CHECK_NULL);
     method->set_native_function(entry,
-      methodOopDesc::native_bind_event_is_interesting);
+      Method::native_bind_event_is_interesting);
     // -verbose:jni printing
     if (PrintJNIResolving) {
       ResourceMark rm(THREAD);
       tty->print_cr("[Dynamic-linking native method %s.%s ... JNI]",
-        Klass::cast(method->method_holder())->external_name(),
+        method->method_holder()->external_name(),
         method->name()->as_C_string());
     }
   }
@@ -406,7 +405,7 @@ address NativeLookup::base_library_lookup(const char* class_name, const char* me
   TempNewSymbol s_name = SymbolTable::new_symbol(signature,   CATCH);
 
   // Find the class
-  klassOop k = SystemDictionary::resolve_or_fail(c_name, true, CATCH);
+  Klass* k = SystemDictionary::resolve_or_fail(c_name, true, CATCH);
   instanceKlassHandle klass (THREAD, k);
 
   // Find method and invoke standard lookup

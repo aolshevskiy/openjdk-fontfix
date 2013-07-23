@@ -110,20 +110,22 @@ void Abstract_VM_Version::initialize() {
   #define VMLP ""
 #endif
 
-#ifdef TIERED
-  #define VMTYPE "Server"
-#else // TIERED
-#ifdef ZERO
-#ifdef SHARK
-  #define VMTYPE "Shark"
-#else // SHARK
-  #define VMTYPE "Zero"
-#endif // SHARK
-#else // ZERO
-   #define VMTYPE COMPILER1_PRESENT("Client")   \
-                  COMPILER2_PRESENT("Server")
-#endif // ZERO
-#endif // TIERED
+#ifndef VMTYPE
+  #ifdef TIERED
+    #define VMTYPE "Server"
+  #else // TIERED
+  #ifdef ZERO
+  #ifdef SHARK
+    #define VMTYPE "Shark"
+  #else // SHARK
+    #define VMTYPE "Zero"
+  #endif // SHARK
+  #else // ZERO
+     #define VMTYPE COMPILER1_PRESENT("Client")   \
+                    COMPILER2_PRESENT("Server")
+  #endif // ZERO
+  #endif // TIERED
+#endif
 
 #ifndef HOTSPOT_VM_DISTRO
   #error HOTSPOT_VM_DISTRO must be defined
@@ -209,6 +211,10 @@ const char* Abstract_VM_Version::internal_vm_info_string() {
         #define HOTSPOT_BUILD_COMPILER "MS VC++ 8.0 (VS2005)"
       #elif _MSC_VER == 1500
         #define HOTSPOT_BUILD_COMPILER "MS VC++ 9.0 (VS2008)"
+      #elif _MSC_VER == 1600
+        #define HOTSPOT_BUILD_COMPILER "MS VC++ 10.0 (VS2010)"
+      #elif _MSC_VER == 1700
+        #define HOTSPOT_BUILD_COMPILER "MS VC++ 11.0 (VS2012)"
       #else
         #define HOTSPOT_BUILD_COMPILER "unknown MS VC++:" XSTR(_MSC_VER)
       #endif

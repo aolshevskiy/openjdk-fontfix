@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,9 +27,9 @@ package com.sun.xml.internal.ws.handler;
 import com.sun.xml.internal.ws.api.message.Header;
 import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.message.Packet;
+import com.sun.xml.internal.ws.api.message.saaj.SAAJFactory;
 import com.sun.xml.internal.ws.api.WSBinding;
 import com.sun.xml.internal.ws.api.SOAPVersion;
-import com.sun.xml.internal.ws.message.saaj.SAAJMessage;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.namespace.QName;
@@ -51,7 +51,7 @@ import java.util.Set;
  *
  * @author WS Development Team
  */
-class SOAPMessageContextImpl extends MessageUpdatableContext implements SOAPMessageContext {
+public class SOAPMessageContextImpl extends MessageUpdatableContext implements SOAPMessageContext {
 
     private Set<String> roles;
     private SOAPMessage soapMsg = null;
@@ -66,7 +66,8 @@ class SOAPMessageContextImpl extends MessageUpdatableContext implements SOAPMess
     public SOAPMessage getMessage() {
         if(soapMsg == null) {
             try {
-                soapMsg = packet.getMessage().readAsSOAPMessage();
+                Message m = packet.getMessage();
+                soapMsg = m != null ? m.readAsSOAPMessage() : null;
             } catch (SOAPException e) {
                 throw new WebServiceException(e);
             }
@@ -93,7 +94,7 @@ class SOAPMessageContextImpl extends MessageUpdatableContext implements SOAPMess
         //Check if SOAPMessage has changed, if so construct new one,
         // Packet are handled through MessageContext
         if(soapMsg != null) {
-            packet.setMessage(new SAAJMessage(soapMsg));
+            packet.setMessage(SAAJFactory.create(soapMsg));
             soapMsg = null;
         }
     }

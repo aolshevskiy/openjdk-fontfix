@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2007, 2013, Red Hat, Inc.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2007, 2008, 2009, 2010, 2011 Red Hat, Inc.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,7 @@
 #include "code/icBuffer.hpp"
 #include "code/vtableStubs.hpp"
 #include "interpreter/interpreter.hpp"
-#include "oops/compiledICHolderOop.hpp"
+#include "oops/compiledICHolder.hpp"
 #include "prims/jvmtiRedefineClassesTrace.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/vframeArray.hpp"
@@ -105,10 +105,8 @@ JRT_LEAF(void, zero_stub())
   ShouldNotCallThis();
 JRT_END
 
-
 static RuntimeStub* generate_empty_runtime_stub(const char* name) {
-  CodeBuffer buffer(name, 0, 0);
-  return RuntimeStub::new_runtime_stub(name, &buffer, 0, 0, NULL, false);
+  return CAST_FROM_FN_PTR(RuntimeStub*,zero_stub);
 }
 
 static SafepointBlob* generate_empty_safepoint_blob() {

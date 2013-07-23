@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -76,7 +76,7 @@ public class ClassTypeImpl extends ReferenceTypeImpl
         List<InterfaceType> immediate = interfaces();
         list.addAll(interfaces());
 
-        Iterator iter = immediate.iterator();
+        Iterator<InterfaceType> iter = immediate.iterator();
         while (iter.hasNext()) {
             InterfaceTypeImpl interfaze = (InterfaceTypeImpl)iter.next();
             interfaze.addSuperinterfaces(list);
@@ -389,7 +389,7 @@ public class ClassTypeImpl extends ReferenceTypeImpl
          * overwrite them in the hash table
          */
 
-        Iterator iter = interfaces().iterator();
+        Iterator<InterfaceType> iter = interfaces().iterator();
         while (iter.hasNext()) {
             InterfaceTypeImpl interfaze = (InterfaceTypeImpl)iter.next();
             interfaze.addVisibleMethods(methodMap);
@@ -411,7 +411,7 @@ public class ClassTypeImpl extends ReferenceTypeImpl
             return true;
         } else {
             List<InterfaceType> interfaces = interfaces();
-            Iterator iter = interfaces.iterator();
+            Iterator<InterfaceType> iter = interfaces.iterator();
             while (iter.hasNext()) {
                 InterfaceTypeImpl interfaze = (InterfaceTypeImpl)iter.next();
                 if (interfaze.isAssignableTo(type)) {

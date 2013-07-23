@@ -23,7 +23,9 @@
  */
 
 #include "precompiled.hpp"
-#include "asm/assembler.hpp"
+#include "asm/macroAssembler.hpp"
+#include "asm/macroAssembler.inline.hpp"
+#include "compiler/disassembler.hpp"
 #include "interpreter/bytecodeHistogram.hpp"
 #include "interpreter/bytecodeInterpreter.hpp"
 #include "interpreter/interpreter.hpp"
@@ -32,8 +34,8 @@
 #include "memory/allocation.inline.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/arrayOop.hpp"
-#include "oops/methodDataOop.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/methodData.hpp"
+#include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/forte.hpp"
 #include "prims/jvmtiExport.hpp"
@@ -193,6 +195,17 @@ AbstractInterpreter::MethodKind AbstractInterpreter::method_kind(methodHandle m)
     return kind;
   }
 
+#ifndef CC_INTERP
+  if (UseCRC32Intrinsics && m->is_native()) {
+    // Use optimized stub code for CRC32 native methods.
+    switch (m->intrinsic_id()) {
+      case vmIntrinsics::_updateCRC32            : return java_util_zip_CRC32_update;
+      case vmIntrinsics::_updateBytesCRC32       : return java_util_zip_CRC32_updateBytes;
+      case vmIntrinsics::_updateByteBufferCRC32  : return java_util_zip_CRC32_updateByteBuffer;
+    }
+  }
+#endif
+
   // Native method?
   // Note: This test must come _before_ the test for intrinsic
   //       methods. See also comments below.
@@ -295,6 +308,9 @@ void AbstractInterpreter::print_method_kind(MethodKind kind) {
     case java_lang_math_sqrt    : tty->print("java_lang_math_sqrt"    ); break;
     case java_lang_math_log     : tty->print("java_lang_math_log"     ); break;
     case java_lang_math_log10   : tty->print("java_lang_math_log10"   ); break;
+    case java_util_zip_CRC32_update           : tty->print("java_util_zip_CRC32_update"); break;
+    case java_util_zip_CRC32_updateBytes      : tty->print("java_util_zip_CRC32_updateBytes"); break;
+    case java_util_zip_CRC32_updateByteBuffer : tty->print("java_util_zip_CRC32_updateByteBuffer"); break;
     default:
       if (kind >= method_handle_invoke_FIRST &&
           kind <= method_handle_invoke_LAST) {
@@ -314,7 +330,7 @@ void AbstractInterpreter::print_method_kind(MethodKind kind) {
 // Deoptimization support
 
 // If deoptimization happens, this function returns the point of next bytecode to continue execution
-address AbstractInterpreter::deopt_continue_after_entry(methodOop method, address bcp, int callee_parameters, bool is_top_frame) {
+address AbstractInterpreter::deopt_continue_after_entry(Method* method, address bcp, int callee_parameters, bool is_top_frame) {
   assert(method->contains(bcp), "just checkin'");
   Bytecodes::Code code   = Bytecodes::java_code_at(method, bcp);
   assert(!Interpreter::bytecode_should_reexecute(code), "should not reexecute");
@@ -352,7 +368,7 @@ address AbstractInterpreter::deopt_continue_after_entry(methodOop method, addres
       // (NOT needed for the old calling convension)
       if (!is_top_frame) {
         int index = Bytes::get_native_u4(bcp+1);
-        method->constants()->cache()->secondary_entry_at(index)->set_parameter_size(callee_parameters);
+        method->constants()->invokedynamic_cp_cache_entry_at(index)->set_parameter_size(callee_parameters);
       }
       break;
     }
@@ -384,7 +400,7 @@ address AbstractInterpreter::deopt_continue_after_entry(methodOop method, addres
 // the bytecode.
 // Note: Bytecodes::_athrow is a special case in that it does not return
 //       Interpreter::deopt_entry(vtos, 0) like others
-address AbstractInterpreter::deopt_reexecute_entry(methodOop method, address bcp) {
+address AbstractInterpreter::deopt_reexecute_entry(Method* method, address bcp) {
   assert(method->contains(bcp), "just checkin'");
   Bytecodes::Code code   = Bytecodes::java_code_at(method, bcp);
 #ifdef COMPILER1

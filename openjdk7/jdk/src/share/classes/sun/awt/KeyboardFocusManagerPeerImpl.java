@@ -57,8 +57,9 @@ public abstract class KeyboardFocusManagerPeerImpl implements KeyboardFocusManag
     public void clearGlobalFocusOwner(Window activeWindow) {
         if (activeWindow != null) {
             Component focusOwner = activeWindow.getFocusOwner();
-            if (focusLog.isLoggable(PlatformLogger.FINE))
+            if (focusLog.isLoggable(PlatformLogger.Level.FINE)) {
                 focusLog.fine("Clearing global focus owner " + focusOwner);
+            }
             if (focusOwner != null) {
                 FocusEvent fl = new CausedFocusEvent(focusOwner, FocusEvent.FOCUS_LOST, false, null,
                                                      CausedFocusEvent.Cause.CLEAR_GLOBAL_FOCUS_OWNER);
@@ -74,6 +75,7 @@ public abstract class KeyboardFocusManagerPeerImpl implements KeyboardFocusManag
      * 1) accepts focus on click (in general)
      * 2) may be a focus owner (in particular)
      */
+    @SuppressWarnings("deprecation")
     public static boolean shouldFocusOnClick(Component component) {
         boolean acceptFocusOnClick = false;
 
@@ -104,6 +106,7 @@ public abstract class KeyboardFocusManagerPeerImpl implements KeyboardFocusManag
     /*
      * Posts proper lost/gain focus events to the event queue.
      */
+    @SuppressWarnings("deprecation")
     public static boolean deliverFocus(Component lightweightChild,
                                        Component target,
                                        boolean temporary,
@@ -113,7 +116,7 @@ public abstract class KeyboardFocusManagerPeerImpl implements KeyboardFocusManag
                                        Component currentFocusOwner) // provided by the descendant peers
     {
         if (lightweightChild == null) {
-            lightweightChild = (Component)target;
+            lightweightChild = target;
         }
 
         Component currentOwner = currentFocusOwner;
@@ -124,17 +127,19 @@ public abstract class KeyboardFocusManagerPeerImpl implements KeyboardFocusManag
             FocusEvent fl = new CausedFocusEvent(currentOwner, FocusEvent.FOCUS_LOST,
                                                  false, lightweightChild, cause);
 
-            if (focusLog.isLoggable(PlatformLogger.FINER))
+            if (focusLog.isLoggable(PlatformLogger.Level.FINER)) {
                 focusLog.finer("Posting focus event: " + fl);
-            SunToolkit.postPriorityEvent(fl);
+            }
+            SunToolkit.postEvent(SunToolkit.targetToAppContext(currentOwner), fl);
         }
 
         FocusEvent fg = new CausedFocusEvent(lightweightChild, FocusEvent.FOCUS_GAINED,
                                              false, currentOwner, cause);
 
-        if (focusLog.isLoggable(PlatformLogger.FINER))
+        if (focusLog.isLoggable(PlatformLogger.Level.FINER)) {
             focusLog.finer("Posting focus event: " + fg);
-        SunToolkit.postPriorityEvent(fg);
+        }
+        SunToolkit.postEvent(SunToolkit.targetToAppContext(lightweightChild), fg);
         return true;
     }
 

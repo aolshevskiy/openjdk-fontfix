@@ -77,7 +77,7 @@ void G1BlockOffsetSharedArray::resize(size_t new_word_size) {
     assert(delta > 0, "just checking");
     if (!_vs.expand_by(delta)) {
       // Do better than this for Merlin
-      vm_exit_out_of_memory(delta, "offset table expansion");
+      vm_exit_out_of_memory(delta, OOM_MMAP_ERROR, "offset table expansion");
     }
     assert(_vs.high() == high + delta, "invalid expansion");
     // Initialization of the contents is left to the
@@ -394,8 +394,16 @@ G1BlockOffsetArray::forward_to_block_containing_addr_slow(HeapWord* q,
   // If the fist object's end q is at the card boundary. Start refining
   // with the corresponding card (the value of the entry will be basically
   // set to 0). If the object crosses the boundary -- start from the next card.
+  size_t n_index = _array->index_for(n);
   size_t next_index = _array->index_for(n) + !_array->is_card_boundary(n);
-  HeapWord* next_boundary = _array->address_for_index(next_index);
+  // Calculate a consistent next boundary.  If "n" is not at the boundary
+  // already, step to the boundary.
+  HeapWord* next_boundary = _array->address_for_index(n_index) +
+                            (n_index == next_index ? 0 : N_words);
+  assert(next_boundary <= _array->_end,
+         err_msg("next_boundary is beyond the end of the covered region "
+                 " next_boundary " PTR_FORMAT " _array->_end " PTR_FORMAT,
+                 next_boundary, _array->_end));
   if (csp() != NULL) {
     if (addr >= csp()->top()) return csp()->top();
     while (next_boundary < addr) {

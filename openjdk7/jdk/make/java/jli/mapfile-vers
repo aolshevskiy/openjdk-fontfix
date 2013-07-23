@@ -25,7 +25,6 @@
 
 # Define public interface.
 
-# MMM: Three JNI funcs added for Mac. Check this out!
 SUNWprivate_1.1 {
 	global:
 		JLI_Launch;
@@ -35,7 +34,7 @@ SUNWprivate_1.1 {
 		JLI_ReportErrorMessageSys;
 		JLI_ReportMessage;
 		JLI_ReportExceptionDescription;
-		JLI_GetStdArgs;
+                JLI_GetStdArgs;
 		JLI_GetStdArgc;
 	local:
 		*;

@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 4694076 7083664
+# @bug 4694076
 # @summary KeyTool throws ArrayIndexOutOfBoundsException for listing
 #          SecretKey entries in non-verbose mode.
 # @author Valerie Peng

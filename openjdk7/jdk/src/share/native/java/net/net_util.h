@@ -116,7 +116,7 @@ void NET_ThrowCurrent(JNIEnv *env, char *msg);
 
 jfieldID NET_GetFileDescriptorID(JNIEnv *env);
 
-JNIEXPORT jint JNICALL ipv6_available();
+JNIEXPORT jint JNICALL ipv6_available() ;
 
 void
 NET_AllocSockaddr(struct sockaddr **him, int *len);

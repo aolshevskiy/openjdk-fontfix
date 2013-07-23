@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,7 +26,7 @@
 #include "interpreter/interpreter.hpp"
 #include "memory/resourceArea.hpp"
 #include "oops/markOop.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/methodHandles.hpp"
 #include "runtime/frame.inline.hpp"
@@ -309,7 +309,7 @@ bool frame::safe_for_sender(JavaThread *thread) {
 
     // The sender should positively be an nmethod or call_stub. On sparc we might in fact see something else.
     // The cause of this is because at a save instruction the O7 we get is a leftover from an earlier
-    // window use. So if a runtime stub creates two frames (common in fastdebug/jvmg) then we see the
+    // window use. So if a runtime stub creates two frames (common in fastdebug/debug) then we see the
     // stale pc. So if the sender blob is not something we'd expect we have little choice but to declare
     // the stack unwalkable. pd_get_top_frame_for_signal_handler tries to recover from this by unwinding
     // that initial frame and retrying.
@@ -622,7 +622,7 @@ bool frame::interpreter_frame_equals_unpacked_fp(intptr_t* fp) {
 void frame::pd_gc_epilog() {
   if (is_interpreted_frame()) {
     // set constant pool cache entry for interpreter
-    methodOop m = interpreter_frame_method();
+    Method* m = interpreter_frame_method();
 
     *interpreter_frame_cpoolcache_addr() = m->constants()->cache();
   }
@@ -655,10 +655,10 @@ bool frame::is_interpreted_frame_valid(JavaThread* thread) const {
 
   // first the method
 
-  methodOop m = *interpreter_frame_method_addr();
+  Method* m = *interpreter_frame_method_addr();
 
   // validate the method we'd find in this potential sender
-  if (!Universe::heap()->is_valid_method(m)) return false;
+  if (!m->is_valid_method()) return false;
 
   // stack frames shouldn't be much larger than max_stack elements
 
@@ -673,13 +673,9 @@ bool frame::is_interpreted_frame_valid(JavaThread* thread) const {
     return false;
   }
 
-  // validate constantPoolCacheOop
-
-  constantPoolCacheOop cp = *interpreter_frame_cache_addr();
-
-  if (cp == NULL ||
-      !Space::is_aligned(cp) ||
-      !Universe::heap()->is_permanent((void*)cp)) return false;
+  // validate ConstantPoolCache*
+  ConstantPoolCache* cp = *interpreter_frame_cache_addr();
+  if (cp == NULL || !cp->is_metaspace_object()) return false;
 
   // validate locals
 
@@ -739,7 +735,7 @@ intptr_t* frame::entry_frame_argument_at(int offset) const {
 
 BasicType frame::interpreter_frame_result(oop* oop_result, jvalue* value_result) {
   assert(is_interpreted_frame(), "interpreted frame expected");
-  methodOop method = interpreter_frame_method();
+  Method* method = interpreter_frame_method();
   BasicType type = method->result_type();
 
   if (method->is_native()) {

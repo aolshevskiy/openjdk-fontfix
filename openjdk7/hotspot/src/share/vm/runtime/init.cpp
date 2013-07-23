@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,7 @@
 #include "runtime/init.hpp"
 #include "runtime/safepoint.hpp"
 #include "runtime/sharedRuntime.hpp"
+#include "utilities/macros.hpp"
 
 // Initialization done by VM thread in vm_init_globals()
 void check_ThreadShadow();
@@ -94,12 +95,13 @@ jint init_globals() {
   management_init();
   bytecodes_init();
   classLoader_init();
+  Metaspace::global_initialize(); // must be before codeCache
   codeCache_init();
   VM_Version_init();
   os_init_globals();
   stubRoutines_init1();
   jint status = universe_init();  // dependent on codeCache_init and
-                                  // stubRoutines_init1
+                                  // stubRoutines_init1 and metaspace_init.
   if (status != JNI_OK)
     return status;
 
@@ -113,7 +115,9 @@ jint init_globals() {
   universe2_init();  // dependent on codeCache_init and stubRoutines_init1
   referenceProcessor_init();
   jni_handles_init();
+#if INCLUDE_VM_STRUCTS
   vmStructs_init();
+#endif // INCLUDE_VM_STRUCTS
 
   vtableStubs_init();
   InlineCacheBuffer_init();

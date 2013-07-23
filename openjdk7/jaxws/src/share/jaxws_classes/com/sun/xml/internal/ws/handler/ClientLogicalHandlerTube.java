@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,8 @@ import com.sun.xml.internal.ws.api.pipe.helper.AbstractFilterTubeImpl;
 import com.sun.xml.internal.ws.api.model.wsdl.WSDLPort;
 import com.sun.xml.internal.ws.api.model.SEIModel;
 import com.sun.xml.internal.ws.binding.BindingImpl;
+import com.sun.xml.internal.ws.model.AbstractSEIModelImpl;
+import com.sun.xml.internal.ws.spi.db.BindingContext;
 
 import javax.xml.ws.handler.LogicalHandler;
 import javax.xml.ws.handler.MessageContext;
@@ -47,15 +49,13 @@ import java.util.ArrayList;
  */
 public class ClientLogicalHandlerTube extends HandlerTube {
 
-    private WSBinding binding;
     private SEIModel seiModel;
 
     /**
      * Creates a new instance of LogicalHandlerTube
      */
     public ClientLogicalHandlerTube(WSBinding binding, SEIModel seiModel, WSDLPort port, Tube next) {
-        super(next, port);
-        this.binding = binding;
+        super(next, port, binding);
         this.seiModel = seiModel;
     }
 
@@ -67,8 +67,7 @@ public class ClientLogicalHandlerTube extends HandlerTube {
      * SOAPHandlerTube.closeHandlers()
      */
     public ClientLogicalHandlerTube(WSBinding binding, SEIModel seiModel, Tube next, HandlerTube cousinTube) {
-        super(next, cousinTube);
-        this.binding = binding;
+        super(next, cousinTube, binding);
         this.seiModel = seiModel;
     }
 
@@ -78,7 +77,6 @@ public class ClientLogicalHandlerTube extends HandlerTube {
 
     private ClientLogicalHandlerTube(ClientLogicalHandlerTube that, TubeCloner cloner) {
         super(that, cloner);
-        this.binding = that.binding;
         this.seiModel = that.seiModel;
     }
 
@@ -94,28 +92,36 @@ public class ClientLogicalHandlerTube extends HandlerTube {
     }
 
     void setUpProcessor() {
-        // Take a snapshot, User may change chain after invocation, Same chain
-        // should be used for the entire MEP
-        handlers = new ArrayList<Handler>();
-        List<LogicalHandler> logicalSnapShot= ((BindingImpl) binding).getHandlerConfig().getLogicalHandlers();
-        if (!logicalSnapShot.isEmpty()) {
-            handlers.addAll(logicalSnapShot);
-            if (binding.getSOAPVersion() == null) {
-                processor = new XMLHandlerProcessor(this, binding,
-                        handlers);
-            } else {
-                processor = new SOAPHandlerProcessor(true, this, binding,
-                        handlers);
-            }
+        if (handlers == null) {
+                // Take a snapshot, User may change chain after invocation, Same chain
+                // should be used for the entire MEP
+                handlers = new ArrayList<Handler>();
+                WSBinding binding = getBinding();
+                List<LogicalHandler> logicalSnapShot= ((BindingImpl) binding).getHandlerConfig().getLogicalHandlers();
+                if (!logicalSnapShot.isEmpty()) {
+                    handlers.addAll(logicalSnapShot);
+                    if (binding.getSOAPVersion() == null) {
+                        processor = new XMLHandlerProcessor(this, binding,
+                                handlers);
+                    } else {
+                        processor = new SOAPHandlerProcessor(true, this, binding,
+                                handlers);
+                    }
+                }
         }
     }
 
 
     MessageUpdatableContext getContext(Packet packet) {
-        return new LogicalMessageContextImpl(binding, (seiModel!= null?seiModel.getJAXBContext():null), packet);
+        return new LogicalMessageContextImpl(getBinding(), getBindingContext(), packet);
     }
 
-    boolean callHandlersOnRequest(MessageUpdatableContext context, boolean isOneWay) {
+    private BindingContext getBindingContext() {
+        return (seiModel!= null && seiModel instanceof AbstractSEIModelImpl) ?
+                ((AbstractSEIModelImpl)seiModel).getBindingContext() : null;
+        }
+
+        boolean callHandlersOnRequest(MessageUpdatableContext context, boolean isOneWay) {
 
         boolean handlerResult;
         try {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,8 @@ import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -43,11 +45,38 @@ import java.util.logging.Logger;
 final class WeakDataFile extends WeakReference<DataFile> {
 
     private static final Logger LOGGER = Logger.getLogger(WeakDataFile.class.getName());
-    private static final int MAX_ITERATIONS = 2;
+    //private static final int MAX_ITERATIONS = 2;
     private static ReferenceQueue<DataFile> refQueue = new ReferenceQueue<DataFile>();
     private static List<WeakDataFile> refList = new ArrayList<WeakDataFile>();
     private final File file;
     private final RandomAccessFile raf;
+    private static boolean hasCleanUpExecutor = false;
+    static {
+        CleanUpExecutorFactory executorFactory = CleanUpExecutorFactory.newInstance();
+        if (executorFactory!=null) {
+            if (LOGGER.isLoggable(Level.FINE)) {
+                LOGGER.log(Level.FINE, "Initializing clean up executor for MIMEPULL: {0}", executorFactory.getClass().getName());
+            }
+            Executor executor = executorFactory.getExecutor();
+            executor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    WeakDataFile weak;
+                    while (true) {
+                        try {
+                            weak = (WeakDataFile) refQueue.remove();
+                            if (LOGGER.isLoggable(Level.FINE)) {
+                                LOGGER.log(Level.FINE, "Cleaning file = {0} from reference queue.", weak.file);
+                            }
+                            weak.close();
+                        } catch (InterruptedException e) {
+                        }
+                    }
+                }
+            });
+            hasCleanUpExecutor = true;
+        }
+    }
 
     WeakDataFile(DataFile df, File file) {
         super(df, refQueue);
@@ -58,7 +87,9 @@ final class WeakDataFile extends WeakReference<DataFile> {
         } catch(IOException ioe) {
             throw new MIMEParsingException(ioe);
         }
-        drainRefQueueBounded();
+        if (!hasCleanUpExecutor) {
+            drainRefQueueBounded();
+        }
     }
 
     synchronized void read(long pointer, byte[] buf, int offset, int length ) {
@@ -81,22 +112,36 @@ final class WeakDataFile extends WeakReference<DataFile> {
     }
 
     void close() {
-        LOGGER.fine("Deleting file = "+file.getName());
+        if (LOGGER.isLoggable(Level.FINE)) {
+            LOGGER.log(Level.FINE, "Deleting file = {0}", file.getName());
+        }
         refList.remove(this);
         try {
             raf.close();
-            file.delete();
+            boolean deleted = file.delete();
+            if (!deleted) {
+                if (LOGGER.isLoggable(Level.INFO)) {
+                    LOGGER.log(Level.INFO, "File {0} was not deleted", file.getAbsolutePath());
+                }
+            }
         } catch(IOException ioe) {
             throw new MIMEParsingException(ioe);
         }
     }
 
     void renameTo(File f) {
-        LOGGER.fine("Moving file="+file+" to="+f);
+        if (LOGGER.isLoggable(Level.FINE)) {
+            LOGGER.log(Level.FINE, "Moving file={0} to={1}", new Object[]{file, f});
+        }
         refList.remove(this);
         try {
             raf.close();
-            file.renameTo(f);
+            boolean renamed = file.renameTo(f);
+            if (!renamed) {
+                if (LOGGER.isLoggable(Level.INFO)) {
+                    LOGGER.log(Level.INFO, "File {0} was not moved to {1}", new Object[] {file.getAbsolutePath(), f.getAbsolutePath()});
+                }
+            }
         } catch(IOException ioe) {
             throw new MIMEParsingException(ioe);
         }
@@ -104,14 +149,12 @@ final class WeakDataFile extends WeakReference<DataFile> {
     }
 
     static void drainRefQueueBounded() {
-        int iterations = 0;
-        WeakDataFile weak = (WeakDataFile) refQueue.poll();
-        while (weak != null && iterations < MAX_ITERATIONS) {
-            LOGGER.fine("Cleaning file = "+weak.file+" from reference queue.");
+        WeakDataFile weak;
+        while (( weak = (WeakDataFile) refQueue.poll()) != null ) {
+            if (LOGGER.isLoggable(Level.FINE)) {
+                LOGGER.log(Level.FINE, "Cleaning file = {0} from reference queue.", weak.file);
+            }
             weak.close();
-            ++iterations;
-            weak = (WeakDataFile) refQueue.poll();
         }
     }
-
 }

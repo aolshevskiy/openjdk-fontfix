@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,6 +35,7 @@
 #include "net_util.h"
 
 #include "sun_nio_ch_Net.h"
+#include "sun_nio_ch_PollArrayWrapper.h"
 
 /**
  * Definitions to allow for building with older SDK include files.
@@ -100,6 +101,18 @@ Java_sun_nio_ch_Net_isIPv6Available0(JNIEnv* env, jclass cl)
     return JNI_FALSE;
 }
 
+JNIEXPORT jint JNICALL
+Java_sun_nio_ch_Net_isExclusiveBindAvailable(JNIEnv *env, jclass clazz) {
+    OSVERSIONINFO ver;
+    int version;
+    ver.dwOSVersionInfoSize = sizeof(ver);
+    GetVersionEx(&ver);
+    version = ver.dwMajorVersion * 10 + ver.dwMinorVersion;
+    //if os <= xp exclusive binding is off by default
+    return version >= 60 ? 1 : 0;
+}
+
+
 JNIEXPORT jboolean JNICALL
 Java_sun_nio_ch_Net_canIPv6SocketJoinIPv4Group0(JNIEnv* env, jclass cl)
 {
@@ -143,8 +156,8 @@ Java_sun_nio_ch_Net_socket0(JNIEnv *env, jclass cl, jboolean preferIPv6,
 }
 
 JNIEXPORT void JNICALL
-Java_sun_nio_ch_Net_bind0(JNIEnv *env, jclass clazz, jboolean preferIPv6,
-                          jobject fdo, jobject iao, jint port)
+Java_sun_nio_ch_Net_bind0(JNIEnv *env, jclass clazz, jobject fdo, jboolean preferIPv6,
+                          jboolean isExclBind, jobject iao, jint port)
 {
     SOCKETADDRESS sa;
     int rv;
@@ -154,7 +167,7 @@ Java_sun_nio_ch_Net_bind0(JNIEnv *env, jclass clazz, jboolean preferIPv6,
       return;
     }
 
-    rv = NET_Bind(fdval(env, fdo), (struct sockaddr *)&sa, sa_len);
+    rv = NET_WinBind(fdval(env, fdo), (struct sockaddr *)&sa, sa_len, isExclBind);
     if (rv == SOCKET_ERROR)
         NET_ThrowNew(env, WSAGetLastError(), "bind");
 }
@@ -523,4 +536,50 @@ Java_sun_nio_ch_Net_shutdown(JNIEnv *env, jclass cl, jobject fdo, jint jhow) {
     if (shutdown(fdval(env, fdo), how) == SOCKET_ERROR) {
         NET_ThrowNew(env, WSAGetLastError(), "shutdown");
     }
+}
+
+JNIEXPORT jint JNICALL
+Java_sun_nio_ch_Net_poll(JNIEnv* env, jclass this, jobject fdo, jint events, jlong timeout)
+{
+    int rv;
+    int revents = 0;
+    struct timeval t;
+    int lastError = 0;
+    fd_set rd, wr, ex;
+    jint fd = fdval(env, fdo);
+
+    t.tv_sec = timeout / 1000;
+    t.tv_usec = (timeout % 1000) * 1000;
+
+    FD_ZERO(&rd);
+    FD_ZERO(&wr);
+    FD_ZERO(&ex);
+    if (events & sun_nio_ch_PollArrayWrapper_POLLIN) {
+        FD_SET(fd, &rd);
+    }
+    if (events & sun_nio_ch_PollArrayWrapper_POLLOUT ||
+        events & sun_nio_ch_PollArrayWrapper_POLLCONN) {
+        FD_SET(fd, &wr);
+    }
+    FD_SET(fd, &ex);
+
+    rv = select(fd+1, &rd, &wr, &ex, &t);
+
+    /* save last winsock error */
+    if (rv == SOCKET_ERROR) {
+        handleSocketError(env, lastError);
+        return IOS_THROWN;
+    } else if (rv >= 0) {
+        rv = 0;
+        if (FD_ISSET(fd, &rd)) {
+            rv |= sun_nio_ch_PollArrayWrapper_POLLIN;
+        }
+        if (FD_ISSET(fd, &wr)) {
+            rv |= sun_nio_ch_PollArrayWrapper_POLLOUT;
+        }
+        if (FD_ISSET(fd, &ex)) {
+            rv |= sun_nio_ch_PollArrayWrapper_POLLERR;
+        }
+    }
+    return rv;
 }

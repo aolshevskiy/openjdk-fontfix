@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -53,6 +53,7 @@ import com.sun.jmx.snmp.agent.SnmpStandardObjectServer;
  */
 public abstract class JVM_MANAGEMENT_MIB extends SnmpMib implements Serializable {
 
+    static final long serialVersionUID = 6895037919735816732L;
     /**
      * Default constructor. Initialize the Mib tree.
      */

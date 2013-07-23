@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2008, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,14 +32,15 @@ import static javax.management.openmbean.SimpleType.*;
 
 import com.sun.jmx.remote.util.EnvHelp;
 
-import java.beans.ConstructorProperties;
 import java.io.InvalidObjectException;
+import java.lang.annotation.Annotation;
 import java.lang.annotation.ElementType;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.GenericArrayType;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
@@ -73,6 +74,8 @@ import javax.management.openmbean.SimpleType;
 import javax.management.openmbean.TabularData;
 import javax.management.openmbean.TabularDataSupport;
 import javax.management.openmbean.TabularType;
+import sun.reflect.misc.MethodUtil;
+import sun.reflect.misc.ReflectUtil;
 
 /**
  *   <p>A converter between Java types and the limited set of classes
@@ -298,6 +301,7 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
 
     private static <T extends Enum<T>> MXBeanMapping
             makeEnumMapping(Class<?> enumClass, Class<T> fake) {
+        ReflectUtil.checkPackageAccess(enumClass);
         return new EnumMapping<T>(Util.<Class<T>>cast(enumClass));
     }
 
@@ -422,6 +426,7 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
             (c.getName().equals("com.sun.management.GcInfo") &&
                 c.getClassLoader() == null);
 
+        ReflectUtil.checkPackageAccess(c);
         final List<Method> methods =
                 MBeanAnalyzer.eliminateCovariantMethods(Arrays.asList(c.getMethods()));
         final SortedMap<String,Method> getterMap = newSortedMap();
@@ -827,7 +832,7 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
             Object[] values = new Object[getters.length];
             for (int i = 0; i < getters.length; i++) {
                 try {
-                    Object got = getters[i].invoke(value, (Object[]) null);
+                    Object got = MethodUtil.invoke(getters[i], value, (Object[]) null);
                     values[i] = getterMappings[i].toOpenValue(got);
                 } catch (Exception e) {
                     throw openDataException("Error calling getter for " +
@@ -1010,7 +1015,7 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
                                        MXBeanMapping[] converters)
                 throws InvalidObjectException {
             try {
-                return fromMethod.invoke(null, cd);
+                return MethodUtil.invoke(fromMethod, null, new Object[] {cd});
             } catch (Exception e) {
                 final String msg = "Failed to invoke from(CompositeData)";
                 throw invalidObjectException(msg, e);
@@ -1106,13 +1111,15 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
                 throws InvalidObjectException {
             Object o;
             try {
-                o = getTargetClass().newInstance();
+                final Class<?> targetClass = getTargetClass();
+                ReflectUtil.checkPackageAccess(targetClass);
+                o = targetClass.newInstance();
                 for (int i = 0; i < itemNames.length; i++) {
                     if (cd.containsKey(itemNames[i])) {
                         Object openItem = cd.get(itemNames[i]);
                         Object javaItem =
                             converters[i].fromOpenValue(openItem);
-                        setters[i].invoke(o, javaItem);
+                        MethodUtil.invoke(setters[i], o, new Object[] {javaItem});
                     }
                 }
             } catch (Exception e) {
@@ -1129,14 +1136,56 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
         to getters.  */
     private static final class CompositeBuilderViaConstructor
             extends CompositeBuilder {
+        static class AnnotationHelper {
+            private static Class<? extends Annotation> constructorPropertiesClass;
+            private static Method valueMethod;
+            static {
+                findConstructorPropertiesClass();
+            }
+
+            @SuppressWarnings("unchecked")
+            private static void findConstructorPropertiesClass() {
+                try {
+                    constructorPropertiesClass = (Class<? extends Annotation>)
+                        Class.forName("java.beans.ConstructorProperties", false,
+                                      DefaultMXBeanMappingFactory.class.getClassLoader());
+                    valueMethod = constructorPropertiesClass.getMethod("value");
+                } catch (ClassNotFoundException cnf) {
+                    // java.beans not present
+                } catch (NoSuchMethodException e) {
+                    // should not reach here
+                    throw new InternalError(e);
+                }
+            }
+
+            static boolean isAvailable() {
+                return constructorPropertiesClass != null;
+            }
+
+            static String[] getPropertyNames(Constructor<?> constr) {
+                if (!isAvailable())
+                    return null;
+
+                Annotation a = constr.getAnnotation(constructorPropertiesClass);
+                if (a == null) return null;
+
+                try {
+                    return (String[]) valueMethod.invoke(a);
+                } catch (InvocationTargetException e) {
+                    throw new InternalError(e);
+                } catch (IllegalAccessException e) {
+                    throw new InternalError(e);
+                }
+            }
+        }
 
         CompositeBuilderViaConstructor(Class<?> targetClass, String[] itemNames) {
             super(targetClass, itemNames);
         }
 
         String applicable(Method[] getters) throws InvalidObjectException {
-
-            final Class<ConstructorProperties> propertyNamesClass = ConstructorProperties.class;
+            if (!AnnotationHelper.isAvailable())
+                return "@ConstructorProperties annotation not available";
 
             Class<?> targetClass = getTargetClass();
             Constructor<?>[] constrs = targetClass.getConstructors();
@@ -1145,7 +1194,7 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
             List<Constructor<?>> annotatedConstrList = newList();
             for (Constructor<?> constr : constrs) {
                 if (Modifier.isPublic(constr.getModifiers())
-                        && constr.getAnnotation(propertyNamesClass) != null)
+                        && AnnotationHelper.getPropertyNames(constr) != null)
                     annotatedConstrList.add(constr);
             }
 
@@ -1174,8 +1223,7 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
             // so we can test unambiguity.
             Set<BitSet> getterIndexSets = newSet();
             for (Constructor<?> constr : annotatedConstrList) {
-                String[] propertyNames =
-                    constr.getAnnotation(propertyNamesClass).value();
+                String[] propertyNames = AnnotationHelper.getPropertyNames(constr);
 
                 Type[] paramTypes = constr.getGenericParameterTypes();
                 if (paramTypes.length != propertyNames.length) {
@@ -1321,6 +1369,7 @@ public class DefaultMXBeanMappingFactory extends MXBeanMappingFactory {
             }
 
             try {
+                ReflectUtil.checkPackageAccess(max.constructor.getDeclaringClass());
                 return max.constructor.newInstance(params);
             } catch (Exception e) {
                 final String msg =

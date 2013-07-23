@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -135,6 +135,14 @@ Java_java_util_zip_ZipFile_getTotal(JNIEnv *env, jclass cls, jlong zfile)
     jzfile *zip = jlong_to_ptr(zfile);
 
     return zip->total;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_java_util_zip_ZipFile_startsWithLOC(JNIEnv *env, jclass cls, jlong zfile)
+{
+    jzfile *zip = jlong_to_ptr(zfile);
+
+    return zip->locsig;
 }
 
 JNIEXPORT void JNICALL

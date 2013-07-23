@@ -23,14 +23,15 @@
  */
 
 #include "precompiled.hpp"
+#include "compiler/disassembler.hpp"
 #include "gc_interface/collectedHeap.inline.hpp"
 #include "interpreter/interpreter.hpp"
 #include "interpreter/oopMapCache.hpp"
 #include "memory/resourceArea.hpp"
 #include "memory/universe.inline.hpp"
 #include "oops/markOop.hpp"
-#include "oops/methodDataOop.hpp"
-#include "oops/methodOop.hpp"
+#include "oops/methodData.hpp"
+#include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/oop.inline2.hpp"
 #include "prims/methodHandles.hpp"
@@ -383,15 +384,14 @@ void frame::interpreter_frame_set_locals(intptr_t* locs)  {
   *interpreter_frame_locals_addr() = locs;
 }
 
-methodOop frame::interpreter_frame_method() const {
+Method* frame::interpreter_frame_method() const {
   assert(is_interpreted_frame(), "interpreted frame expected");
-  methodOop m = *interpreter_frame_method_addr();
-  assert(m->is_perm(), "bad methodOop in interpreter frame");
-  assert(m->is_method(), "not a methodOop");
+  Method* m = *interpreter_frame_method_addr();
+  assert(m->is_method(), "not a Method*");
   return m;
 }
 
-void frame::interpreter_frame_set_method(methodOop method) {
+void frame::interpreter_frame_set_method(Method* method) {
   assert(is_interpreted_frame(), "interpreted frame expected");
   *interpreter_frame_method_addr() = method;
 }
@@ -410,7 +410,7 @@ void frame::interpreter_frame_set_bcx(intptr_t bcx) {
         if (!is_now_bci) {
           // The bcx was just converted from bci to bcp.
           // Convert the mdx in parallel.
-          methodDataOop mdo = interpreter_frame_method()->method_data();
+          MethodData* mdo = interpreter_frame_method()->method_data();
           assert(mdo != NULL, "");
           int mdi = mdx - 1; // We distinguish valid mdi from zero by adding one.
           address mdp = mdo->di_to_dp(mdi);
@@ -420,7 +420,7 @@ void frame::interpreter_frame_set_bcx(intptr_t bcx) {
         if (is_now_bci) {
           // The bcx was just converted from bcp to bci.
           // Convert the mdx in parallel.
-          methodDataOop mdo = interpreter_frame_method()->method_data();
+          MethodData* mdo = interpreter_frame_method()->method_data();
           assert(mdo != NULL, "");
           int mdi = mdo->dp_to_di((address)mdx);
           interpreter_frame_set_mdx((intptr_t)mdi + 1); // distinguish valid from 0.
@@ -691,7 +691,7 @@ static void print_C_frame(outputStream* st, char* buf, int buflen, address pc) {
 void frame::print_on_error(outputStream* st, char* buf, int buflen, bool verbose) const {
   if (_cb != NULL) {
     if (Interpreter::contains(pc())) {
-      methodOop m = this->interpreter_frame_method();
+      Method* m = this->interpreter_frame_method();
       if (m != NULL) {
         m->name_and_sig_as_C_string(buf, buflen);
         st->print("j  %s", buf);
@@ -709,10 +709,11 @@ void frame::print_on_error(outputStream* st, char* buf, int buflen, bool verbose
     } else if (_cb->is_buffer_blob()) {
       st->print("v  ~BufferBlob::%s", ((BufferBlob *)_cb)->name());
     } else if (_cb->is_nmethod()) {
-      methodOop m = ((nmethod *)_cb)->method();
+      Method* m = ((nmethod *)_cb)->method();
       if (m != NULL) {
         m->name_and_sig_as_C_string(buf, buflen);
-        st->print("J  %s", buf);
+        st->print("J  %s @ " PTR_FORMAT " [" PTR_FORMAT "+" SIZE_FORMAT "]",
+                  buf, _pc, _cb->code_begin(), _pc - _cb->code_begin());
       } else {
         st->print("J  " PTR_FORMAT, pc());
       }
@@ -736,8 +737,8 @@ void frame::print_on_error(outputStream* st, char* buf, int buflen, bool verbose
 /*
   The interpreter_frame_expression_stack_at method in the case of SPARC needs the
   max_stack value of the method in order to compute the expression stack address.
-  It uses the methodOop in order to get the max_stack value but during GC this
-  methodOop value saved on the frame is changed by reverse_and_push and hence cannot
+  It uses the Method* in order to get the max_stack value but during GC this
+  Method* value saved on the frame is changed by reverse_and_push and hence cannot
   be used. So we save the max_stack value in the FrameClosure object and pass it
   down to the interpreter_frame_expression_stack_at method
 */
@@ -879,16 +880,20 @@ oop* frame::interpreter_callee_receiver_addr(Symbol* signature) {
 }
 
 
-void frame::oops_interpreted_do(OopClosure* f, const RegisterMap* map, bool query_oop_map_cache) {
+void frame::oops_interpreted_do(OopClosure* f, CLDToOopClosure* cld_f,
+    const RegisterMap* map, bool query_oop_map_cache) {
   assert(is_interpreted_frame(), "Not an interpreted frame");
   assert(map != NULL, "map must be set");
   Thread *thread = Thread::current();
   methodHandle m (thread, interpreter_frame_method());
   jint      bci = interpreter_frame_bci();
 
-  assert(Universe::heap()->is_in(m()), "must be valid oop");
+  assert(!Universe::heap()->is_in(m()),
+          "must be valid oop");
   assert(m->is_method(), "checking frame value");
-  assert((m->is_native() && bci == 0)  || (!m->is_native() && bci >= 0 && bci < m->code_size()), "invalid bci value");
+  assert((m->is_native() && bci == 0)  ||
+         (!m->is_native() && bci >= 0 && bci < m->code_size()),
+         "invalid bci value");
 
   // Handle the monitor elements in the activation
   for (
@@ -903,23 +908,20 @@ void frame::oops_interpreted_do(OopClosure* f, const RegisterMap* map, bool quer
   }
 
   // process fixed part
-  f->do_oop((oop*)interpreter_frame_method_addr());
-  f->do_oop((oop*)interpreter_frame_cache_addr());
-
-  // Hmm what about the mdp?
-#ifdef CC_INTERP
-  // Interpreter frame in the midst of a call have a methodOop within the
-  // object.
-  interpreterState istate = get_interpreterState();
-  if (istate->msg() == BytecodeInterpreter::call_method) {
-    f->do_oop((oop*)&istate->_result._to_call._callee);
+  if (cld_f != NULL) {
+    // The method pointer in the frame might be the only path to the method's
+    // klass, and the klass needs to be kept alive while executing. The GCs
+    // don't trace through method pointers, so typically in similar situations
+    // the mirror or the class loader of the klass are installed as a GC root.
+    // To minimze the overhead of doing that here, we ask the GC to pass down a
+    // closure that knows how to keep klasses alive given a ClassLoaderData.
+    cld_f->do_cld(m->method_holder()->class_loader_data());
   }
-
-#endif /* CC_INTERP */
 
 #if !defined(PPC) || defined(ZERO)
   if (m->is_native()) {
 #ifdef CC_INTERP
+    interpreterState istate = get_interpreterState();
     f->do_oop((oop*)&istate->_oop_temp);
 #else
     f->do_oop((oop*)( fp() + interpreter_frame_oop_temp_offset ));
@@ -1006,6 +1008,7 @@ class CompiledArgumentOopFinder: public SignatureInfo {
   OopClosure*     _f;
   int             _offset;        // the current offset, incremented with each argument
   bool            _has_receiver;  // true if the callee has a receiver
+  bool            _has_appendix;  // true if the call has an appendix
   frame           _fr;
   RegisterMap*    _reg_map;
   int             _arg_size;
@@ -1025,19 +1028,20 @@ class CompiledArgumentOopFinder: public SignatureInfo {
   }
 
  public:
-  CompiledArgumentOopFinder(Symbol* signature, bool has_receiver, OopClosure* f, frame fr,  const RegisterMap* reg_map)
+  CompiledArgumentOopFinder(Symbol* signature, bool has_receiver, bool has_appendix, OopClosure* f, frame fr,  const RegisterMap* reg_map)
     : SignatureInfo(signature) {
 
     // initialize CompiledArgumentOopFinder
     _f         = f;
     _offset    = 0;
     _has_receiver = has_receiver;
+    _has_appendix = has_appendix;
     _fr        = fr;
     _reg_map   = (RegisterMap*)reg_map;
-    _arg_size  = ArgumentSizeComputer(signature).size() + (has_receiver ? 1 : 0);
+    _arg_size  = ArgumentSizeComputer(signature).size() + (has_receiver ? 1 : 0) + (has_appendix ? 1 : 0);
 
     int arg_size;
-    _regs = SharedRuntime::find_callee_arguments(signature, has_receiver, &arg_size);
+    _regs = SharedRuntime::find_callee_arguments(signature, has_receiver, has_appendix, &arg_size);
     assert(arg_size == _arg_size, "wrong arg size");
   }
 
@@ -1047,12 +1051,16 @@ class CompiledArgumentOopFinder: public SignatureInfo {
       _offset++;
     }
     iterate_parameters();
+    if (_has_appendix) {
+      handle_oop_offset();
+      _offset++;
+    }
   }
 };
 
-void frame::oops_compiled_arguments_do(Symbol* signature, bool has_receiver, const RegisterMap* reg_map, OopClosure* f) {
+void frame::oops_compiled_arguments_do(Symbol* signature, bool has_receiver, bool has_appendix, const RegisterMap* reg_map, OopClosure* f) {
   ResourceMark rm;
-  CompiledArgumentOopFinder finder(signature, has_receiver, f, *this, reg_map);
+  CompiledArgumentOopFinder finder(signature, has_receiver, has_appendix, f, *this, reg_map);
   finder.oops_do();
 }
 
@@ -1068,7 +1076,12 @@ oop frame::retrieve_receiver(RegisterMap* reg_map) {
 
   // First consult the ADLC on where it puts parameter 0 for this signature.
   VMReg reg = SharedRuntime::name_for_receiver();
-  oop r = *caller.oopmapreg_to_location(reg, reg_map);
+  oop* oop_adr = caller.oopmapreg_to_location(reg, reg_map);
+  if (oop_adr == NULL) {
+    guarantee(oop_adr != NULL, "bad register save location");
+    return NULL;
+  }
+  oop r = *oop_adr;
   assert(Universe::heap()->is_in_or_null(r), err_msg("bad receiver: " INTPTR_FORMAT " (" INTX_FORMAT ")", (intptr_t) r, (intptr_t) r));
   return r;
 }
@@ -1118,7 +1131,7 @@ void frame::oops_entry_do(OopClosure* f, const RegisterMap* map) {
 }
 
 
-void frame::oops_do_internal(OopClosure* f, CodeBlobClosure* cf, RegisterMap* map, bool use_interpreter_oop_map_cache) {
+void frame::oops_do_internal(OopClosure* f, CLDToOopClosure* cld_f, CodeBlobClosure* cf, RegisterMap* map, bool use_interpreter_oop_map_cache) {
 #ifndef PRODUCT
   // simulate GC crash here to dump java thread in error report
   if (CrashGCForDumpingJavaThread) {
@@ -1127,7 +1140,7 @@ void frame::oops_do_internal(OopClosure* f, CodeBlobClosure* cf, RegisterMap* ma
   }
 #endif
   if (is_interpreted_frame()) {
-    oops_interpreted_do(f, map, use_interpreter_oop_map_cache);
+    oops_interpreted_do(f, cld_f, map, use_interpreter_oop_map_cache);
   } else if (is_entry_frame()) {
     oops_entry_do(f, map);
   } else if (CodeCache::contains(pc())) {
@@ -1148,9 +1161,19 @@ void frame::nmethods_do(CodeBlobClosure* cf) {
 }
 
 
+// call f() on the interpreted Method*s in the stack.
+// Have to walk the entire code cache for the compiled frames Yuck.
+void frame::metadata_do(void f(Metadata*)) {
+  if (_cb != NULL && Interpreter::contains(pc())) {
+    Method* m = this->interpreter_frame_method();
+    assert(m != NULL, "huh?");
+    f(m);
+  }
+}
+
 void frame::gc_prologue() {
   if (is_interpreted_frame()) {
-    // set bcx to bci to become methodOop position independent during GC
+    // set bcx to bci to become Method* position independent during GC
     interpreter_frame_set_bcx(interpreter_frame_bci());
   }
 }
@@ -1225,7 +1248,7 @@ void frame::zap_dead_locals(JavaThread* thread, const RegisterMap* map) {
 void frame::zap_dead_interpreted_locals(JavaThread *thread, const RegisterMap* map) {
   // get current interpreter 'pc'
   assert(is_interpreted_frame(), "Not an interpreted frame");
-  methodOop m   = interpreter_frame_method();
+  Method* m   = interpreter_frame_method();
   int       bci = interpreter_frame_bci();
 
   int max_locals = m->is_native() ? m->size_of_parameters() : m->max_locals();
@@ -1269,7 +1292,7 @@ void frame::zap_dead_deoptimized_locals(JavaThread*, const RegisterMap*) {
 void frame::verify(const RegisterMap* map) {
   // for now make sure receiver type is correct
   if (is_interpreted_frame()) {
-    methodOop method = interpreter_frame_method();
+    Method* method = interpreter_frame_method();
     guarantee(method->is_method(), "method is wrong in frame::verify");
     if (!method->is_static()) {
       // fetch the receiver
@@ -1278,7 +1301,7 @@ void frame::verify(const RegisterMap* map) {
     }
   }
   COMPILER2_PRESENT(assert(DerivedPointerTable::is_empty(), "must be empty before verify");)
-  oops_do_internal(&VerifyOopClosure::verify_oop, NULL, (RegisterMap*)map, false);
+  oops_do_internal(&VerifyOopClosure::verify_oop, NULL, NULL, (RegisterMap*)map, false);
 }
 
 
@@ -1334,7 +1357,7 @@ void frame::describe(FrameValues& values, int frame_no) {
   }
 
   if (is_interpreted_frame()) {
-    methodOop m = interpreter_frame_method();
+    Method* m = interpreter_frame_method();
     int bci = interpreter_frame_bci();
 
     // Label the method and current bci

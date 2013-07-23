@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2007, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -81,17 +81,14 @@ else
 include $(BUILDDIR)/common/Classes.gmk
 endif # PLATFORM
 
-#
-# Libraries to link
-#
-ifeq ($(PLATFORM), windows)
-  OTHER_LDLIBS = $(JVMLIB)
-else ifeq ($(PLATFORM), macosx)
-  OTHER_LDLIBS = $(LIBDL) $(JVMLIB) -framework Kerberos
-else
-  OTHER_LDLIBS = $(LIBDL) $(JVMLIB)
+ifneq ($(PLATFORM), windows)
+  ifeq ($(PLATFORM), macosx)
+    OTHER_LDLIBS = $(LIBDL) -framework Kerberos
+  else
+    OTHER_LDLIBS = $(LIBDL)
+  endif
 endif
-
+  
 build:
 ifeq ($(PLATFORM),windows)
 	$(call make-launcher, kinit, sun.security.krb5.internal.tools.Kinit, , )

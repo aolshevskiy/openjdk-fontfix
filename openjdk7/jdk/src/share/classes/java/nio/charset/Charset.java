@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,6 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.spi.CharsetProvider;
 import java.security.AccessController;
-import java.security.AccessControlException;
 import java.security.PrivilegedAction;
 import java.util.Collections;
 import java.util.HashSet;
@@ -67,7 +66,7 @@ import sun.security.action.GetPropertyAction;
  *
  *
  * <a name="names"><a name="charenc">
- * <h4>Charset names</h4>
+ * <h2>Charset names</h2>
  *
  * <p> Charsets are named by strings composed of the following characters:
  *
@@ -141,7 +140,7 @@ import sun.security.action.GetPropertyAction;
  * previous canonical name be made into an alias.
  *
  *
- * <h4>Standard charsets</h4>
+ * <h2>Standard charsets</h2>
  *
  * <a name="standard">
  *
@@ -218,7 +217,7 @@ import sun.security.action.GetPropertyAction;
  * <p>The {@link StandardCharsets} class defines constants for each of the
  * standard charsets.
  *
- * <h4>Terminology</h4>
+ * <h2>Terminology</h2>
  *
  * <p> The name of this class is taken from the terms used in
  * <a href="http://www.ietf.org/rfc/rfc2278.txt"><i>RFC&nbsp;2278</i></a>.
@@ -339,15 +338,15 @@ public abstract class Charset
     // those whose lookup or instantiation causes a security exception to be
     // thrown.  Should be invoked with full privileges.
     //
-    private static Iterator providers() {
-        return new Iterator() {
+    private static Iterator<CharsetProvider> providers() {
+        return new Iterator<CharsetProvider>() {
 
                 ClassLoader cl = ClassLoader.getSystemClassLoader();
                 ServiceLoader<CharsetProvider> sl =
                     ServiceLoader.load(CharsetProvider.class, cl);
                 Iterator<CharsetProvider> i = sl.iterator();
 
-                Object next = null;
+                CharsetProvider next = null;
 
                 private boolean getNext() {
                     while (next == null) {
@@ -370,10 +369,10 @@ public abstract class Charset
                     return getNext();
                 }
 
-                public Object next() {
+                public CharsetProvider next() {
                     if (!getNext())
                         throw new NoSuchElementException();
-                    Object n = next;
+                    CharsetProvider n = next;
                     next = null;
                     return n;
                 }
@@ -386,7 +385,8 @@ public abstract class Charset
     }
 
     // Thread-local gate to prevent recursive provider lookups
-    private static ThreadLocal<ThreadLocal> gate = new ThreadLocal<ThreadLocal>();
+    private static ThreadLocal<ThreadLocal<?>> gate =
+            new ThreadLocal<ThreadLocal<?>>();
 
     private static Charset lookupViaProviders(final String charsetName) {
 
@@ -410,8 +410,9 @@ public abstract class Charset
             return AccessController.doPrivileged(
                 new PrivilegedAction<Charset>() {
                     public Charset run() {
-                        for (Iterator i = providers(); i.hasNext();) {
-                            CharsetProvider cp = (CharsetProvider)i.next();
+                        for (Iterator<CharsetProvider> i = providers();
+                             i.hasNext();) {
+                            CharsetProvider cp = i.next();
                             Charset cs = cp.charsetForName(charsetName);
                             if (cs != null)
                                 return cs;
@@ -426,46 +427,38 @@ public abstract class Charset
     }
 
     /* The extended set of charsets */
-    private static Object extendedProviderLock = new Object();
-    private static boolean extendedProviderProbed = false;
-    private static CharsetProvider extendedProvider = null;
-
-    private static void probeExtendedProvider() {
-        AccessController.doPrivileged(new PrivilegedAction<Object>() {
-                public Object run() {
-                    try {
-                        Class epc
-                            = Class.forName("sun.nio.cs.ext.ExtendedCharsets");
-                        extendedProvider = (CharsetProvider)epc.newInstance();
-                    } catch (ClassNotFoundException x) {
-                        // Extended charsets not available
-                        // (charsets.jar not present)
-                    } catch (InstantiationException x) {
-                        throw new Error(x);
-                    } catch (IllegalAccessException x) {
-                        throw new Error(x);
-                    }
-                    return null;
-                }
-            });
+    private static class ExtendedProviderHolder {
+        static final CharsetProvider extendedProvider = extendedProvider();
+        // returns ExtendedProvider, if installed
+        private static CharsetProvider extendedProvider() {
+            return AccessController.doPrivileged(
+                       new PrivilegedAction<CharsetProvider>() {
+                           public CharsetProvider run() {
+                                try {
+                                    Class<?> epc
+                                        = Class.forName("sun.nio.cs.ext.ExtendedCharsets");
+                                    return (CharsetProvider)epc.newInstance();
+                                } catch (ClassNotFoundException x) {
+                                    // Extended charsets not available
+                                    // (charsets.jar not present)
+                                } catch (InstantiationException |
+                                         IllegalAccessException x) {
+                                  throw new Error(x);
+                                }
+                                return null;
+                            }
+                        });
+        }
     }
 
     private static Charset lookupExtendedCharset(String charsetName) {
-        CharsetProvider ecp = null;
-        synchronized (extendedProviderLock) {
-            if (!extendedProviderProbed) {
-                probeExtendedProvider();
-                extendedProviderProbed = true;
-            }
-            ecp = extendedProvider;
-        }
+        CharsetProvider ecp = ExtendedProviderHolder.extendedProvider;
         return (ecp != null) ? ecp.charsetForName(charsetName) : null;
     }
 
     private static Charset lookup(String charsetName) {
         if (charsetName == null)
             throw new IllegalArgumentException("Null charset name");
-
         Object[] a;
         if ((a = cache1) != null && charsetName.equals(a[0]))
             return (Charset)a[1];
@@ -482,7 +475,6 @@ public abstract class Charset
             cache1 = a;
             return (Charset)a[1];
         }
-
         Charset cs;
         if ((cs = standardProvider.charsetForName(charsetName)) != null ||
             (cs = lookupExtendedCharset(charsetName))           != null ||
@@ -498,7 +490,7 @@ public abstract class Charset
     }
 
     /**
-     * Tells whether the named charset is supported. </p>
+     * Tells whether the named charset is supported.
      *
      * @param  charsetName
      *         The name of the requested charset; may be either
@@ -518,7 +510,7 @@ public abstract class Charset
     }
 
     /**
-     * Returns a charset object for the named charset. </p>
+     * Returns a charset object for the named charset.
      *
      * @param  charsetName
      *         The name of the requested charset; may be either
@@ -588,8 +580,11 @@ public abstract class Charset
                         new TreeMap<String,Charset>(
                             ASCIICaseInsensitiveComparator.CASE_INSENSITIVE_ORDER);
                     put(standardProvider.charsets(), m);
-                    for (Iterator i = providers(); i.hasNext();) {
-                        CharsetProvider cp = (CharsetProvider)i.next();
+                    CharsetProvider ecp = ExtendedProviderHolder.extendedProvider;
+                    if (ecp != null)
+                        put(ecp.charsets(), m);
+                    for (Iterator<CharsetProvider> i = providers(); i.hasNext();) {
+                        CharsetProvider cp = i.next();
                         put(cp.charsets(), m);
                     }
                     return Collections.unmodifiableSortedMap(m);
@@ -634,7 +629,7 @@ public abstract class Charset
 
     /**
      * Initializes a new charset with the given canonical name and alias
-     * set. </p>
+     * set.
      *
      * @param  canonicalName
      *         The canonical name of this charset
@@ -655,7 +650,7 @@ public abstract class Charset
     }
 
     /**
-     * Returns this charset's canonical name. </p>
+     * Returns this charset's canonical name.
      *
      * @return  The canonical name of this charset
      */
@@ -664,7 +659,7 @@ public abstract class Charset
     }
 
     /**
-     * Returns a set containing this charset's aliases. </p>
+     * Returns a set containing this charset's aliases.
      *
      * @return  An immutable set of this charset's aliases
      */
@@ -695,7 +690,7 @@ public abstract class Charset
     /**
      * Tells whether or not this charset is registered in the <a
      * href="http://www.iana.org/assignments/character-sets">IANA Charset
-     * Registry</a>.  </p>
+     * Registry</a>.
      *
      * @return  <tt>true</tt> if, and only if, this charset is known by its
      *          implementor to be registered with the IANA
@@ -742,19 +737,22 @@ public abstract class Charset
      * it is not necessarily the case that the given charset is not contained
      * in this charset.
      *
+     * @param   cs
+     *          The given charset
+     *
      * @return  <tt>true</tt> if the given charset is contained in this charset
      */
     public abstract boolean contains(Charset cs);
 
     /**
-     * Constructs a new decoder for this charset. </p>
+     * Constructs a new decoder for this charset.
      *
      * @return  A new decoder for this charset
      */
     public abstract CharsetDecoder newDecoder();
 
     /**
-     * Constructs a new encoder for this charset. </p>
+     * Constructs a new encoder for this charset.
      *
      * @return  A new encoder for this charset
      *
@@ -886,7 +884,7 @@ public abstract class Charset
     }
 
     /**
-     * Computes a hashcode for this charset. </p>
+     * Computes a hashcode for this charset.
      *
      * @return  An integer hashcode
      */
@@ -912,7 +910,7 @@ public abstract class Charset
     }
 
     /**
-     * Returns a string describing this charset. </p>
+     * Returns a string describing this charset.
      *
      * @return  A string describing this charset
      */

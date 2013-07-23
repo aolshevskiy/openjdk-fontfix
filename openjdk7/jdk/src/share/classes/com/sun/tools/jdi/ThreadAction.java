@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,7 @@ import java.util.EventObject;
  * with JDI events.
  */
 class ThreadAction extends EventObject {
+    private static final long serialVersionUID = 5690763191100515283L;
     // Event ids
     /*static final int THREAD_SUSPENDED = 1;*/
     static final int THREAD_RESUMABLE = 2;

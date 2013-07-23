@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,17 +25,23 @@
 
 package com.sun.tools.javadoc;
 
-import com.sun.tools.javac.util.Context;
-import com.sun.tools.javac.util.Position;
+import com.sun.source.util.TreePath;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Kinds;
 import com.sun.tools.javac.code.Symbol.*;
 import com.sun.tools.javac.comp.MemberEnter;
 import com.sun.tools.javac.tree.JCTree.*;
+import com.sun.tools.javac.util.Context;
 
 /**
  *  Javadoc's own memberEnter phase does a few things above and beyond that
  *  done by javac.
+ *
+ *  <p><b>This is NOT part of any supported API.
+ *  If you write code that depends on this, you do so at your own risk.
+ *  This code and its internal interfaces are subject to change or
+ *  deletion without notice.</b>
+ *
  *  @author Neal Gafter
  */
 public class JavadocMemberEnter extends MemberEnter {
@@ -61,28 +67,30 @@ public class JavadocMemberEnter extends MemberEnter {
         docenv = DocEnv.instance(context);
     }
 
+    @Override
     public void visitMethodDef(JCMethodDecl tree) {
         super.visitMethodDef(tree);
         MethodSymbol meth = tree.sym;
         if (meth == null || meth.kind != Kinds.MTH) return;
-        String docComment = env.toplevel.docComments.get(tree);
-        Position.LineMap lineMap = env.toplevel.lineMap;
+        TreePath treePath = docenv.getTreePath(env.toplevel, env.enclClass, tree);
         if (meth.isConstructor())
-            docenv.makeConstructorDoc(meth, docComment, tree, lineMap);
+            docenv.makeConstructorDoc(meth, treePath);
         else if (isAnnotationTypeElement(meth))
-            docenv.makeAnnotationTypeElementDoc(meth, docComment, tree, lineMap);
+            docenv.makeAnnotationTypeElementDoc(meth, treePath);
         else
-            docenv.makeMethodDoc(meth, docComment, tree, lineMap);
+            docenv.makeMethodDoc(meth, treePath);
+
+        // release resources
+        tree.body = null;
     }
 
+    @Override
     public void visitVarDef(JCVariableDecl tree) {
         super.visitVarDef(tree);
         if (tree.sym != null &&
                 tree.sym.kind == Kinds.VAR &&
                 !isParameter(tree.sym)) {
-            String docComment = env.toplevel.docComments.get(tree);
-            Position.LineMap lineMap = env.toplevel.lineMap;
-            docenv.makeFieldDoc(tree.sym, docComment, tree, lineMap);
+            docenv.makeFieldDoc(tree.sym, docenv.getTreePath(env.toplevel, env.enclClass, tree));
         }
     }
 

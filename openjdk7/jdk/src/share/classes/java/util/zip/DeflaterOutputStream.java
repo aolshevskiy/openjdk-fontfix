@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -71,7 +71,7 @@ class DeflaterOutputStream extends FilterOutputStream {
      *        {@link Deflater#SYNC_FLUSH} before flushing the output
      *        stream, otherwise only flushes the output stream
      *
-     * @throws IllegalArgumentException if size is <= 0
+     * @throws IllegalArgumentException if {@code size <= 0}
      *
      * @since 1.7
      */
@@ -101,7 +101,7 @@ class DeflaterOutputStream extends FilterOutputStream {
      * @param out the output stream
      * @param def the compressor ("deflater")
      * @param size the output buffer size
-     * @exception IllegalArgumentException if size is <= 0
+     * @exception IllegalArgumentException if {@code size <= 0}
      */
     public DeflaterOutputStream(OutputStream out, Deflater def, int size) {
         this(out, def, size, false);

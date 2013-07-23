@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -167,6 +167,7 @@ public final class SunPKCS11 extends AuthProvider {
             try {
                 String nssLibraryDirectory = config.getNssLibraryDirectory();
                 String nssSecmodDirectory = config.getNssSecmodDirectory();
+                boolean nssOptimizeSpace = config.getNssOptimizeSpace();
 
                 if (secmod.isInitialized()) {
                     if (nssSecmodDirectory != null) {
@@ -204,7 +205,7 @@ public final class SunPKCS11 extends AuthProvider {
                         }
                     }
                     secmod.initialize(nssDbMode, nssSecmodDirectory,
-                        nssLibraryDirectory);
+                        nssLibraryDirectory, nssOptimizeSpace);
                 }
             } catch (IOException e) {
                 // XXX which exception to throw
@@ -342,6 +343,7 @@ public final class SunPKCS11 extends AuthProvider {
                 System.out.println("Library info:");
                 System.out.println(p11Info);
             }
+
             if ((slotID < 0) || showInfo) {
                 long[] slots = p11.C_GetSlotList(false);
                 if (showInfo) {
@@ -398,12 +400,8 @@ public final class SunPKCS11 extends AuthProvider {
         return System.identityHashCode(this);
     }
 
-    private static String[] s(String s1) {
-        return new String[] {s1};
-    }
-
-    private static String[] s(String s1, String s2) {
-        return new String[] {s1, s2};
+    private static String[] s(String ...aliases) {
+        return aliases;
     }
 
     private static final class Descriptor {
@@ -520,24 +518,39 @@ public final class SunPKCS11 extends AuthProvider {
                 m(CKM_MD2));
         d(MD, "MD5",            P11Digest,
                 m(CKM_MD5));
-        d(MD, "SHA1",           P11Digest,              s("SHA", "SHA-1"),
+        d(MD, "SHA1",           P11Digest,
+                s("SHA", "SHA-1", "1.3.14.3.2.26", "OID.1.3.14.3.2.26"),
                 m(CKM_SHA_1));
+
+        d(MD, "SHA-224",        P11Digest,
+                s("2.16.840.1.101.3.4.2.4", "OID.2.16.840.1.101.3.4.2.4"),
+                m(CKM_SHA224));
         d(MD, "SHA-256",        P11Digest,
+                s("2.16.840.1.101.3.4.2.1", "OID.2.16.840.1.101.3.4.2.1"),
                 m(CKM_SHA256));
         d(MD, "SHA-384",        P11Digest,
+                s("2.16.840.1.101.3.4.2.2", "OID.2.16.840.1.101.3.4.2.2"),
                 m(CKM_SHA384));
         d(MD, "SHA-512",        P11Digest,
+                s("2.16.840.1.101.3.4.2.3", "OID.2.16.840.1.101.3.4.2.3"),
                 m(CKM_SHA512));
 
         d(MAC, "HmacMD5",       P11MAC,
                 m(CKM_MD5_HMAC));
         d(MAC, "HmacSHA1",      P11MAC,
+                s("1.2.840.113549.2.7", "OID.1.2.840.113549.2.7"),
                 m(CKM_SHA_1_HMAC));
+        d(MAC, "HmacSHA224",    P11MAC,
+                s("1.2.840.113549.2.8", "OID.1.2.840.113549.2.8"),
+                m(CKM_SHA224_HMAC));
         d(MAC, "HmacSHA256",    P11MAC,
+                s("1.2.840.113549.2.9", "OID.1.2.840.113549.2.9"),
                 m(CKM_SHA256_HMAC));
         d(MAC, "HmacSHA384",    P11MAC,
+                s("1.2.840.113549.2.10", "OID.1.2.840.113549.2.10"),
                 m(CKM_SHA384_HMAC));
         d(MAC, "HmacSHA512",    P11MAC,
+                s("1.2.840.113549.2.11", "OID.1.2.840.113549.2.11"),
                 m(CKM_SHA512_HMAC));
         d(MAC, "SslMacMD5",     P11MAC,
                 m(CKM_SSL3_MD5_MAC));
@@ -547,6 +560,7 @@ public final class SunPKCS11 extends AuthProvider {
         d(KPG, "RSA",           P11KeyPairGenerator,
                 m(CKM_RSA_PKCS_KEY_PAIR_GEN));
         d(KPG, "DSA",           P11KeyPairGenerator,
+                s("1.3.14.3.2.12", "1.2.840.10040.4.1", "OID.1.2.840.10040.4.1"),
                 m(CKM_DSA_KEY_PAIR_GEN));
         d(KPG, "DH",            P11KeyPairGenerator,    s("DiffieHellman"),
                 m(CKM_DH_PKCS_KEY_PAIR_GEN));
@@ -569,6 +583,7 @@ public final class SunPKCS11 extends AuthProvider {
         d(KF, "RSA",            P11RSAKeyFactory,
                 m(CKM_RSA_PKCS_KEY_PAIR_GEN, CKM_RSA_PKCS, CKM_RSA_X_509));
         d(KF, "DSA",            P11DSAKeyFactory,
+                s("1.3.14.3.2.12", "1.2.840.10040.4.1", "OID.1.2.840.10040.4.1"),
                 m(CKM_DSA_KEY_PAIR_GEN, CKM_DSA, CKM_DSA_SHA1));
         d(KF, "DH",             P11DHKeyFactory,        s("DiffieHellman"),
                 m(CKM_DH_PKCS_KEY_PAIR_GEN, CKM_DH_PKCS_DERIVE));
@@ -595,6 +610,7 @@ public final class SunPKCS11 extends AuthProvider {
         d(SKF, "DESede",        P11SecretKeyFactory,
                 m(CKM_DES3_CBC));
         d(SKF, "AES",           P11SecretKeyFactory,
+                s("2.16.840.1.101.3.4.1", "OID.2.16.840.1.101.3.4.1"),
                 m(CKM_AES_CBC));
         d(SKF, "Blowfish",      P11SecretKeyFactory,
                 m(CKM_BLOWFISH_CBC));
@@ -610,6 +626,7 @@ public final class SunPKCS11 extends AuthProvider {
                 m(CKM_DES_ECB));
         d(CIP, "DES/ECB/PKCS5Padding",          P11Cipher,      s("DES"),
                 m(CKM_DES_ECB));
+
         d(CIP, "DESede/CBC/NoPadding",          P11Cipher,
                 m(CKM_DES3_CBC));
         d(CIP, "DESede/CBC/PKCS5Padding",       P11Cipher,
@@ -620,9 +637,27 @@ public final class SunPKCS11 extends AuthProvider {
                 m(CKM_DES3_ECB));
         d(CIP, "AES/CBC/NoPadding",             P11Cipher,
                 m(CKM_AES_CBC));
+        d(CIP, "AES_128/CBC/NoPadding",          P11Cipher,
+                s("2.16.840.1.101.3.4.1.2", "OID.2.16.840.1.101.3.4.1.2"),
+                m(CKM_AES_CBC));
+        d(CIP, "AES_192/CBC/NoPadding",          P11Cipher,
+                s("2.16.840.1.101.3.4.1.22", "OID.2.16.840.1.101.3.4.1.22"),
+                m(CKM_AES_CBC));
+        d(CIP, "AES_256/CBC/NoPadding",          P11Cipher,
+                s("2.16.840.1.101.3.4.1.42", "OID.2.16.840.1.101.3.4.1.42"),
+                m(CKM_AES_CBC));
         d(CIP, "AES/CBC/PKCS5Padding",          P11Cipher,
                 m(CKM_AES_CBC_PAD, CKM_AES_CBC));
         d(CIP, "AES/ECB/NoPadding",             P11Cipher,
+                m(CKM_AES_ECB));
+        d(CIP, "AES_128/ECB/NoPadding",          P11Cipher,
+                s("2.16.840.1.101.3.4.1.1", "OID.2.16.840.1.101.3.4.1.1"),
+                m(CKM_AES_ECB));
+        d(CIP, "AES_192/ECB/NoPadding",          P11Cipher,
+                s("2.16.840.1.101.3.4.1.21", "OID.2.16.840.1.101.3.4.1.21"),
+                m(CKM_AES_ECB));
+        d(CIP, "AES_256/ECB/NoPadding",          P11Cipher,
+                s("2.16.840.1.101.3.4.1.41", "OID.2.16.840.1.101.3.4.1.41"),
                 m(CKM_AES_ECB));
         d(CIP, "AES/ECB/PKCS5Padding",          P11Cipher,      s("AES"),
                 m(CKM_AES_ECB));
@@ -639,31 +674,50 @@ public final class SunPKCS11 extends AuthProvider {
         d(CIP, "RSA/ECB/NoPadding",             P11RSACipher,
                 m(CKM_RSA_X_509));
 
-        d(SIG, "RawDSA",        P11Signature,           s("NONEwithDSA"),
+        d(SIG, "RawDSA",        P11Signature,   s("NONEwithDSA"),
                 m(CKM_DSA));
-        d(SIG, "DSA",           P11Signature,           s("SHA1withDSA"),
+        d(SIG, "DSA",           P11Signature,
+                s("SHA1withDSA", "1.3.14.3.2.13", "1.3.14.3.2.27",
+                  "1.2.840.10040.4.3", "OID.1.2.840.10040.4.3"),
                 m(CKM_DSA_SHA1, CKM_DSA));
         d(SIG, "NONEwithECDSA", P11Signature,
                 m(CKM_ECDSA));
-        d(SIG, "SHA1withECDSA", P11Signature,           s("ECDSA"),
+        d(SIG, "SHA1withECDSA", P11Signature,
+                s("ECDSA", "1.2.840.10045.4.1", "OID.1.2.840.10045.4.1"),
                 m(CKM_ECDSA_SHA1, CKM_ECDSA));
+        d(SIG, "SHA224withECDSA",       P11Signature,
+                s("1.2.840.10045.4.3.1", "OID.1.2.840.10045.4.3.1"),
+                m(CKM_ECDSA));
         d(SIG, "SHA256withECDSA",       P11Signature,
+                s("1.2.840.10045.4.3.2", "OID.1.2.840.10045.4.3.2"),
                 m(CKM_ECDSA));
         d(SIG, "SHA384withECDSA",       P11Signature,
+                s("1.2.840.10045.4.3.3", "OID.1.2.840.10045.4.3.3"),
                 m(CKM_ECDSA));
         d(SIG, "SHA512withECDSA",       P11Signature,
+                s("1.2.840.10045.4.3.4", "OID.1.2.840.10045.4.3.4"),
                 m(CKM_ECDSA));
         d(SIG, "MD2withRSA",    P11Signature,
+                s("1.2.840.113549.1.1.2", "OID.1.2.840.113549.1.1.2"),
                 m(CKM_MD2_RSA_PKCS, CKM_RSA_PKCS, CKM_RSA_X_509));
         d(SIG, "MD5withRSA",    P11Signature,
+                s("1.2.840.113549.1.1.4", "OID.1.2.840.113549.1.1.4"),
                 m(CKM_MD5_RSA_PKCS, CKM_RSA_PKCS, CKM_RSA_X_509));
         d(SIG, "SHA1withRSA",   P11Signature,
+                s("1.2.840.113549.1.1.5", "OID.1.2.840.113549.1.1.5",
+                  "1.3.14.3.2.29"),
                 m(CKM_SHA1_RSA_PKCS, CKM_RSA_PKCS, CKM_RSA_X_509));
+        d(SIG, "SHA224withRSA", P11Signature,
+                s("1.2.840.113549.1.1.14", "OID.1.2.840.113549.1.1.14"),
+                m(CKM_SHA224_RSA_PKCS, CKM_RSA_PKCS, CKM_RSA_X_509));
         d(SIG, "SHA256withRSA", P11Signature,
+                s("1.2.840.113549.1.1.11", "OID.1.2.840.113549.1.1.11"),
                 m(CKM_SHA256_RSA_PKCS, CKM_RSA_PKCS, CKM_RSA_X_509));
         d(SIG, "SHA384withRSA", P11Signature,
+                s("1.2.840.113549.1.1.12", "OID.1.2.840.113549.1.1.12"),
                 m(CKM_SHA384_RSA_PKCS, CKM_RSA_PKCS, CKM_RSA_X_509));
         d(SIG, "SHA512withRSA", P11Signature,
+                s("1.2.840.113549.1.1.13", "OID.1.2.840.113549.1.1.13"),
                 m(CKM_SHA512_RSA_PKCS, CKM_RSA_PKCS, CKM_RSA_X_509));
 
         /*
@@ -1342,10 +1396,10 @@ public final class SunPKCS11 extends AuthProvider {
                             return null;
                         }
 
-                        Class c = Class.forName
-                                (defaultHandler,
-                                true,
-                                Thread.currentThread().getContextClassLoader());
+                        Class<?> c = Class.forName
+                                   (defaultHandler,
+                                   true,
+                                   Thread.currentThread().getContextClassLoader());
                         return (CallbackHandler)c.newInstance();
                     }
                 });

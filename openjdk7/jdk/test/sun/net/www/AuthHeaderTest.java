@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,7 @@
  * @test
  * @bug 4804309
  * @library ../../../sun/net/www/httptest/
- * @build HttpCallback HttpServer ClosedChannelList HttpTransaction
+ * @build HttpCallback TestHttpServer ClosedChannelList HttpTransaction
  * @run main AuthHeaderTest
  * @summary AuthHeaderTest bug
  */
@@ -90,13 +90,13 @@ public class AuthHeaderTest implements HttpCallback {
         is.close();
     }
 
-    static HttpServer server;
+    static TestHttpServer server;
 
     public static void main (String[] args) throws Exception {
         MyAuthenticator auth = new MyAuthenticator ();
         Authenticator.setDefault (auth);
         try {
-            server = new HttpServer (new AuthHeaderTest(), 1, 10, 0);
+            server = new TestHttpServer (new AuthHeaderTest(), 1, 10, 0);
             System.out.println ("Server: listening on port: " + server.getLocalPort());
             client ("http://localhost:"+server.getLocalPort()+"/d1/foo.html");
         } catch (Exception e) {

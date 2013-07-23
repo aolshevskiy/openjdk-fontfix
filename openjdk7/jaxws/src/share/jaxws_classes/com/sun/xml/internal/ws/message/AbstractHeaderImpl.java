@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,6 +33,8 @@ import com.sun.xml.internal.ws.api.addressing.AddressingVersion;
 import com.sun.xml.internal.ws.api.addressing.WSEndpointReference;
 import com.sun.xml.internal.ws.api.message.Header;
 import com.sun.xml.internal.ws.api.streaming.XMLStreamReaderFactory;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+
 import org.xml.sax.helpers.AttributesImpl;
 
 import javax.xml.bind.JAXBException;
@@ -70,10 +72,18 @@ public abstract class AbstractHeaderImpl implements Header {
             throw new JAXBException(e);
         }
     }
-
+    /** @deprecated */
     public <T> T readAsJAXB(Bridge<T> bridge) throws JAXBException {
         try {
             return bridge.unmarshal(readHeader());
+        } catch (XMLStreamException e) {
+            throw new JAXBException(e);
+        }
+    }
+
+    public <T> T readAsJAXB(XMLBridge<T> bridge) throws JAXBException {
+        try {
+            return bridge.unmarshal(readHeader(), null);
         } catch (XMLStreamException e) {
             throw new JAXBException(e);
         }
@@ -93,6 +103,8 @@ public abstract class AbstractHeaderImpl implements Header {
         // check mustUnderstand
         String v = getAttribute(soapVersion.nsUri, "mustUnderstand");
         if(v==null || !parseBool(v)) return true;
+
+        if (roles == null) return true;
 
         // now role
         return !roles.contains(getRole(soapVersion));

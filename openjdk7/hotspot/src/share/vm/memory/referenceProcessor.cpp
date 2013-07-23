@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -274,7 +274,6 @@ uint ReferenceProcessor::count_jni_refs() {
   class AlwaysAliveClosure: public BoolObjectClosure {
   public:
     virtual bool do_object_b(oop obj) { return true; }
-    virtual void do_object(oop obj) { assert(false, "Don't call"); }
   };
 
   class CountHandleClosure: public OopClosure {
@@ -563,7 +562,7 @@ ReferenceProcessor::process_phase1(DiscoveredList&    refs_list,
         !policy->should_clear_reference(iter.obj(), _soft_ref_timestamp_clock)) {
       if (TraceReferenceGC) {
         gclog_or_tty->print_cr("Dropping reference (" INTPTR_FORMAT ": %s"  ") by policy",
-                               iter.obj(), iter.obj()->blueprint()->internal_name());
+                               iter.obj(), iter.obj()->klass()->internal_name());
       }
       // Remove Reference object from list
       iter.remove();
@@ -602,7 +601,7 @@ ReferenceProcessor::pp2_work(DiscoveredList&    refs_list,
     if (iter.is_referent_alive()) {
       if (TraceReferenceGC) {
         gclog_or_tty->print_cr("Dropping strongly reachable reference (" INTPTR_FORMAT ": %s)",
-                               iter.obj(), iter.obj()->blueprint()->internal_name());
+                               iter.obj(), iter.obj()->klass()->internal_name());
       }
       // The referent is reachable after all.
       // Remove Reference object from list.
@@ -688,7 +687,7 @@ ReferenceProcessor::process_phase3(DiscoveredList&    refs_list,
     if (TraceReferenceGC) {
       gclog_or_tty->print_cr("Adding %sreference (" INTPTR_FORMAT ": %s) as pending",
                              clear_referent ? "cleared " : "",
-                             iter.obj(), iter.obj()->blueprint()->internal_name());
+                             iter.obj(), iter.obj()->klass()->internal_name());
     }
     assert(iter.obj()->is_oop(UseConcMarkSweepGC), "Adding a bad reference");
     iter.next();
@@ -1059,7 +1058,7 @@ inline DiscoveredList* ReferenceProcessor::get_discovered_list(ReferenceType rt)
       list = &_discoveredPhantomRefs[id];
       break;
     case REF_NONE:
-      // we should not reach here if we are an instanceRefKlass
+      // we should not reach here if we are an InstanceRefKlass
     default:
       ShouldNotReachHere();
   }
@@ -1104,14 +1103,14 @@ ReferenceProcessor::add_to_discovered_list_mt(DiscoveredList& refs_list,
 
     if (TraceReferenceGC) {
       gclog_or_tty->print_cr("Discovered reference (mt) (" INTPTR_FORMAT ": %s)",
-                             obj, obj->blueprint()->internal_name());
+                             obj, obj->klass()->internal_name());
     }
   } else {
     // If retest was non NULL, another thread beat us to it:
     // The reference has already been discovered...
     if (TraceReferenceGC) {
       gclog_or_tty->print_cr("Already discovered reference (" INTPTR_FORMAT ": %s)",
-                             obj, obj->blueprint()->internal_name());
+                             obj, obj->klass()->internal_name());
     }
   }
 }
@@ -1206,7 +1205,7 @@ bool ReferenceProcessor::discover_reference(oop obj, ReferenceType rt) {
     // The reference has already been discovered...
     if (TraceReferenceGC) {
       gclog_or_tty->print_cr("Already discovered reference (" INTPTR_FORMAT ": %s)",
-                             obj, obj->blueprint()->internal_name());
+                             obj, obj->klass()->internal_name());
     }
     if (RefDiscoveryPolicy == ReferentBasedDiscovery) {
       // assumes that an object is not processed twice;
@@ -1274,7 +1273,7 @@ bool ReferenceProcessor::discover_reference(oop obj, ReferenceType rt) {
 
     if (TraceReferenceGC) {
       gclog_or_tty->print_cr("Discovered reference (" INTPTR_FORMAT ": %s)",
-                                obj, obj->blueprint()->internal_name());
+                                obj, obj->klass()->internal_name());
     }
   }
   assert(obj->is_oop(), "Discovered a bad reference");
@@ -1291,18 +1290,10 @@ void ReferenceProcessor::preclean_discovered_references(
   OopClosure* keep_alive,
   VoidClosure* complete_gc,
   YieldClosure* yield,
-  bool should_unload_classes,
-  GCTimer *gc_timer) {
+  GCTimer* gc_timer) {
 
   NOT_PRODUCT(verify_ok_to_handle_reflists());
 
-#ifdef ASSERT
-  bool must_remember_klasses = ClassUnloading && !UseConcMarkSweepGC ||
-                               CMSClassUnloadingEnabled && UseConcMarkSweepGC ||
-                               ExplicitGCInvokesConcurrentAndUnloadsClasses &&
-                                 UseConcMarkSweepGC && should_unload_classes;
-  RememberKlassesChecker mx(must_remember_klasses);
-#endif
   // Soft references
   {
     GCTraceTime tt("Preclean SoftReferences", PrintGCDetails && PrintReferenceGC,
@@ -1381,7 +1372,7 @@ ReferenceProcessor::preclean_discovered_reflist(DiscoveredList&    refs_list,
       // active; we need to trace and mark its cohort.
       if (TraceReferenceGC) {
         gclog_or_tty->print_cr("Precleaning Reference (" INTPTR_FORMAT ": %s)",
-                               iter.obj(), iter.obj()->blueprint()->internal_name());
+                               iter.obj(), iter.obj()->klass()->internal_name());
       }
       // Remove Reference object from list
       iter.remove();

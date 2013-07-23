@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -96,7 +96,7 @@ final class FieldSignature {
             if (c.getDeclaringClass() == null) {
                 return c.getName().replace('.', '/');
             } else {
-                return fqcn(c.getDeclaringClass())+"."+c.getSimpleName();
+                return fqcn(c.getDeclaringClass())+"$"+c.getSimpleName();
             }
         } else if (t instanceof ParameterizedType) {
             ParameterizedType p = (ParameterizedType)t;
@@ -112,11 +112,11 @@ final class FieldSignature {
     }
 
     private static String args(ParameterizedType p) {
-        String sig = "<";
+        StringBuilder sig = new StringBuilder("<");
         for(Type t : p.getActualTypeArguments()) {
-            sig += vms(t);
+            sig.append(vms(t));
         }
-        return sig+">";
+        return sig.append(">").toString();
     }
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,22 +32,12 @@
 #include "gc_interface/allocTracer.hpp"
 #include "gc_interface/collectedHeap.hpp"
 #include "gc_interface/collectedHeap.inline.hpp"
+#include "memory/metaspace.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/instanceMirrorKlass.hpp"
 #include "runtime/init.hpp"
+#include "runtime/thread.inline.hpp"
 #include "services/heapDumper.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
 
 
 #ifdef ASSERT
@@ -55,9 +45,6 @@ int CollectedHeap::_fire_out_of_memory_count = 0;
 #endif
 
 size_t CollectedHeap::_filler_array_max_size = 0;
-
-const char* CollectedHeap::OverflowMessage
-  = "The size of the object heap + perm gen exceeds the maximum representable size";
 
 template <>
 void EventLogBase<GCMessage>::print(outputStream* st, GCMessage& m) {
@@ -96,11 +83,21 @@ GCHeapSummary CollectedHeap::create_heap_summary() {
   return GCHeapSummary(heap_space, used());
 }
 
-PermGenSummary CollectedHeap::create_perm_gen_summary() {
-  VirtualSpaceSummary perm_space = create_perm_gen_space_summary();
-  SpaceSummary object_space(perm_space.start(), perm_space.committed_end(), permanent_used());
+MetaspaceSummary CollectedHeap::create_metaspace_summary() {
+  const MetaspaceSizes meta_space(
+      MetaspaceAux::allocated_capacity_bytes(),
+      MetaspaceAux::allocated_used_bytes(),
+      MetaspaceAux::reserved_in_bytes());
+  const MetaspaceSizes data_space(
+      MetaspaceAux::allocated_capacity_bytes(Metaspace::NonClassType),
+      MetaspaceAux::allocated_used_bytes(Metaspace::NonClassType),
+      MetaspaceAux::reserved_in_bytes(Metaspace::NonClassType));
+  const MetaspaceSizes class_space(
+      MetaspaceAux::allocated_capacity_bytes(Metaspace::ClassType),
+      MetaspaceAux::allocated_used_bytes(Metaspace::ClassType),
+      MetaspaceAux::reserved_in_bytes(Metaspace::ClassType));
 
-  return PermGenSummary(perm_space, object_space);
+  return MetaspaceSummary(meta_space, data_space, class_space);
 }
 
 void CollectedHeap::print_heap_before_gc() {
@@ -123,8 +120,8 @@ void CollectedHeap::print_heap_after_gc() {
 
 void CollectedHeap::trace_heap(GCWhen::Type when, GCTracer* gc_tracer) {
   const GCHeapSummary& heap_summary = create_heap_summary();
-  const PermGenSummary& perm_summary = create_perm_gen_summary();
-  gc_tracer->report_gc_heap_summary(when, heap_summary, perm_summary);
+  const MetaspaceSummary& metaspace_summary = create_metaspace_summary();
+  gc_tracer->report_gc_heap_summary(when, heap_summary, metaspace_summary);
 }
 
 void CollectedHeap::trace_heap_before_gc(GCTracer* gc_tracer) {
@@ -172,6 +169,38 @@ CollectedHeap::CollectedHeap() : _n_par_threads(0)
   }
 }
 
+// This interface assumes that it's being called by the
+// vm thread. It collects the heap assuming that the
+// heap lock is already held and that we are executing in
+// the context of the vm thread.
+void CollectedHeap::collect_as_vm_thread(GCCause::Cause cause) {
+  assert(Thread::current()->is_VM_thread(), "Precondition#1");
+  assert(Heap_lock->is_locked(), "Precondition#2");
+  GCCauseSetter gcs(this, cause);
+  switch (cause) {
+    case GCCause::_heap_inspection:
+    case GCCause::_heap_dump:
+    case GCCause::_metadata_GC_threshold : {
+      HandleMark hm;
+      do_full_collection(false);        // don't clear all soft refs
+      break;
+    }
+    case GCCause::_last_ditch_collection: {
+      HandleMark hm;
+      do_full_collection(true);         // do clear all soft refs
+      break;
+    }
+    default:
+      ShouldNotReachHere(); // Unexpected use of this function
+  }
+}
+MetaWord* CollectedHeap::satisfy_failed_metadata_allocation(
+                                              ClassLoaderData* loader_data,
+                                              size_t size, Metaspace::MetadataType mdtype) {
+  return collector_policy()->satisfy_failed_metadata_allocation(loader_data, size, mdtype);
+}
+
+
 void CollectedHeap::pre_initialize() {
   // Used for ReduceInitialCardMarks (when COMPILER2 is used);
   // otherwise remains unused.
@@ -181,26 +210,6 @@ void CollectedHeap::pre_initialize() {
 #else
   assert(_defer_initial_card_mark == false, "Who would set it?");
 #endif
-}
-
-size_t CollectedHeap::add_and_check_overflow(size_t total, size_t size) {
-  assert(size >= 0, "must be");
-  size_t result = total + size;
-  if (result < size) {
-    // We must have overflowed
-    vm_exit_during_initialization(CollectedHeap::OverflowMessage);
-  }
-  return result;
-}
-
-size_t CollectedHeap::round_up_and_check_overflow(size_t total, size_t size) {
-  assert(size >= 0, "must be");
-  size_t result = round_to(total, size);
-  if (result < size) {
-    // We must have overflowed
-    vm_exit_during_initialization(CollectedHeap::OverflowMessage);
-  }
-  return result;
 }
 
 #ifndef PRODUCT
@@ -296,9 +305,7 @@ void CollectedHeap::flush_deferred_store_barrier(JavaThread* thread) {
       assert(is_in(old_obj), "Not in allocated heap");
       assert(!can_elide_initializing_store_barrier(old_obj),
              "Else should have been filtered in new_store_pre_barrier()");
-      assert(!is_in_permanent(old_obj), "Sanity: not expected");
       assert(old_obj->is_oop(true), "Not an oop");
-      assert(old_obj->is_parsable(), "Will not be concurrently parsable");
       assert(deferred.word_size() == (size_t)(old_obj->size()),
              "Mismatch: multiple objects?");
     }
@@ -529,7 +536,7 @@ void CollectedHeap::pre_full_gc_dump(GCTimer* timer) {
   }
   if (PrintClassHistogramBeforeFullGC) {
     GCTraceTime tt("Class Histogram (before full gc): ", PrintGCDetails, true, timer);
-    VM_GC_HeapInspection inspector(gclog_or_tty, false /* ! full gc */, false /* ! prologue */);
+    VM_GC_HeapInspection inspector(gclog_or_tty, false /* ! full gc */);
     inspector.doit();
   }
 }
@@ -541,7 +548,7 @@ void CollectedHeap::post_full_gc_dump(GCTimer* timer) {
   }
   if (PrintClassHistogramAfterFullGC) {
     GCTraceTime tt("Class Histogram (after full gc): ", PrintGCDetails, true, timer);
-    VM_GC_HeapInspection inspector(gclog_or_tty, false /* ! full gc */, false /* ! prologue */);
+    VM_GC_HeapInspection inspector(gclog_or_tty, false /* ! full gc */);
     inspector.doit();
   }
 }
@@ -551,15 +558,11 @@ oop CollectedHeap::Class_obj_allocate(KlassHandle klass, int size, KlassHandle r
   assert(!Universe::heap()->is_gc_active(), "Allocation during gc not allowed");
   assert(size >= 0, "int won't convert to size_t");
   HeapWord* obj;
-  if (JavaObjectsInPerm) {
-    obj = common_permanent_mem_allocate_init(size, CHECK_NULL);
-  } else {
     assert(ScavengeRootsInCode > 0, "must be");
     obj = common_mem_allocate_init(real_klass, size, CHECK_NULL);
-  }
   post_allocation_setup_common(klass, obj);
   assert(Universe::is_bootstrapping() ||
-         !((oop)obj)->blueprint()->oop_is_array(), "must not be an array");
+         !((oop)obj)->is_array(), "must not be an array");
   NOT_PRODUCT(Universe::heap()->check_for_bad_heap_word_value(obj, size));
   oop mirror = (oop)obj;
 
@@ -571,7 +574,7 @@ oop CollectedHeap::Class_obj_allocate(KlassHandle klass, int size, KlassHandle r
     real_klass->set_java_mirror(mirror);
   }
 
-  instanceMirrorKlass* mk = instanceMirrorKlass::cast(mirror->klass());
+  InstanceMirrorKlass* mk = InstanceMirrorKlass::cast(mirror->klass());
   assert(size == mk->instance_size(real_klass), "should have been set");
 
   // notify jvmti and dtrace

@@ -25,7 +25,7 @@
 # @bug 7102369 7094468 7100592
 # @library ../../testlibrary
 # @build TestLibrary
-# @summary remove java.rmi.server.codebase property parsing from RegistryImpl
+# @summary remove java.rmi.server.codebase property parsing from registyimpl
 # @run shell readTest.sh
 
 OS=`uname -s`
@@ -53,8 +53,8 @@ esac
 
 TEST_CLASSPATH=.$PS${TESTCLASSPATH:-$TESTCLASSES}
 cp -r ${TESTSRC}${FS}* .
-${TESTJAVA}${FS}bin${FS}javac testPkg${FS}*java
-${TESTJAVA}${FS}bin${FS}javac -cp $TEST_CLASSPATH readTest.java
+${COMPILEJAVA}${FS}bin${FS}javac ${TESTJAVACOPTS} ${TESTTOOLVMOPTS} testPkg${FS}*java
+${COMPILEJAVA}${FS}bin${FS}javac ${TESTJAVACOPTS} ${TESTTOOLVMOPTS} -cp $TEST_CLASSPATH readTest.java
 
 mkdir rmi_tmp
 RMIREG_OUT=rmi.out
@@ -77,7 +77,7 @@ case "$OS" in
     ;;  
 esac
 # trailing / after code base is important for rmi codebase property.
-${TESTJAVA}${FS}bin${FS}java -cp $TEST_CLASSPATH -Djava.rmi.server.codebase=${FILEURL}$CODEBASE/ readTest > OUT.TXT 2>&1 &
+${TESTJAVA}${FS}bin${FS}java ${TESTVMOPTS} -cp $TEST_CLASSPATH -Djava.rmi.server.codebase=${FILEURL}$CODEBASE/ readTest > OUT.TXT 2>&1 &
 TEST_PID=$!
 #bulk of testcase - let it run for a while
 sleep 5

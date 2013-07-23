@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -407,7 +407,7 @@ void IdealGraphPrinter::visit_node(Node *n, bool edges, VectorSet* temp_set) {
     node->_in_dump_cnt++;
     print_prop(NODE_NAME_PROPERTY, (const char *)node->Name());
     const Type *t = node->bottom_type();
-    print_prop("type", (const char *)Type::msg[t->base()]);
+    print_prop("type", t->msg());
     print_prop("idx", node->_idx);
 #ifdef ASSERT
     print_prop("debug_idx", node->_debug_idx);
@@ -547,7 +547,7 @@ void IdealGraphPrinter::visit_node(Node *n, bool edges, VectorSet* temp_set) {
 
         // max. 2 chars allowed
         if (value >= -9 && value <= 99) {
-          sprintf(buffer, INT64_FORMAT, value);
+          sprintf(buffer, JLONG_FORMAT, value);
           print_prop(short_name, buffer);
         } else {
           print_prop(short_name, "L");
@@ -616,7 +616,7 @@ void IdealGraphPrinter::visit_node(Node *n, bool edges, VectorSet* temp_set) {
       buffer[0] = 0;
       _chaitin->dump_register(node, buffer);
       print_prop("reg", buffer);
-      print_prop("lrg", _chaitin->n2lidx(node));
+      print_prop("lrg", _chaitin->_lrg_map.live_range_id(node));
     }
 
     node->_in_dump_cnt--;

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -41,13 +41,11 @@ include $(BUILDDIR)/sun/awt/FILES_export_unix.gmk
 # Check which C files should be built.  Headless uses only
 # non-motif files.  Also, a version-specific motif file is
 # compiled based on the motif version.
-ifdef HEADLESS
-  FILES_c = $(FILES_NO_MOTIF_c)
-else
-#  FILES_c = $(FILES_MOTIF_c) $(FILES_NO_MOTIF_c)
-#  XXX if in FILES_MOTIF_c there are unrelated to motif stuff, create a separate list!
-  FILES_c = $(FILES_NO_MOTIF_c)
-endif
+FILES_c = $(FILES_NO_MOTIF_c)
+
+ifeq ($(PLATFORM), macosx)
+FILES_objc = $(FILES_NO_MOTIF_objc)
+endif # PLATFORM
 
 ifeq ($(PLATFORM), solaris)
   ifneq ($(ARCH), amd64)
@@ -103,6 +101,10 @@ vpath %.c   $(SHARE_SRC)/native/$(PKGDIR)/../java2d/pipe
 vpath %.cpp $(SHARE_SRC)/native/$(PKGDIR)/image
 vpath %.c   $(PLATFORM_SRC)/native/$(PKGDIR)/robot_child
 
+ifeq ($(PLATFORM), macosx)
+vpath %.m   $(call NativeSrcDirList,,native/sun/font)
+endif # PLATFORM
+
 #
 # Libraries to link in.
 #
@@ -116,32 +118,6 @@ CFLAGS += -DHEADLESS=$(HEADLESS)
 CPPFLAGS += -DHEADLESS=$(HEADLESS)
 OTHER_LDLIBS =
 else
-#CFLAGS += -DMOTIF_VERSION=$(MOTIF_VERSION)
-
-#ifeq ($(STATIC_MOTIF),true)
-#    LIBXM = $(MOTIF_LIB)/libXm.a -lXp -lXmu
-#    ifeq ($(PLATFORM), linux)
-#	ifeq ($(ARCH_DATA_MODEL), 64)
-#            LIBXT = -lXt
-#        else
-#        # Allows for builds on Debian GNU Linux, X11 is in a different place 
-#	    LIBXT = $(firstword $(wildcard /usr/X11R6/lib/libXt.a) \
-#                            $(wildcard /usr/lib/libXt.a))
-#	    LIBSM = $(firstword $(wildcard /usr/X11R6/lib/libSM.a) \
-#                            $(wildcard /usr/lib/libSM.a))
-#	    LIBICE = $(firstword $(wildcard /usr/X11R6/lib/libICE.a) \
-#                             $(wildcard /usr/lib/libICE.a))
-#	endif
-#    endif
-#else
-#    LIBXM = -L$(MOTIF_LIB) -lXm -lXp
-#    ifeq ($(PLATFORM), linux)
-#	LIBXT = -lXt
-#	LIBSM = 
-#	LIBICE = 
-#    endif
-#endif
-
 LIBXTST = -lXtst
 ifeq ($(PLATFORM), linux)
    ifeq ($(ARCH_DATA_MODEL), 64)
@@ -224,13 +200,21 @@ CPPFLAGS += -I$(SHARE_SRC)/native/$(PKGDIR)/debug \
         $(EVENT_MODEL)
 
 ifeq ($(PLATFORM), macosx)
-CPPFLAGS += -I$(CUPS_HEADERS_PATH)
+CPPFLAGS += -I$(CUPS_HEADERS_PATH) \
+			$(call NativeSrcDirList,-I,native/sun/awt) \
+			$(call NativeSrcDirList,-I,native/sun/font)
 
 ifndef HEADLESS
 CPPFLAGS += -I$(MOTIF_DIR)/include \
             -I$(OPENWIN_HOME)/include 
 LDFLAGS  += -L$(MOTIF_LIB) -L$(OPENWIN_LIB)
-
+else
+LDFLAGS  += -framework Accelerate \
+			-framework ApplicationServices \
+			-framework Cocoa \
+			-F/System/Library/Frameworks/JavaVM.framework/Frameworks \
+			-framework JavaNativeFoundation \
+			-framework JavaRuntimeSupport
 endif # !HEADLESS
 endif # PLATFORM
 
@@ -240,7 +224,7 @@ ifeq ($(PLATFORM), linux)
                         $(wildcard /usr/include/X11/extensions))
 endif
 
-ifeq ($(PLATFORM), macosx))
+ifeq ($(PLATFORM), macosx)
   CPPFLAGS += -I$(OPENWIN_HOME)/include/X11/extensions \
               -I$(OPENWIN_HOME)/include 
 endif

@@ -26,14 +26,12 @@
 #include "java_awt_Color.h"
 #include "java_awt_Dimension.h"
 #include "java_awt_MenuBar.h"
-//#include "java_awt_Label.h"
 #include "java_awt_FontMetrics.h"
 #include "java_awt_event_MouseEvent.h"
 #include "java_awt_Rectangle.h"
 #include "java_awt_ScrollPaneAdjustable.h"
 #include "java_awt_Toolkit.h"
 #include "java_awt_CheckboxMenuItem.h"
-#include "sun_awt_CharsetString.h"
 
 #include "jni_util.h"
 
@@ -86,6 +84,12 @@ Java_java_awt_ScrollPaneAdjustable_initIDs
 
 JNIEXPORT void JNICALL
 Java_java_awt_CheckboxMenuItem_initIDs
+  (JNIEnv *env, jclass clazz)
+{
+}
+
+JNIEXPORT void JNICALL
+Java_java_awt_Choice_initIDs
   (JNIEnv *env, jclass clazz)
 {
 }

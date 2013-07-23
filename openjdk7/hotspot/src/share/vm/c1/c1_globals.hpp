@@ -119,6 +119,24 @@
   develop(bool, UseGlobalValueNumbering, true,                              \
           "Use Global Value Numbering (separate phase)")                    \
                                                                             \
+  product(bool, UseLoopInvariantCodeMotion, true,                           \
+          "Simple loop invariant code motion for short loops during GVN")   \
+                                                                            \
+  develop(bool, TracePredicateFailedTraps, false,                           \
+          "trace runtime traps caused by predicate failure")                \
+                                                                            \
+  develop(bool, StressLoopInvariantCodeMotion, false,                       \
+          "stress loop invariant code motion")                              \
+                                                                            \
+  develop(bool, TraceRangeCheckElimination, false,                          \
+          "Trace Range Check Elimination")                                  \
+                                                                            \
+  develop(bool, AssertRangeCheckElimination, false,                         \
+          "Assert Range Check Elimination")                                 \
+                                                                            \
+  develop(bool, StressRangeCheckElimination, false,                         \
+          "stress Range Check Elimination")                                 \
+                                                                            \
   develop(bool, PrintValueNumbering, false,                                 \
           "Print Value Numbering")                                          \
                                                                             \
@@ -147,7 +165,7 @@
           "Inline methods containing exception handlers "                   \
           "(NOTE: does not work with current backend)")                     \
                                                                             \
-  develop(bool, InlineSynchronizedMethods, true,                            \
+  product(bool, InlineSynchronizedMethods, true,                            \
           "Inline synchronized methods")                                    \
                                                                             \
   develop(bool, InlineNIOCheckIndex, true,                                  \
@@ -315,7 +333,7 @@
           "Use CHA and exact type results at call sites when updating MDOs")\
                                                                             \
   product(bool, C1UpdateMethodData, trueInTiered,                           \
-          "Update methodDataOops in Tier1-generated code")                  \
+          "Update MethodData*s in Tier1-generated code")                  \
                                                                             \
   develop(bool, PrintCFGToFile, false,                                      \
           "print control flow graph to a separate file during compilation") \

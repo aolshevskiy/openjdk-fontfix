@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.xml.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -393,7 +392,7 @@ public final class WsservletMessages {
     }
 
     /**
-     * WSRuntimeInfoParser cauld not parse sun-jaxws.xml runtime descriptor
+     * WSRuntimeInfoParser could not parse sun-jaxws.xml runtime descriptor
      *
      */
     public static String JAXRPCSERVLET_11_DIAG_CAUSE_1() {
@@ -506,18 +505,6 @@ public final class WsservletMessages {
      */
     public static String SERVLET_ERROR_NO_RESPONSE_MESSAGE() {
         return localizer.localize(localizableSERVLET_ERROR_NO_RESPONSE_MESSAGE());
-    }
-
-    public static Localizable localizableSERVLET_HTML_STATUS_ERROR() {
-        return messageFactory.getMessage("servlet.html.status.error");
-    }
-
-    /**
-     * ERROR
-     *
-     */
-    public static String SERVLET_HTML_STATUS_ERROR() {
-        return localizer.localize(localizableSERVLET_HTML_STATUS_ERROR());
     }
 
     public static Localizable localizableLISTENER_INFO_INITIALIZE() {
@@ -640,18 +627,6 @@ public final class WsservletMessages {
         return localizer.localize(localizableWSSERVLET_50_DIAG_CAUSE_1());
     }
 
-    public static Localizable localizableSERVLET_HTML_STATUS_ACTIVE() {
-        return messageFactory.getMessage("servlet.html.status.active");
-    }
-
-    /**
-     * ACTIVE
-     *
-     */
-    public static String SERVLET_HTML_STATUS_ACTIVE() {
-        return localizer.localize(localizableSERVLET_HTML_STATUS_ACTIVE());
-    }
-
     public static Localizable localizableWSSERVLET_25_DIAG_CHECK_1() {
         return messageFactory.getMessage("WSSERVLET25.diag.check.1");
     }
@@ -681,7 +656,7 @@ public final class WsservletMessages {
     }
 
     /**
-     * Implicit URLS are not supported in this realease
+     * Implicit URLS are not supported in this release
      *
      */
     public static String WSSERVLET_27_DIAG_CAUSE_1() {
@@ -729,7 +704,7 @@ public final class WsservletMessages {
     }
 
     /**
-     * Runtime descriptor "{0}" is mising
+     * Runtime descriptor "{0}" is missing
      *
      */
     public static String NO_SUNJAXWS_XML(Object arg0) {
@@ -986,30 +961,6 @@ public final class WsservletMessages {
      */
     public static String SERVLET_FAULTSTRING_INVALID_SOAP_ACTION() {
         return localizer.localize(localizableSERVLET_FAULTSTRING_INVALID_SOAP_ACTION());
-    }
-
-    public static Localizable localizableHTML_ROOT_PAGE_BODY_3_B() {
-        return messageFactory.getMessage("html.rootPage.body3b");
-    }
-
-    /**
-     * '>here.</a></p>
-     *
-     */
-    public static String HTML_ROOT_PAGE_BODY_3_B() {
-        return localizer.localize(localizableHTML_ROOT_PAGE_BODY_3_B());
-    }
-
-    public static Localizable localizableHTML_ROOT_PAGE_BODY_3_A() {
-        return messageFactory.getMessage("html.rootPage.body3a");
-    }
-
-    /**
-     * <p>A WSDL description of these ports is available <a href='
-     *
-     */
-    public static String HTML_ROOT_PAGE_BODY_3_A() {
-        return localizer.localize(localizableHTML_ROOT_PAGE_BODY_3_A());
     }
 
     public static Localizable localizableWSSERVLET_14_DIAG_CHECK_1() {
@@ -1288,18 +1239,6 @@ public final class WsservletMessages {
         return localizer.localize(localizableSERVLET_WARNING_DUPLICATE_ENDPOINT_URL_PATTERN(arg0));
     }
 
-    public static Localizable localizableHTML_NON_ROOT_PAGE_BODY_3_B() {
-        return messageFactory.getMessage("html.nonRootPage.body3b");
-    }
-
-    /**
-     * '>this page</a> for information about the deployed services.</p>
-     *
-     */
-    public static String HTML_NON_ROOT_PAGE_BODY_3_B() {
-        return localizer.localize(localizableHTML_NON_ROOT_PAGE_BODY_3_B());
-    }
-
     public static Localizable localizableWSSERVLET_49_DIAG_CHECK_1() {
         return messageFactory.getMessage("WSSERVLET49.diag.check.1");
     }
@@ -1310,18 +1249,6 @@ public final class WsservletMessages {
      */
     public static String WSSERVLET_49_DIAG_CHECK_1() {
         return localizer.localize(localizableWSSERVLET_49_DIAG_CHECK_1());
-    }
-
-    public static Localizable localizableHTML_NON_ROOT_PAGE_BODY_3_A() {
-        return messageFactory.getMessage("html.nonRootPage.body3a");
-    }
-
-    /**
-     * <p>Please refer to <a href='
-     *
-     */
-    public static String HTML_NON_ROOT_PAGE_BODY_3_A() {
-        return localizer.localize(localizableHTML_NON_ROOT_PAGE_BODY_3_A());
     }
 
     public static Localizable localizableERROR_IMPLEMENTOR_REGISTRY_CANNOT_READ_CONFIGURATION() {
@@ -1593,7 +1520,7 @@ public final class WsservletMessages {
     }
 
     /**
-     * There maybe a tranformation engine may not be supported or compatible. Check the server.xml file for exceptions.
+     * There maybe a transformation engine may not be supported or compatible. Check the server.xml file for exceptions.
      *
      */
     public static String WSSERVLET_33_DIAG_CHECK_2() {
@@ -1605,7 +1532,7 @@ public final class WsservletMessages {
     }
 
     /**
-     * There maybe a tranformation engine being used that is not compatible. Make sure you are using the correct transformer and version.
+     * There maybe a transformation engine being used that is not compatible. Make sure you are using the correct transformer and version.
      *
      */
     public static String WSSERVLET_33_DIAG_CHECK_1() {
@@ -1617,7 +1544,7 @@ public final class WsservletMessages {
     }
 
     /**
-     * Service processing of the request generated an exception; while attempting to return a SOAPPFaultMessage a thowable was again generated
+     * Service processing of the request generated an exception; while attempting to return a SOAPPFaultMessage a throwable was again generated
      *
      */
     public static String WSSERVLET_51_DIAG_CAUSE_1() {
@@ -1713,7 +1640,7 @@ public final class WsservletMessages {
     }
 
     /**
-     * Service processing of the request generated an exception; while attempting to return a SOAPFaultMessage a thowable was again generated
+     * Service processing of the request generated an exception; while attempting to return a SOAPFaultMessage a throwable was again generated
      *
      */
     public static String WSSERVLET_49_DIAG_CAUSE_1() {

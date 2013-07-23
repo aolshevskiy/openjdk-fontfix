@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,6 @@
  * @bug 8000955
  * @summary Map.Entry implementations need to comply with Map.Entry.hashCode() defined behaviour.
  * @author ngmr
- * @run main/othervm -Djdk.map.althashing.threshold=1 EntryHashCode
  */
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;

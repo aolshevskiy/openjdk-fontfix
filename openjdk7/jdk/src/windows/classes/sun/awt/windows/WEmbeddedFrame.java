@@ -27,11 +27,13 @@ package sun.awt.windows;
 
 import sun.awt.*;
 import java.awt.*;
-import java.awt.event.*;
+import java.awt.event.InvocationEvent;
 import java.awt.peer.ComponentPeer;
 import java.awt.image.*;
 import sun.awt.image.ByteInterleavedRaster;
 import sun.security.action.GetPropertyAction;
+import java.security.PrivilegedAction;
+import  java.security.AccessController;
 
 public class WEmbeddedFrame extends EmbeddedFrame {
 
@@ -49,8 +51,8 @@ public class WEmbeddedFrame extends EmbeddedFrame {
     private static int pScale = 0;
     private static final int MAX_BAND_SIZE = (1024*30);
 
-    private static String printScale = (String) java.security.AccessController
-       .doPrivileged(new GetPropertyAction("sun.java2d.print.pluginscalefactor"));
+    private static String printScale = AccessController.doPrivileged(
+        new GetPropertyAction("sun.java2d.print.pluginscalefactor"));
 
     public WEmbeddedFrame() {
         this((long)0);
@@ -72,6 +74,7 @@ public class WEmbeddedFrame extends EmbeddedFrame {
         }
     }
 
+    @SuppressWarnings("deprecation")
     public void addNotify() {
         if (getPeer() == null) {
             WToolkit toolkit = (WToolkit)Toolkit.getDefaultToolkit();
@@ -131,8 +134,8 @@ public class WEmbeddedFrame extends EmbeddedFrame {
 
             bandHeight = Math.min(MAX_BAND_SIZE/bandWidth, frameHeight);
 
-            imgWid = (int)(bandWidth * xscale);
-            imgHgt = (int)(bandHeight * yscale);
+            imgWid = bandWidth * xscale;
+            imgHgt = bandHeight * yscale;
             bandImage = new BufferedImage(imgWid, imgHgt,
                                           BufferedImage.TYPE_3BYTE_BGR);
         }
@@ -156,7 +159,7 @@ public class WEmbeddedFrame extends EmbeddedFrame {
             if ((bandTop+bandHeight) > frameHeight) {
                 // last band
                 currBandHeight = frameHeight - bandTop;
-                currImgHeight = (int)(currBandHeight*yscale);
+                currImgHeight = currBandHeight*yscale;
 
                 // multiply by 3 because the image is a 3 byte BGR
                 imageOffset = imgWid*(imgHgt-currImgHeight)*3;
@@ -176,9 +179,9 @@ public class WEmbeddedFrame extends EmbeddedFrame {
         if (printScale == null) {
             // if no system property is specified,
             // check for environment setting
-            printScale = (String) java.security.AccessController.doPrivileged(
-                new java.security.PrivilegedAction() {
-                    public Object run() {
+            printScale = AccessController.doPrivileged(
+                new PrivilegedAction<String>() {
+                    public String run() {
                         return System.getenv("JAVA2D_PLUGIN_PRINT_SCALE");
                     }
                 }
@@ -223,15 +226,16 @@ public class WEmbeddedFrame extends EmbeddedFrame {
     public void activateEmbeddingTopLevel() {
     }
 
-    public void synthesizeWindowActivation(final boolean doActivate) {
-        if (!doActivate || EventQueue.isDispatchThread()) {
-            ((WEmbeddedFramePeer)getPeer()).synthesizeWmActivate(doActivate);
+    @SuppressWarnings("deprecation")
+    public void synthesizeWindowActivation(final boolean activate) {
+        if (!activate || EventQueue.isDispatchThread()) {
+            ((WFramePeer)getPeer()).emulateActivation(activate);
         } else {
             // To avoid focus concurrence b/w IE and EmbeddedFrame
             // activation is postponed by means of posting it to EDT.
             Runnable r = new Runnable() {
                 public void run() {
-                    ((WEmbeddedFramePeer)getPeer()).synthesizeWmActivate(true);
+                    ((WFramePeer)getPeer()).emulateActivation(true);
                 }
             };
             WToolkit.postEvent(WToolkit.targetToAppContext(this),

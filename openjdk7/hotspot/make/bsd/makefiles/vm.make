@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -94,14 +94,15 @@ CXXFLAGS =           \
 # This is VERY important! The version define must only be supplied to vm_version.o
 # If not, ccache will not re-use the cache at all, since the version string might contain
 # a time and date.
-vm_version.o: CXXFLAGS += ${JRE_VERSION}
+CXXFLAGS/vm_version.o += ${JRE_VERSION}
+
+CXXFLAGS/BYFILE = $(CXXFLAGS/$@)
+
+# File specific flags
+CXXFLAGS += $(CXXFLAGS/BYFILE)
 
 ifdef DEFAULT_LIBPATH
 CXXFLAGS += -DDEFAULT_LIBPATH="\"$(DEFAULT_LIBPATH)\""
-endif
-
-ifeq ($(INCLUDE_TRACE), 1)
-CFLAGS += -DINCLUDE_TRACE=1
 endif
 
 # CFLAGS_WARN holds compiler options to suppress/enable warnings.
@@ -121,7 +122,11 @@ ifneq ($(OS_VENDOR), Darwin)
 LFLAGS += -Xlinker -z -Xlinker noexecstack
 endif
 
-LIBS += -lm -pthread
+LIBS += -lm
+
+ifeq ($(USE_CLANG),)
+  LIBS += -pthread
+endif
 
 # By default, link the *.o into the library, not the executable.
 LINK_INTO$(LINK_INTO) = LIBJVM
@@ -138,11 +143,12 @@ include $(MAKEFILES_DIR)/dtrace.make
 JVM    = jvm
 ifeq ($(OS_VENDOR), Darwin)
   LIBJVM   = lib$(JVM).dylib
-  LIBJVM_G = lib$(JVM)$(G_SUFFIX).dylib
   CFLAGS  += -D_XOPEN_SOURCE -D_DARWIN_C_SOURCE
+  ifeq (${VERSION}, $(filter ${VERSION}, debug fastdebug))
+    CFLAGS += -DALLOW_OPERATOR_NEW_USAGE
+  endif
 else
   LIBJVM   = lib$(JVM).so
-  LIBJVM_G = lib$(JVM)$(G_SUFFIX).so
 endif
 
 SPECIAL_PATHS:=adlc c1 gc_implementation opto shark libadt
@@ -155,14 +161,14 @@ SOURCE_PATHS+=$(HS_COMMON_SRC)/os/posix/vm
 SOURCE_PATHS+=$(HS_COMMON_SRC)/cpu/$(Platform_arch)/vm
 SOURCE_PATHS+=$(HS_COMMON_SRC)/os_cpu/$(Platform_os_arch)/vm
 
-ifeq ($(INCLUDE_TRACE), 1)
-SOURCE_PATHS+=$(shell if [ -d $(HS_ALT_SRC)/share/vm/jfr ]; then \
+CORE_PATHS=$(foreach path,$(SOURCE_PATHS),$(call altsrc,$(path)) $(path))
+CORE_PATHS+=$(GENERATED)/jvmtifiles $(GENERATED)/tracefiles
+
+ifneq ($(INCLUDE_TRACE), false)
+CORE_PATHS+=$(shell if [ -d $(HS_ALT_SRC)/share/vm/jfr ]; then \
   find $(HS_ALT_SRC)/share/vm/jfr -type d; \
   fi)
 endif
-
-CORE_PATHS=$(foreach path,$(SOURCE_PATHS),$(call altsrc,$(path)) $(path))
-CORE_PATHS+=$(GENERATED)/jvmtifiles $(GENERATED)/tracefiles
 
 COMPILER1_PATHS := $(call altsrc,$(HS_COMMON_SRC)/share/vm/c1)
 COMPILER1_PATHS += $(HS_COMMON_SRC)/share/vm/c1
@@ -184,13 +190,13 @@ Src_Dirs/ZERO      := $(CORE_PATHS)
 Src_Dirs/SHARK     := $(CORE_PATHS) $(SHARK_PATHS)
 Src_Dirs := $(Src_Dirs/$(TYPE))
 
-COMPILER2_SPECIFIC_FILES := opto libadt bcEscapeAnalyzer.cpp chaitin\* c2_\* runtime_\*
+COMPILER2_SPECIFIC_FILES := opto libadt bcEscapeAnalyzer.cpp c2_\* runtime_\*
 COMPILER1_SPECIFIC_FILES := c1_\*
 SHARK_SPECIFIC_FILES     := shark
 ZERO_SPECIFIC_FILES      := zero
 
 # Always exclude these.
-Src_Files_EXCLUDE := jsig.c jvmtiEnvRecommended.cpp jvmtiEnvStub.cpp
+Src_Files_EXCLUDE += jsig.c jvmtiEnvRecommended.cpp jvmtiEnvStub.cpp
 
 # Exclude per type.
 Src_Files_EXCLUDE/CORE      := $(COMPILER1_SPECIFIC_FILES) $(COMPILER2_SPECIFIC_FILES) $(ZERO_SPECIFIC_FILES) $(SHARK_SPECIFIC_FILES) ciTypeFlow.cpp
@@ -311,10 +317,9 @@ $(LIBJVM): $(LIBJVM.o) $(LIBJVM_MAPFILE) $(LD_SCRIPT)
 	    echo Linking vm...;                                         \
 	    $(LINK_LIB.CXX/PRE_HOOK)                                     \
 	    $(LINK_VM) $(LD_SCRIPT_FLAG)                                \
-		       $(LFLAGS_VM) -o $@ $(LIBJVM.o) $(LIBS_VM);       \
+		       $(LFLAGS_VM) -o $@ $(sort $(LIBJVM.o)) $(LIBS_VM); \
 	    $(LINK_LIB.CXX/POST_HOOK)                                    \
 	    rm -f $@.1; ln -s $@ $@.1;                                  \
-	    [ -f $(LIBJVM_G) ] || { ln -s $@ $(LIBJVM_G); ln -s $@.1 $(LIBJVM_G).1; }; \
 	}
 
 DEST_JVM = $(JDK_LIBDIR)/$(VM_SUBDIR)/$(LIBJVM)
@@ -325,9 +330,6 @@ install_jvm: $(LIBJVM)
 
 #----------------------------------------------------------------------
 # Other files
-
-# Gamma launcher
-include $(MAKEFILES_DIR)/launcher.make
 
 # Signal interposition library
 include $(MAKEFILES_DIR)/jsig.make

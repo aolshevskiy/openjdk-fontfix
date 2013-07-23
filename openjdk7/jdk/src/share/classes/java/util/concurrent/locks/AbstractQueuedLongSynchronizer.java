@@ -34,18 +34,19 @@
  */
 
 package java.util.concurrent.locks;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.*;
+import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Date;
 import sun.misc.Unsafe;
 
 /**
  * A version of {@link AbstractQueuedSynchronizer} in
- * which synchronization state is maintained as a <tt>long</tt>.
+ * which synchronization state is maintained as a {@code long}.
  * This class has exactly the same structure, properties, and methods
- * as <tt>AbstractQueuedSynchronizer</tt> with the exception
+ * as {@code AbstractQueuedSynchronizer} with the exception
  * that all state-related parameters and results are defined
- * as <tt>long</tt> rather than <tt>int</tt>. This class
+ * as {@code long} rather than {@code int}. This class
  * may be useful when creating synchronizers such as
  * multilevel locks and barriers that require
  * 64 bits of state.
@@ -70,7 +71,7 @@ public abstract class AbstractQueuedLongSynchronizer
     */
 
     /**
-     * Creates a new <tt>AbstractQueuedLongSynchronizer</tt> instance
+     * Creates a new {@code AbstractQueuedLongSynchronizer} instance
      * with initial synchronization state of zero.
      */
     protected AbstractQueuedLongSynchronizer() { }
@@ -103,7 +104,7 @@ public abstract class AbstractQueuedLongSynchronizer
      *
      * <p>Insertion into a CLH queue requires only a single atomic
      * operation on "tail", so there is a simple atomic point of
-     * demarcation from unqueued to queued. Similarly, dequeing
+     * demarcation from unqueued to queued. Similarly, dequeuing
      * involves only updating the "head". However, it takes a bit
      * more work for nodes to determine who their successors are,
      * in part to deal with possible cancellation due to timeouts
@@ -210,7 +211,7 @@ public abstract class AbstractQueuedLongSynchronizer
 
         /**
          * Link to predecessor node that current node/thread relies on
-         * for checking waitStatus. Assigned during enqueing, and nulled
+         * for checking waitStatus. Assigned during enqueuing, and nulled
          * out (for sake of GC) only upon dequeuing.  Also, upon
          * cancellation of a predecessor, we short-circuit while
          * finding a non-cancelled one, which will always exist
@@ -255,7 +256,7 @@ public abstract class AbstractQueuedLongSynchronizer
         Node nextWaiter;
 
         /**
-         * Returns true if node is waiting in shared mode
+         * Returns true if node is waiting in shared mode.
          */
         final boolean isShared() {
             return nextWaiter == SHARED;
@@ -311,7 +312,7 @@ public abstract class AbstractQueuedLongSynchronizer
 
     /**
      * Returns the current value of synchronization state.
-     * This operation has memory semantics of a <tt>volatile</tt> read.
+     * This operation has memory semantics of a {@code volatile} read.
      * @return current state value
      */
     protected final long getState() {
@@ -320,7 +321,7 @@ public abstract class AbstractQueuedLongSynchronizer
 
     /**
      * Sets the value of synchronization state.
-     * This operation has memory semantics of a <tt>volatile</tt> write.
+     * This operation has memory semantics of a {@code volatile} write.
      * @param newState the new state value
      */
     protected final void setState(long newState) {
@@ -330,12 +331,12 @@ public abstract class AbstractQueuedLongSynchronizer
     /**
      * Atomically sets synchronization state to the given updated
      * value if the current state value equals the expected value.
-     * This operation has memory semantics of a <tt>volatile</tt> read
+     * This operation has memory semantics of a {@code volatile} read
      * and write.
      *
      * @param expect the expected value
      * @param update the new value
-     * @return true if successful. False return indicates that the actual
+     * @return {@code true} if successful. False return indicates that the actual
      *         value was not equal to the expected value.
      */
     protected final boolean compareAndSetState(long expect, long update) {
@@ -440,7 +441,7 @@ public abstract class AbstractQueuedLongSynchronizer
     }
 
     /**
-     * Release action for shared mode -- signal successor and ensure
+     * Release action for shared mode -- signals successor and ensures
      * propagation. (Note: For exclusive mode, release just amounts
      * to calling unparkSuccessor of head if it needs signal.)
      */
@@ -561,7 +562,7 @@ public abstract class AbstractQueuedLongSynchronizer
     /**
      * Checks and updates status for a node that failed to acquire.
      * Returns true if thread should block. This is the main signal
-     * control in all acquire loops.  Requires that pred == node.prev
+     * control in all acquire loops.  Requires that pred == node.prev.
      *
      * @param pred node's predecessor holding status
      * @param node the node
@@ -598,7 +599,7 @@ public abstract class AbstractQueuedLongSynchronizer
     /**
      * Convenience method to interrupt current thread.
      */
-    private static void selfInterrupt() {
+    static void selfInterrupt() {
         Thread.currentThread().interrupt();
     }
 
@@ -686,8 +687,10 @@ public abstract class AbstractQueuedLongSynchronizer
      * @return {@code true} if acquired
      */
     private boolean doAcquireNanos(long arg, long nanosTimeout)
-        throws InterruptedException {
-        long lastTime = System.nanoTime();
+            throws InterruptedException {
+        if (nanosTimeout <= 0L)
+            return false;
+        final long deadline = System.nanoTime() + nanosTimeout;
         final Node node = addWaiter(Node.EXCLUSIVE);
         boolean failed = true;
         try {
@@ -699,14 +702,12 @@ public abstract class AbstractQueuedLongSynchronizer
                     failed = false;
                     return true;
                 }
-                if (nanosTimeout <= 0)
+                nanosTimeout = deadline - System.nanoTime();
+                if (nanosTimeout <= 0L)
                     return false;
                 if (shouldParkAfterFailedAcquire(p, node) &&
                     nanosTimeout > spinForTimeoutThreshold)
                     LockSupport.parkNanos(this, nanosTimeout);
-                long now = System.nanoTime();
-                nanosTimeout -= now - lastTime;
-                lastTime = now;
                 if (Thread.interrupted())
                     throw new InterruptedException();
             }
@@ -786,9 +787,10 @@ public abstract class AbstractQueuedLongSynchronizer
      * @return {@code true} if acquired
      */
     private boolean doAcquireSharedNanos(long arg, long nanosTimeout)
-        throws InterruptedException {
-
-        long lastTime = System.nanoTime();
+            throws InterruptedException {
+        if (nanosTimeout <= 0L)
+            return false;
+        final long deadline = System.nanoTime() + nanosTimeout;
         final Node node = addWaiter(Node.SHARED);
         boolean failed = true;
         try {
@@ -803,14 +805,12 @@ public abstract class AbstractQueuedLongSynchronizer
                         return true;
                     }
                 }
-                if (nanosTimeout <= 0)
+                nanosTimeout = deadline - System.nanoTime();
+                if (nanosTimeout <= 0L)
                     return false;
                 if (shouldParkAfterFailedAcquire(p, node) &&
                     nanosTimeout > spinForTimeoutThreshold)
                     LockSupport.parkNanos(this, nanosTimeout);
-                long now = System.nanoTime();
-                nanosTimeout -= now - lastTime;
-                lastTime = now;
                 if (Thread.interrupted())
                     throw new InterruptedException();
             }
@@ -1066,7 +1066,7 @@ public abstract class AbstractQueuedLongSynchronizer
      * thread is queued, possibly repeatedly blocking and unblocking,
      * invoking {@link #tryAcquireShared} until success or the thread
      * is interrupted.
-     * @param arg the acquire argument
+     * @param arg the acquire argument.
      * This value is conveyed to {@link #tryAcquireShared} but is
      * otherwise uninterpreted and can represent anything
      * you like.
@@ -1260,7 +1260,7 @@ public abstract class AbstractQueuedLongSynchronizer
      * due to the queue being empty.
      *
      * <p>This method is designed to be used by a fair synchronizer to
-     * avoid <a href="AbstractQueuedSynchronizer#barging">barging</a>.
+     * avoid <a href="AbstractQueuedSynchronizer.html#barging">barging</a>.
      * Such a synchronizer's {@link #tryAcquire} method should return
      * {@code false}, and its {@link #tryAcquireShared} method should
      * return a negative value, if this method returns {@code true}
@@ -1441,7 +1441,7 @@ public abstract class AbstractQueuedLongSynchronizer
      * Returns true if successful.
      * @param node the node
      * @return true if successfully transferred (else the node was
-     * cancelled before signal).
+     * cancelled before signal)
      */
     final boolean transferForSignal(Node node) {
         /*
@@ -1464,11 +1464,10 @@ public abstract class AbstractQueuedLongSynchronizer
     }
 
     /**
-     * Transfers node, if necessary, to sync queue after a cancelled
-     * wait. Returns true if thread was cancelled before being
-     * signalled.
-     * @param current the waiting thread
-     * @param node its node
+     * Transfers node, if necessary, to sync queue after a cancelled wait.
+     * Returns true if thread was cancelled before being signalled.
+     *
+     * @param node the node
      * @return true if cancelled before the node was signalled
      */
     final boolean transferAfterCancelledWait(Node node) {
@@ -1516,25 +1515,23 @@ public abstract class AbstractQueuedLongSynchronizer
      * uses this synchronizer as its lock.
      *
      * @param condition the condition
-     * @return <tt>true</tt> if owned
+     * @return {@code true} if owned
      * @throws NullPointerException if the condition is null
      */
     public final boolean owns(ConditionObject condition) {
-        if (condition == null)
-            throw new NullPointerException();
         return condition.isOwnedBy(this);
     }
 
     /**
      * Queries whether any threads are waiting on the given condition
      * associated with this synchronizer. Note that because timeouts
-     * and interrupts may occur at any time, a <tt>true</tt> return
-     * does not guarantee that a future <tt>signal</tt> will awaken
+     * and interrupts may occur at any time, a {@code true} return
+     * does not guarantee that a future {@code signal} will awaken
      * any threads.  This method is designed primarily for use in
      * monitoring of the system state.
      *
      * @param condition the condition
-     * @return <tt>true</tt> if there are any waiting threads
+     * @return {@code true} if there are any waiting threads
      * @throws IllegalMonitorStateException if exclusive synchronization
      *         is not held
      * @throws IllegalArgumentException if the given condition is
@@ -1601,7 +1598,7 @@ public abstract class AbstractQueuedLongSynchronizer
      * and Condition users. Exported versions of this class will in
      * general need to be accompanied by documentation describing
      * condition semantics that rely on those of the associated
-     * <tt>AbstractQueuedLongSynchronizer</tt>.
+     * {@code AbstractQueuedLongSynchronizer}.
      *
      * <p>This class is Serializable, but all fields are transient,
      * so deserialized conditions have no waiters.
@@ -1616,7 +1613,7 @@ public abstract class AbstractQueuedLongSynchronizer
         private transient Node lastWaiter;
 
         /**
-         * Creates a new <tt>ConditionObject</tt> instance.
+         * Creates a new {@code ConditionObject} instance.
          */
         public ConditionObject() { }
 
@@ -1742,9 +1739,8 @@ public abstract class AbstractQueuedLongSynchronizer
          * Implements uninterruptible condition wait.
          * <ol>
          * <li> Save lock state returned by {@link #getState}.
-         * <li> Invoke {@link #release} with
-         *      saved state as argument, throwing
-         *      IllegalMonitorStateException if it fails.
+         * <li> Invoke {@link #release} with saved state as argument,
+         *      throwing IllegalMonitorStateException if it fails.
          * <li> Block until signalled.
          * <li> Reacquire by invoking specialized version of
          *      {@link #acquire} with saved state as argument.
@@ -1803,9 +1799,8 @@ public abstract class AbstractQueuedLongSynchronizer
          * <ol>
          * <li> If current thread is interrupted, throw InterruptedException.
          * <li> Save lock state returned by {@link #getState}.
-         * <li> Invoke {@link #release} with
-         *      saved state as argument, throwing
-         *      IllegalMonitorStateException if it fails.
+         * <li> Invoke {@link #release} with saved state as argument,
+         *      throwing IllegalMonitorStateException if it fails.
          * <li> Block until signalled or interrupted.
          * <li> Reacquire by invoking specialized version of
          *      {@link #acquire} with saved state as argument.
@@ -1836,9 +1831,8 @@ public abstract class AbstractQueuedLongSynchronizer
          * <ol>
          * <li> If current thread is interrupted, throw InterruptedException.
          * <li> Save lock state returned by {@link #getState}.
-         * <li> Invoke {@link #release} with
-         *      saved state as argument, throwing
-         *      IllegalMonitorStateException if it fails.
+         * <li> Invoke {@link #release} with saved state as argument,
+         *      throwing IllegalMonitorStateException if it fails.
          * <li> Block until signalled, interrupted, or timed out.
          * <li> Reacquire by invoking specialized version of
          *      {@link #acquire} with saved state as argument.
@@ -1851,20 +1845,18 @@ public abstract class AbstractQueuedLongSynchronizer
                 throw new InterruptedException();
             Node node = addConditionWaiter();
             long savedState = fullyRelease(node);
-            long lastTime = System.nanoTime();
+            final long deadline = System.nanoTime() + nanosTimeout;
             int interruptMode = 0;
             while (!isOnSyncQueue(node)) {
                 if (nanosTimeout <= 0L) {
                     transferAfterCancelledWait(node);
                     break;
                 }
-                LockSupport.parkNanos(this, nanosTimeout);
+                if (nanosTimeout >= spinForTimeoutThreshold)
+                    LockSupport.parkNanos(this, nanosTimeout);
                 if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
                     break;
-
-                long now = System.nanoTime();
-                nanosTimeout -= now - lastTime;
-                lastTime = now;
+                nanosTimeout = deadline - System.nanoTime();
             }
             if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
                 interruptMode = REINTERRUPT;
@@ -1872,7 +1864,7 @@ public abstract class AbstractQueuedLongSynchronizer
                 unlinkCancelledWaiters();
             if (interruptMode != 0)
                 reportInterruptAfterWait(interruptMode);
-            return nanosTimeout - (System.nanoTime() - lastTime);
+            return deadline - System.nanoTime();
         }
 
         /**
@@ -1880,9 +1872,8 @@ public abstract class AbstractQueuedLongSynchronizer
          * <ol>
          * <li> If current thread is interrupted, throw InterruptedException.
          * <li> Save lock state returned by {@link #getState}.
-         * <li> Invoke {@link #release} with
-         *      saved state as argument, throwing
-         *      IllegalMonitorStateException if it fails.
+         * <li> Invoke {@link #release} with saved state as argument,
+         *      throwing IllegalMonitorStateException if it fails.
          * <li> Block until signalled, interrupted, or timed out.
          * <li> Reacquire by invoking specialized version of
          *      {@link #acquire} with saved state as argument.
@@ -1892,8 +1883,6 @@ public abstract class AbstractQueuedLongSynchronizer
          */
         public final boolean awaitUntil(Date deadline)
                 throws InterruptedException {
-            if (deadline == null)
-                throw new NullPointerException();
             long abstime = deadline.getTime();
             if (Thread.interrupted())
                 throw new InterruptedException();
@@ -1924,9 +1913,8 @@ public abstract class AbstractQueuedLongSynchronizer
          * <ol>
          * <li> If current thread is interrupted, throw InterruptedException.
          * <li> Save lock state returned by {@link #getState}.
-         * <li> Invoke {@link #release} with
-         *      saved state as argument, throwing
-         *      IllegalMonitorStateException if it fails.
+         * <li> Invoke {@link #release} with saved state as argument,
+         *      throwing IllegalMonitorStateException if it fails.
          * <li> Block until signalled, interrupted, or timed out.
          * <li> Reacquire by invoking specialized version of
          *      {@link #acquire} with saved state as argument.
@@ -1936,14 +1924,12 @@ public abstract class AbstractQueuedLongSynchronizer
          */
         public final boolean await(long time, TimeUnit unit)
                 throws InterruptedException {
-            if (unit == null)
-                throw new NullPointerException();
             long nanosTimeout = unit.toNanos(time);
             if (Thread.interrupted())
                 throw new InterruptedException();
             Node node = addConditionWaiter();
             long savedState = fullyRelease(node);
-            long lastTime = System.nanoTime();
+            final long deadline = System.nanoTime() + nanosTimeout;
             boolean timedout = false;
             int interruptMode = 0;
             while (!isOnSyncQueue(node)) {
@@ -1955,9 +1941,7 @@ public abstract class AbstractQueuedLongSynchronizer
                     LockSupport.parkNanos(this, nanosTimeout);
                 if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
                     break;
-                long now = System.nanoTime();
-                nanosTimeout -= now - lastTime;
-                lastTime = now;
+                nanosTimeout = deadline - System.nanoTime();
             }
             if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
                 interruptMode = REINTERRUPT;
@@ -1982,7 +1966,7 @@ public abstract class AbstractQueuedLongSynchronizer
 
         /**
          * Queries whether any threads are waiting on this condition.
-         * Implements {@link AbstractQueuedLongSynchronizer#hasWaiters}.
+         * Implements {@link AbstractQueuedLongSynchronizer#hasWaiters(ConditionObject)}.
          *
          * @return {@code true} if there are any waiting threads
          * @throws IllegalMonitorStateException if {@link #isHeldExclusively}
@@ -2001,7 +1985,7 @@ public abstract class AbstractQueuedLongSynchronizer
         /**
          * Returns an estimate of the number of threads waiting on
          * this condition.
-         * Implements {@link AbstractQueuedLongSynchronizer#getWaitQueueLength}.
+         * Implements {@link AbstractQueuedLongSynchronizer#getWaitQueueLength(ConditionObject)}.
          *
          * @return the estimated number of waiting threads
          * @throws IllegalMonitorStateException if {@link #isHeldExclusively}
@@ -2021,7 +2005,7 @@ public abstract class AbstractQueuedLongSynchronizer
         /**
          * Returns a collection containing those threads that may be
          * waiting on this Condition.
-         * Implements {@link AbstractQueuedLongSynchronizer#getWaitingThreads}.
+         * Implements {@link AbstractQueuedLongSynchronizer#getWaitingThreads(ConditionObject)}.
          *
          * @return the collection of threads
          * @throws IllegalMonitorStateException if {@link #isHeldExclusively}

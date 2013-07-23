@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -153,22 +153,48 @@ public class File
     /**
      * The FileSystem object representing the platform's local file system.
      */
-    static private FileSystem fs = FileSystem.getFileSystem();
+    private static final FileSystem fs = DefaultFileSystem.getFileSystem();
 
     /**
-     * This abstract pathname's normalized pathname string.  A normalized
+     * This abstract pathname's normalized pathname string. A normalized
      * pathname string uses the default name-separator character and does not
      * contain any duplicate or redundant separators.
      *
      * @serial
      */
-    private String path;
+    private final String path;
+
+    /**
+     * Enum type that indicates the status of a file path.
+     */
+    private static enum PathStatus { INVALID, CHECKED };
+
+    /**
+     * The flag indicating whether the file path is invalid.
+     */
+    private transient PathStatus status = null;
+
+    /**
+     * Check if the file has an invalid path. Currently, the inspection of
+     * a file path is very limited, and it only covers Nul character check.
+     * Returning true means the path is definitely invalid/garbage. But
+     * returning false does not guarantee that the path is valid.
+     *
+     * @return true if the file path is invalid.
+     */
+    final boolean isInvalid() {
+        if (status == null) {
+            status = (this.path.indexOf('\u0000') < 0) ? PathStatus.CHECKED
+                                                       : PathStatus.INVALID;
+        }
+        return status == PathStatus.INVALID;
+    }
 
     /**
      * The length of this abstract pathname's prefix, or zero if it has no
      * prefix.
      */
-    private transient int prefixLength;
+    private final transient int prefixLength;
 
     /**
      * Returns the length of this abstract pathname's prefix.
@@ -586,6 +612,9 @@ public class File
      * @see     Path#toRealPath
      */
     public String getCanonicalPath() throws IOException {
+        if (isInvalid()) {
+            throw new IOException("Invalid file path");
+        }
         return fs.canonicalize(fs.resolve(this));
     }
 
@@ -651,6 +680,9 @@ public class File
      */
     @Deprecated
     public URL toURL() throws MalformedURLException {
+        if (isInvalid()) {
+            throw new MalformedURLException("Invalid file path");
+        }
         return new URL("file", "", slashify(getAbsolutePath(), isDirectory()));
     }
 
@@ -711,7 +743,10 @@ public class File
 
     /**
      * Tests whether the application can read the file denoted by this
-     * abstract pathname.
+     * abstract pathname. On some platforms it may be possible to start the
+     * Java virtual machine with special privileges that allow it to read
+     * files that are marked as unreadable. Consequently this method may return
+     * {@code true} even though the file does not have read permissions.
      *
      * @return  <code>true</code> if and only if the file specified by this
      *          abstract pathname exists <em>and</em> can be read by the
@@ -727,12 +762,18 @@ public class File
         if (security != null) {
             security.checkRead(path);
         }
+        if (isInvalid()) {
+            return false;
+        }
         return fs.checkAccess(this, FileSystem.ACCESS_READ);
     }
 
     /**
      * Tests whether the application can modify the file denoted by this
-     * abstract pathname.
+     * abstract pathname. On some platforms it may be possible to start the
+     * Java virtual machine with special privileges that allow it to modify
+     * files that are marked read-only. Consequently this method may return
+     * {@code true} even though the file is marked read-only.
      *
      * @return  <code>true</code> if and only if the file system actually
      *          contains a file denoted by this abstract pathname <em>and</em>
@@ -748,6 +789,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkWrite(path);
+        }
+        if (isInvalid()) {
+            return false;
         }
         return fs.checkAccess(this, FileSystem.ACCESS_WRITE);
     }
@@ -768,6 +812,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkRead(path);
+        }
+        if (isInvalid()) {
+            return false;
         }
         return ((fs.getBooleanAttributes(this) & FileSystem.BA_EXISTS) != 0);
     }
@@ -795,6 +842,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkRead(path);
+        }
+        if (isInvalid()) {
+            return false;
         }
         return ((fs.getBooleanAttributes(this) & FileSystem.BA_DIRECTORY)
                 != 0);
@@ -826,6 +876,9 @@ public class File
         if (security != null) {
             security.checkRead(path);
         }
+        if (isInvalid()) {
+            return false;
+        }
         return ((fs.getBooleanAttributes(this) & FileSystem.BA_REGULAR) != 0);
     }
 
@@ -851,6 +904,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkRead(path);
+        }
+        if (isInvalid()) {
+            return false;
         }
         return ((fs.getBooleanAttributes(this) & FileSystem.BA_HIDDEN) != 0);
     }
@@ -881,6 +937,9 @@ public class File
         if (security != null) {
             security.checkRead(path);
         }
+        if (isInvalid()) {
+            return 0L;
+        }
         return fs.getLastModifiedTime(this);
     }
 
@@ -908,6 +967,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkRead(path);
+        }
+        if (isInvalid()) {
+            return 0L;
         }
         return fs.getLength(this);
     }
@@ -944,6 +1006,9 @@ public class File
     public boolean createNewFile() throws IOException {
         SecurityManager security = System.getSecurityManager();
         if (security != null) security.checkWrite(path);
+        if (isInvalid()) {
+            throw new IOException("Invalid file path");
+        }
         return fs.createFileExclusively(path);
     }
 
@@ -969,6 +1034,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkDelete(path);
+        }
+        if (isInvalid()) {
+            return false;
         }
         return fs.delete(this);
     }
@@ -1004,6 +1072,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkDelete(path);
+        }
+        if (isInvalid()) {
+            return;
         }
         DeleteOnExitHook.add(path);
     }
@@ -1044,6 +1115,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkRead(path);
+        }
+        if (isInvalid()) {
+            return null;
         }
         return fs.list(this);
     }
@@ -1236,6 +1310,9 @@ public class File
         if (security != null) {
             security.checkWrite(path);
         }
+        if (isInvalid()) {
+            return false;
+        }
         return fs.createDirectory(this);
     }
 
@@ -1311,6 +1388,12 @@ public class File
             security.checkWrite(path);
             security.checkWrite(dest.path);
         }
+        if (dest == null) {
+            throw new NullPointerException();
+        }
+        if (this.isInvalid() || dest.isInvalid()) {
+            return false;
+        }
         return fs.rename(this, dest);
     }
 
@@ -1346,14 +1429,19 @@ public class File
         if (security != null) {
             security.checkWrite(path);
         }
+        if (isInvalid()) {
+            return false;
+        }
         return fs.setLastModifiedTime(this, time);
     }
 
     /**
      * Marks the file or directory named by this abstract pathname so that
-     * only read operations are allowed.  After invoking this method the file
-     * or directory is guaranteed not to change until it is either deleted or
-     * marked to allow write access.  Whether or not a read-only file or
+     * only read operations are allowed. After invoking this method the file
+     * or directory will not change until it is either deleted or marked
+     * to allow write access. On some platforms it may be possible to start the
+     * Java virtual machine with special privileges that allow it to modify
+     * files that are marked read-only. Whether or not a read-only file or
      * directory may be deleted depends upon the underlying system.
      *
      * @return <code>true</code> if and only if the operation succeeded;
@@ -1371,12 +1459,17 @@ public class File
         if (security != null) {
             security.checkWrite(path);
         }
+        if (isInvalid()) {
+            return false;
+        }
         return fs.setReadOnly(this);
     }
 
     /**
      * Sets the owner's or everybody's write permission for this abstract
-     * pathname.
+     * pathname. On some platforms it may be possible to start the Java virtual
+     * machine with special privileges that allow it to modify files that
+     * disallow write operations.
      *
      * <p> The {@link java.nio.file.Files} class defines methods that operate on
      * file attributes including file permissions. This may be used when finer
@@ -1409,12 +1502,17 @@ public class File
         if (security != null) {
             security.checkWrite(path);
         }
+        if (isInvalid()) {
+            return false;
+        }
         return fs.setPermission(this, FileSystem.ACCESS_WRITE, writable, ownerOnly);
     }
 
     /**
      * A convenience method to set the owner's write permission for this abstract
-     * pathname.
+     * pathname. On some platforms it may be possible to start the Java virtual
+     * machine with special privileges that allow it to modify files that
+     * disallow write operations.
      *
      * <p> An invocation of this method of the form <tt>file.setWritable(arg)</tt>
      * behaves in exactly the same way as the invocation
@@ -1443,7 +1541,9 @@ public class File
 
     /**
      * Sets the owner's or everybody's read permission for this abstract
-     * pathname.
+     * pathname. On some platforms it may be possible to start the Java virtual
+     * machine with special privileges that allow it to read files that are
+     * marked as unreadable.
      *
      * <p> The {@link java.nio.file.Files} class defines methods that operate on
      * file attributes including file permissions. This may be used when finer
@@ -1479,12 +1579,17 @@ public class File
         if (security != null) {
             security.checkWrite(path);
         }
+        if (isInvalid()) {
+            return false;
+        }
         return fs.setPermission(this, FileSystem.ACCESS_READ, readable, ownerOnly);
     }
 
     /**
      * A convenience method to set the owner's read permission for this abstract
-     * pathname.
+     * pathname. On some platforms it may be possible to start the Java virtual
+     * machine with special privileges that allow it to read files that that are
+     * marked as unreadable.
      *
      * <p>An invocation of this method of the form <tt>file.setReadable(arg)</tt>
      * behaves in exactly the same way as the invocation
@@ -1516,7 +1621,9 @@ public class File
 
     /**
      * Sets the owner's or everybody's execute permission for this abstract
-     * pathname.
+     * pathname. On some platforms it may be possible to start the Java virtual
+     * machine with special privileges that allow it to execute files that are
+     * not marked executable.
      *
      * <p> The {@link java.nio.file.Files} class defines methods that operate on
      * file attributes including file permissions. This may be used when finer
@@ -1552,12 +1659,17 @@ public class File
         if (security != null) {
             security.checkWrite(path);
         }
+        if (isInvalid()) {
+            return false;
+        }
         return fs.setPermission(this, FileSystem.ACCESS_EXECUTE, executable, ownerOnly);
     }
 
     /**
-     * A convenience method to set the owner's execute permission for this abstract
-     * pathname.
+     * A convenience method to set the owner's execute permission for this
+     * abstract pathname. On some platforms it may be possible to start the Java
+     * virtual machine with special privileges that allow it to execute files
+     * that are not marked executable.
      *
      * <p>An invocation of this method of the form <tt>file.setExcutable(arg)</tt>
      * behaves in exactly the same way as the invocation
@@ -1589,7 +1701,10 @@ public class File
 
     /**
      * Tests whether the application can execute the file denoted by this
-     * abstract pathname.
+     * abstract pathname. On some platforms it may be possible to start the
+     * Java virtual machine with special privileges that allow it to execute
+     * files that are not marked executable. Consequently this method may return
+     * {@code true} even though the file does not have execute permissions.
      *
      * @return  <code>true</code> if and only if the abstract pathname exists
      *          <em>and</em> the application is allowed to execute the file
@@ -1605,6 +1720,9 @@ public class File
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             security.checkExec(path);
+        }
+        if (isInvalid()) {
+            return false;
         }
         return fs.checkAccess(this, FileSystem.ACCESS_EXECUTE);
     }
@@ -1682,6 +1800,9 @@ public class File
             sm.checkPermission(new RuntimePermission("getFileSystemAttributes"));
             sm.checkRead(path);
         }
+        if (isInvalid()) {
+            return 0L;
+        }
         return fs.getSpace(this, FileSystem.SPACE_TOTAL);
     }
 
@@ -1698,7 +1819,7 @@ public class File
      * makes no guarantee that write operations to this file system
      * will succeed.
      *
-     * @return  The number of unallocated bytes on the partition <tt>0L</tt>
+     * @return  The number of unallocated bytes on the partition or <tt>0L</tt>
      *          if the abstract pathname does not name a partition.  This
      *          value will be less than or equal to the total file system size
      *          returned by {@link #getTotalSpace}.
@@ -1716,6 +1837,9 @@ public class File
         if (sm != null) {
             sm.checkPermission(new RuntimePermission("getFileSystemAttributes"));
             sm.checkRead(path);
+        }
+        if (isInvalid()) {
+            return 0L;
         }
         return fs.getSpace(this, FileSystem.SPACE_FREE);
     }
@@ -1755,6 +1879,9 @@ public class File
             sm.checkPermission(new RuntimePermission("getFileSystemAttributes"));
             sm.checkRead(path);
         }
+        if (isInvalid()) {
+            return 0L;
+        }
         return fs.getSpace(this, FileSystem.SPACE_USABLE);
     }
 
@@ -1764,22 +1891,28 @@ public class File
         private TempDirectory() { }
 
         // temporary directory location
-        private static final File tmpdir = new File(fs.normalize(AccessController
-            .doPrivileged(new GetPropertyAction("java.io.tmpdir"))));
+        private static final File tmpdir = new File(AccessController
+            .doPrivileged(new GetPropertyAction("java.io.tmpdir")));
         static File location() {
             return tmpdir;
         }
 
         // file name generation
         private static final SecureRandom random = new SecureRandom();
-        static File generateFile(String prefix, String suffix, File dir) {
+        static File generateFile(String prefix, String suffix, File dir)
+            throws IOException
+        {
             long n = random.nextLong();
             if (n == Long.MIN_VALUE) {
                 n = 0;      // corner case
             } else {
                 n = Math.abs(n);
             }
-            return new File(dir, prefix + Long.toString(n) + suffix);
+            String name = prefix + Long.toString(n) + suffix;
+            File f = new File(dir, name);
+            if (!name.equals(f.getName()) || f.isInvalid())
+                throw new IOException("Unable to create temporary file");
+            return f;
         }
     }
 
@@ -1861,11 +1994,13 @@ public class File
         if (suffix == null)
             suffix = ".tmp";
 
-        File tmpdir = (directory != null) ? directory : TempDirectory.location();
+        File tmpdir = (directory != null) ? directory
+                                          : TempDirectory.location();
         SecurityManager sm = System.getSecurityManager();
         File f;
         do {
             f = TempDirectory.generateFile(prefix, suffix, tmpdir);
+
             if (sm != null) {
                 try {
                     sm.checkWrite(f.getPath());
@@ -1876,7 +2011,11 @@ public class File
                     throw se;
                 }
             }
-        } while (!fs.createFileExclusively(f.getPath()));
+        } while ((fs.getBooleanAttributes(f) & FileSystem.BA_EXISTS) != 0);
+
+        if (!fs.createFileExclusively(f.getPath()))
+            throw new IOException("Unable to create temporary file");
+
         return f;
     }
 
@@ -2006,7 +2145,7 @@ public class File
         throws IOException
     {
         s.defaultWriteObject();
-        s.writeChar(this.separatorChar); // Add the separator character
+        s.writeChar(separatorChar); // Add the separator character
     }
 
     /**
@@ -2023,9 +2162,27 @@ public class File
         char sep = s.readChar(); // read the previous separator char
         if (sep != separatorChar)
             pathField = pathField.replace(sep, separatorChar);
-        this.path = fs.normalize(pathField);
-        this.prefixLength = fs.prefixLength(this.path);
+        String path = fs.normalize(pathField);
+        UNSAFE.putObject(this, PATH_OFFSET, path);
+        UNSAFE.putIntVolatile(this, PREFIX_LENGTH_OFFSET, fs.prefixLength(path));
     }
+
+    private static final long PATH_OFFSET;
+    private static final long PREFIX_LENGTH_OFFSET;
+    private static final sun.misc.Unsafe UNSAFE;
+    static {
+        try {
+            sun.misc.Unsafe unsafe = sun.misc.Unsafe.getUnsafe();
+            PATH_OFFSET = unsafe.objectFieldOffset(
+                    File.class.getDeclaredField("path"));
+            PREFIX_LENGTH_OFFSET = unsafe.objectFieldOffset(
+                    File.class.getDeclaredField("prefixLength"));
+            UNSAFE = unsafe;
+        } catch (ReflectiveOperationException e) {
+            throw new Error(e);
+        }
+    }
+
 
     /** use serialVersionUID from JDK 1.0.2 for interoperability */
     private static final long serialVersionUID = 301077366599181567L;

@@ -162,7 +162,9 @@ clean:
 # jtreg tests
 
 # Expect JT_HOME to be set for jtreg tests. (home for jtreg)
-JT_HOME = $(SLASH_JAVA)/re/jtreg/4.0/promoted/latest/binaries/jtreg
+ifndef JT_HOME
+  JT_HOME = $(SLASH_JAVA)/re/jtreg/4.0/promoted/latest/binaries/jtreg
+endif
 ifdef JPRT_JTREG_HOME
   JT_HOME = $(JPRT_JTREG_HOME)
 endif
@@ -189,9 +191,9 @@ jtreg_tests: prep $(JT_HOME) $(PRODUCT_HOME) $(JTREG)
 	$(JTREG) -a -v:fail,error               \
           $(JTREG_KEY_OPTION)                   \
           $(EXTRA_JTREG_OPTIONS)                \
-          -r:$(ABS_TEST_OUTPUT_DIR)/JTreport    \
-          -w:$(ABS_TEST_OUTPUT_DIR)/JTwork      \
-          -jdk:$(PRODUCT_HOME)                  \
+          -r:$(shell $(GETMIXEDPATH) "$(ABS_TEST_OUTPUT_DIR)")/JTreport    \
+          -w:$(shell $(GETMIXEDPATH) "$(ABS_TEST_OUTPUT_DIR)")/JTwork      \
+          -jdk:$(shell $(GETMIXEDPATH) "$(PRODUCT_HOME)")                  \
           $(JAVA_OPTIONS:%=-vmoption:%)         \
           $(JTREG_TESTDIRS)                     \
 	  || $(BUNDLE_UP_FAILED)

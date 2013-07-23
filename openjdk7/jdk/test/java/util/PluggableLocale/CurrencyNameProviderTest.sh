@@ -1,5 +1,6 @@
+#!/bin/sh
 # 
-# Copyright (c) 2007, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2007, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 # 
 # This code is free software; you can redistribute it and/or modify it
@@ -20,9 +21,8 @@
 # or visit www.oracle.com if you need additional information or have any
 # questions.
 #
-#!/bin/sh
 #
 # @test
-# @bug 4052440
+# @bug 4052440 7199750 8000997
 # @summary CurrencyNameProvider tests
 # @run shell ExecTest.sh bar CurrencyNameProviderTest true

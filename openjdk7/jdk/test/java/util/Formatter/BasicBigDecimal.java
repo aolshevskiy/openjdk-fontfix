@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,6 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.text.DateFormatSymbols;
 import java.util.*;
-
 
 
 
@@ -1104,6 +1103,15 @@ public class BasicBigDecimal extends Basic {
         test("%.5f", "1.99999", val);
         test("%.6f", "1.999990", val);
 
+        val = new BigDecimal(0.9996);
+        test("%.0f", "1", val);
+        test("%.1f", "1.0", val);
+        test("%.2f", "1.00", val);
+        test("%.3f", "1.000", val);
+        test("%.4f", "0.9996", val);
+        test("%.5f", "0.99960", val);
+        test("%.6f", "0.999600", val);
+
 
 
 
@@ -1168,6 +1176,13 @@ public class BasicBigDecimal extends Basic {
         test("%.0g", "1e+05", create(100000.0));
         test("%.3G", "1.00E-05", recip(create(100000.0)));
         test("%.3G", "-1.00E-05", recip(create(-100000.0)));
+
+        test("%.1g", "-0", -0.0);
+        test("%3.0g", " -0", -0.0);
+        test("%.1g", "0", 0.0);
+        test("%3.0g", "  0", 0.0);
+        test("%.1g", "0", +0.0);
+        test("%3.0g", "  0", +0.0);
 
         test("%3.0g", "1e-06", 0.000001);
         test("%3.0g", "1e-05", 0.00001);

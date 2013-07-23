@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,9 @@
 
 #include "utilities/xmlstream.hpp"
 
+class ciBaseObject;
 class ciObject;
+class ciMetadata;
 class ciSymbol;
 
 // CompileLog
@@ -55,7 +57,7 @@ class CompileLog : public xmlStream {
   void va_tag(bool push, const char* format, va_list ap);
 
  public:
-  CompileLog(const char* file, FILE* fp, intx thread_id);
+  CompileLog(const char* file_name, FILE* fp, intx thread_id);
   ~CompileLog();
 
   intx          thread_id()                      { return _thread_id; }
@@ -72,7 +74,7 @@ class CompileLog : public xmlStream {
   void          name(Symbol* s)                  { xmlStream::name(s); }
 
   // Output an object description, return obj->ident().
-  int           identify(ciObject* obj);
+  int           identify(ciBaseObject* obj);
   void          clear_identities();
 
   void inline_fail   (const char* reason);

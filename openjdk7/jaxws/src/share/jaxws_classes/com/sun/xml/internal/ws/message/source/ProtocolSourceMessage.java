@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,9 +29,10 @@ import com.sun.xml.internal.bind.api.Bridge;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.pipe.Codecs;
 import com.sun.xml.internal.ws.api.pipe.StreamSOAPCodec;
-import com.sun.xml.internal.ws.api.message.HeaderList;
 import com.sun.xml.internal.ws.api.message.Message;
+import com.sun.xml.internal.ws.api.message.MessageHeaders;
 import com.sun.xml.internal.ws.api.message.Packet;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
 import com.sun.xml.internal.ws.streaming.SourceReaderFactory;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Unmarshaller;
@@ -66,10 +67,6 @@ public class ProtocolSourceMessage extends Message {
 
     public boolean hasHeaders() {
         return sm.hasHeaders();
-    }
-
-    public HeaderList getHeaders() {
-        return sm.getHeaders();
     }
 
     public String getPayloadLocalPart() {
@@ -119,12 +116,24 @@ public class ProtocolSourceMessage extends Message {
     public <T> T readPayloadAsJAXB(Unmarshaller unmarshaller) throws JAXBException {
         return (T)sm.readPayloadAsJAXB(unmarshaller);
     }
-
+    /** @deprecated */
     public <T> T readPayloadAsJAXB(Bridge<T> bridge) throws JAXBException {
+        return sm.readPayloadAsJAXB(bridge);
+    }
+    public <T> T readPayloadAsJAXB(XMLBridge<T> bridge) throws JAXBException {
         return sm.readPayloadAsJAXB(bridge);
     }
 
     public void writeTo(ContentHandler contentHandler, ErrorHandler errorHandler) throws SAXException {
         sm.writeTo(contentHandler, errorHandler);
+    }
+
+    public SOAPVersion getSOAPVersion() {
+        return sm.getSOAPVersion();
+    }
+
+    @Override
+    public MessageHeaders getHeaders() {
+        return sm.getHeaders();
     }
 }

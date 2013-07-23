@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,10 +47,10 @@ public final class SHA extends DigestBase {
     // 64 bytes are included in each hash block so the low order
     // bits of count are used to know how to pack the bytes into ints
     // and to know when to compute the block and start the next one.
-    private final int[] W;
+    private int[] W;
 
     // state of this
-    private final int[] state;
+    private int[] state;
 
     /**
      * Creates a new SHA object.
@@ -62,19 +62,14 @@ public final class SHA extends DigestBase {
         implReset();
     }
 
-    /**
-     * Creates a SHA object.with state (for cloning) */
-    private SHA(SHA base) {
-        super(base);
-        this.state = base.state.clone();
-        this.W = new int[80];
-    }
-
     /*
      * Clones this object.
      */
-    public Object clone() {
-        return new SHA(this);
+    public Object clone() throws CloneNotSupportedException {
+        SHA copy = (SHA) super.clone();
+        copy.state = copy.state.clone();
+        copy.W = new int[80];
+        return copy;
     }
 
     /**

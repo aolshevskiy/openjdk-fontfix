@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -887,7 +887,7 @@ void GraphBuilder::load_constant() {
           patch_state = copy_state_before();
           t = new ObjectConstant(obj);
         } else {
-          assert(!obj->is_klass(), "must be java_mirror of klass");
+          assert(obj->is_instance(), "must be java_mirror of klass");
           t = new InstanceConstant(obj->as_instance());
         }
         break;
@@ -947,7 +947,9 @@ void GraphBuilder::store_local(ValueStack* state, Value x, int index) {
 
 
 void GraphBuilder::load_indexed(BasicType type) {
-  ValueStack* state_before = copy_state_for_exception();
+  // In case of in block code motion in range check elimination
+  ValueStack* state_before = copy_state_indexed_access();
+  compilation()->set_has_access_indexed(true);
   Value index = ipop();
   Value array = apop();
   Value length = NULL;
@@ -961,7 +963,9 @@ void GraphBuilder::load_indexed(BasicType type) {
 
 
 void GraphBuilder::store_indexed(BasicType type) {
-  ValueStack* state_before = copy_state_for_exception();
+  // In case of in block code motion in range check elimination
+  ValueStack* state_before = copy_state_indexed_access();
+  compilation()->set_has_access_indexed(true);
   Value value = pop(as_ValueType(type));
   Value index = ipop();
   Value array = apop();
@@ -1179,7 +1183,9 @@ void GraphBuilder::if_node(Value x, If::Condition cond, Value y, ValueStack* sta
   BlockBegin* tsux = block_at(stream()->get_dest());
   BlockBegin* fsux = block_at(stream()->next_bci());
   bool is_bb = tsux->bci() < stream()->cur_bci() || fsux->bci() < stream()->cur_bci();
-  Instruction *i = append(new If(x, cond, false, y, tsux, fsux, is_bb ? state_before : NULL, is_bb));
+  // In case of loop invariant code motion or predicate insertion
+  // before the body of a loop the state is needed
+  Instruction *i = append(new If(x, cond, false, y, tsux, fsux, (is_bb || compilation()->is_optimistic()) ? state_before : NULL, is_bb));
 
   assert(i->as_Goto() == NULL ||
          (i->as_Goto()->sux_at(0) == tsux  && i->as_Goto()->is_safepoint() == tsux->bci() < stream()->cur_bci()) ||
@@ -1294,7 +1300,9 @@ void GraphBuilder::table_switch() {
     BlockBegin* tsux = block_at(bci() + sw.dest_offset_at(0));
     BlockBegin* fsux = block_at(bci() + sw.default_offset());
     bool is_bb = tsux->bci() < bci() || fsux->bci() < bci();
-    ValueStack* state_before = is_bb ? copy_state_before() : NULL;
+    // In case of loop invariant code motion or predicate insertion
+    // before the body of a loop the state is needed
+    ValueStack* state_before = copy_state_if_bb(is_bb);
     append(new If(ipop(), If::eql, true, key, tsux, fsux, state_before, is_bb));
   } else {
     // collect successors
@@ -1308,7 +1316,9 @@ void GraphBuilder::table_switch() {
     // add default successor
     if (sw.default_offset() < 0) has_bb = true;
     sux->at_put(i, block_at(bci() + sw.default_offset()));
-    ValueStack* state_before = has_bb ? copy_state_before() : NULL;
+    // In case of loop invariant code motion or predicate insertion
+    // before the body of a loop the state is needed
+    ValueStack* state_before = copy_state_if_bb(has_bb);
     Instruction* res = append(new TableSwitch(ipop(), sux, sw.low_key(), state_before, has_bb));
 #ifdef ASSERT
     if (res->as_Goto()) {
@@ -1336,7 +1346,9 @@ void GraphBuilder::lookup_switch() {
     BlockBegin* tsux = block_at(bci() + pair.offset());
     BlockBegin* fsux = block_at(bci() + sw.default_offset());
     bool is_bb = tsux->bci() < bci() || fsux->bci() < bci();
-    ValueStack* state_before = is_bb ? copy_state_before() : NULL;
+    // In case of loop invariant code motion or predicate insertion
+    // before the body of a loop the state is needed
+    ValueStack* state_before = copy_state_if_bb(is_bb);;
     append(new If(ipop(), If::eql, true, key, tsux, fsux, state_before, is_bb));
   } else {
     // collect successors & keys
@@ -1353,7 +1365,9 @@ void GraphBuilder::lookup_switch() {
     // add default successor
     if (sw.default_offset() < 0) has_bb = true;
     sux->at_put(i, block_at(bci() + sw.default_offset()));
-    ValueStack* state_before = has_bb ? copy_state_before() : NULL;
+    // In case of loop invariant code motion or predicate insertion
+    // before the body of a loop the state is needed
+    ValueStack* state_before = copy_state_if_bb(has_bb);
     Instruction* res = append(new LookupSwitch(ipop(), sux, keys, state_before, has_bb));
 #ifdef ASSERT
     if (res->as_Goto()) {
@@ -1434,7 +1448,7 @@ void GraphBuilder::method_return(Value x) {
     if (compilation()->env()->dtrace_method_probes()) {
       // Report exit from inline methods
       Values* args = new Values(1);
-      args->push(append(new Constant(new ObjectConstant(method()))));
+      args->push(append(new Constant(new MethodConstant(method()))));
       append(new RuntimeCall(voidType, "dtrace_method_exit", CAST_FROM_FN_PTR(address, SharedRuntime::dtrace_method_exit), args));
     }
 
@@ -1889,7 +1903,7 @@ void GraphBuilder::invoke(Bytecodes::Code code) {
     code == Bytecodes::_invokeinterface;
   Values* args = state()->pop_arguments(target->arg_size_no_receiver());
   Value recv = has_receiver ? apop() : NULL;
-  int vtable_index = methodOopDesc::invalid_vtable_index;
+  int vtable_index = Method::invalid_vtable_index;
 
 #ifdef SPARC
   // Currently only supported on Sparc.
@@ -3447,6 +3461,19 @@ bool GraphBuilder::try_inline_intrinsics(ciMethod* callee) {
       preserves_state = true;
       break;
 
+    case vmIntrinsics::_updateCRC32:
+    case vmIntrinsics::_updateBytesCRC32:
+    case vmIntrinsics::_updateByteBufferCRC32:
+      if (!UseCRC32Intrinsics) return false;
+      cantrap = false;
+      preserves_state = true;
+      break;
+
+    case vmIntrinsics::_loadFence :
+    case vmIntrinsics::_storeFence:
+    case vmIntrinsics::_fullFence :
+      break;
+
     default                       : return false; // do not inline
   }
   // create intrinsic node
@@ -3600,7 +3627,7 @@ void GraphBuilder::fill_sync_handler(Value lock, BlockBegin* sync_handler, bool 
     // Report exit from inline methods.  We don't have a stream here
     // so pass an explicit bci of SynchronizationEntryBCI.
     Values* args = new Values(1);
-    args->push(append_with_bci(new Constant(new ObjectConstant(method())), bci));
+    args->push(append_with_bci(new Constant(new MethodConstant(method())), bci));
     append_with_bci(new RuntimeCall(voidType, "dtrace_method_exit", CAST_FROM_FN_PTR(address, SharedRuntime::dtrace_method_exit), args), bci);
   }
 
@@ -3790,7 +3817,7 @@ bool GraphBuilder::try_inline_full(ciMethod* callee, bool holder_known, Bytecode
 
   if (compilation()->env()->dtrace_method_probes()) {
     Values* args = new Values(1);
-    args->push(append(new Constant(new ObjectConstant(method()))));
+    args->push(append(new Constant(new MethodConstant(method()))));
     append(new RuntimeCall(voidType, "dtrace_method_entry", CAST_FROM_FN_PTR(address, SharedRuntime::dtrace_method_entry), args));
   }
 

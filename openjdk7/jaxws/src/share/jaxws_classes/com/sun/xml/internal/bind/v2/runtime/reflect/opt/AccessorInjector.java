@@ -60,7 +60,7 @@ class AccessorInjector {
             return null;
 
         try {
-            ClassLoader cl = beanClass.getClassLoader();
+            ClassLoader cl = SecureLoader.getClassClassLoader(beanClass);
             if(cl==null)    return null;    // how do I inject classes to this "null" class loader? for now, back off.
 
             Class c = null;
@@ -91,7 +91,7 @@ class AccessorInjector {
      * Customizes a class file by replacing constant pools.
      *
      * @param templateClassName
-     *      The resouce that contains the template class file.
+     *      The resource that contains the template class file.
      * @param replacements
      *      A list of pair of strings that specify the substitution
      *      {@code String[]{search_0, replace_0, search_1, replace_1, ..., search_n, replace_n }
@@ -111,5 +111,5 @@ class AccessorInjector {
         return ClassTailor.tailor(resource,templateClassName,newClassName,replacements);
     }
 
-    private static final ClassLoader CLASS_LOADER = AccessorInjector.class.getClassLoader();
+    private static final ClassLoader CLASS_LOADER = SecureLoader.getClassClassLoader(AccessorInjector.class);
 }

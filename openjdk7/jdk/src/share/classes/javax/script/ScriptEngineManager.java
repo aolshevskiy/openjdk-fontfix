@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,9 @@
 
 package javax.script;
 import java.util.*;
-import java.net.URL;
-import java.io.*;
 import java.security.*;
-import sun.misc.Service;
-import sun.misc.ServiceConfigurationError;
-import sun.reflect.Reflection;
-import sun.security.util.SecurityConstants;
+import java.util.ServiceLoader;
+import java.util.ServiceConfigurationError;
 
 /**
  * The <code>ScriptEngineManager</code> implements a discovery and instantiation
@@ -55,22 +51,14 @@ import sun.security.util.SecurityConstants;
 public class ScriptEngineManager  {
     private static final boolean DEBUG = false;
     /**
-     * If the thread context ClassLoader can be accessed by the caller,
-     * then the effect of calling this constructor is the same as calling
+     * The effect of calling this constructor is the same as calling
      * <code>ScriptEngineManager(Thread.currentThread().getContextClassLoader())</code>.
-     * Otherwise, the effect is the same as calling <code>ScriptEngineManager(null)</code>.
      *
      * @see java.lang.Thread#getContextClassLoader
      */
     public ScriptEngineManager() {
         ClassLoader ctxtLoader = Thread.currentThread().getContextClassLoader();
-        if (canCallerAccessLoader(ctxtLoader)) {
-            if (DEBUG) System.out.println("using " + ctxtLoader);
-            init(ctxtLoader);
-        } else {
-            if (DEBUG) System.out.println("using bootstrap loader");
-            init(null);
-        }
+        init(ctxtLoader);
     }
 
     /**
@@ -102,13 +90,15 @@ public class ScriptEngineManager  {
     }
 
     private void initEngines(final ClassLoader loader) {
-        Iterator itr = null;
+        Iterator<ScriptEngineFactory> itr = null;
         try {
+            ServiceLoader<ScriptEngineFactory> sl;
             if (loader != null) {
-                itr = Service.providers(ScriptEngineFactory.class, loader);
+                sl = ServiceLoader.load(ScriptEngineFactory.class, loader);
             } else {
-                itr = Service.installedProviders(ScriptEngineFactory.class);
+                sl = ServiceLoader.loadInstalled(ScriptEngineFactory.class);
             }
+            itr = sl.iterator();
         } catch (ServiceConfigurationError err) {
             System.err.println("Can't find ScriptEngineFactory providers: " +
                           err.getMessage());
@@ -124,7 +114,7 @@ public class ScriptEngineManager  {
         try {
             while (itr.hasNext()) {
                 try {
-                    ScriptEngineFactory fact = (ScriptEngineFactory) itr.next();
+                    ScriptEngineFactory fact = itr.next();
                     engineSpis.add(fact);
                 } catch (ServiceConfigurationError err) {
                     System.err.println("ScriptEngineManager providers.next(): "
@@ -418,42 +408,4 @@ public class ScriptEngineManager  {
 
     /** Global bindings associated with script engines created by this manager. */
     private Bindings globalScope;
-
-    private boolean canCallerAccessLoader(ClassLoader loader) {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            ClassLoader callerLoader = getCallerClassLoader();
-            if (callerLoader != null) {
-                if (loader != callerLoader || !isAncestor(loader, callerLoader)) {
-                    try {
-                        sm.checkPermission(SecurityConstants.GET_CLASSLOADER_PERMISSION);
-                    } catch (SecurityException exp) {
-                        if (DEBUG) exp.printStackTrace();
-                        return false;
-                    }
-                } // else fallthru..
-            } // else fallthru..
-        } // else fallthru..
-
-        return true;
-    }
-
-    // Note that this code is same as ClassLoader.getCallerClassLoader().
-    // But, that method is package private and hence we can't call here.
-    private ClassLoader getCallerClassLoader() {
-        Class caller = Reflection.getCallerClass(3);
-        if (caller == null) {
-            return null;
-        }
-        return caller.getClassLoader();
-    }
-
-    // is cl1 ancestor of cl2?
-    private boolean isAncestor(ClassLoader cl1, ClassLoader cl2) {
-        do {
-            cl2 = cl2.getParent();
-            if (cl1 == cl2) return true;
-        } while (cl2 != null);
-        return false;
-    }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@
 #include "interpreter/interpreterRuntime.hpp"
 #include "memory/cardTableModRefBS.hpp"
 #include "memory/resourceArea.hpp"
+#include "oops/methodCounters.hpp"
 #include "oops/objArrayKlass.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/jvmtiExport.hpp"
@@ -304,11 +305,12 @@
 
 
 #define METHOD istate->method()
-#define INVOCATION_COUNT METHOD->invocation_counter()
-#define BACKEDGE_COUNT METHOD->backedge_counter()
+#define GET_METHOD_COUNTERS(res)    \
+  res = METHOD->method_counters();  \
+  if (res == NULL) {                \
+    CALL_VM(res = InterpreterRuntime::build_method_counters(THREAD, METHOD), handle_exception); \
+  }
 
-
-#define INCR_INVOCATION_COUNT INVOCATION_COUNT->increment()
 #define OSR_REQUEST(res, branch_pc) \
             CALL_VM(res=InterpreterRuntime::frequency_counter_overflow(THREAD, branch_pc), handle_exception);
 /*
@@ -325,10 +327,12 @@
 
 #define DO_BACKEDGE_CHECKS(skip, branch_pc)                                                         \
     if ((skip) <= 0) {                                                                              \
+      MethodCounters* mcs;                                                                          \
+      GET_METHOD_COUNTERS(mcs);                                                                     \
       if (UseLoopCounter) {                                                                         \
         bool do_OSR = UseOnStackReplacement;                                                        \
-        BACKEDGE_COUNT->increment();                                                                \
-        if (do_OSR) do_OSR = BACKEDGE_COUNT->reached_InvocationLimit();                             \
+        mcs->backedge_counter()->increment();                                                       \
+        if (do_OSR) do_OSR = mcs->backedge_counter()->reached_InvocationLimit();                    \
         if (do_OSR) {                                                                               \
           nmethod*  osr_nmethod;                                                                    \
           OSR_REQUEST(osr_nmethod, branch_pc);                                                      \
@@ -341,7 +345,7 @@
           }                                                                                         \
         }                                                                                           \
       }  /* UseCompiler ... */                                                                      \
-      INCR_INVOCATION_COUNT;                                                                        \
+      mcs->invocation_counter()->increment();                                                       \
       SAFEPOINT;                                                                                    \
     }
 
@@ -464,7 +468,25 @@ BytecodeInterpreter::run(interpreterState istate) {
 
 #ifdef ASSERT
   if (istate->_msg != initialize) {
-    assert(abs(istate->_stack_base - istate->_stack_limit) == (istate->_method->max_stack() + 1), "bad stack limit");
+    // We have a problem here if we are running with a pre-hsx24 JDK (for example during bootstrap)
+    // because in that case, EnableInvokeDynamic is true by default but will be later switched off
+    // if java_lang_invoke_MethodHandle::compute_offsets() detects that the JDK only has the classes
+    // for the old JSR292 implementation.
+    // This leads to a situation where 'istate->_stack_limit' always accounts for
+    // methodOopDesc::extra_stack_entries() because it is computed in
+    // CppInterpreterGenerator::generate_compute_interpreter_state() which was generated while
+    // EnableInvokeDynamic was still true. On the other hand, istate->_method->max_stack() doesn't
+    // account for extra_stack_entries() anymore because at the time when it is called
+    // EnableInvokeDynamic was already set to false.
+    // So we have a second version of the assertion which handles the case where EnableInvokeDynamic was
+    // switched off because of the wrong classes.
+    if (EnableInvokeDynamic || FLAG_IS_CMDLINE(EnableInvokeDynamic)) {
+      assert(labs(istate->_stack_base - istate->_stack_limit) == (istate->_method->max_stack() + 1), "bad stack limit");
+    } else {
+      const int extra_stack_entries = Method::extra_stack_entries_for_jsr292;
+      assert(labs(istate->_stack_base - istate->_stack_limit) == (istate->_method->max_stack() + extra_stack_entries
+                                                                                               + 1), "bad stack limit");
+    }
 #ifndef SHARK
     IA32_ONLY(assert(istate->_stack_limit == istate->_thread->last_Java_sp() + 1, "wrong"));
 #endif // !SHARK
@@ -486,7 +508,7 @@ BytecodeInterpreter::run(interpreterState istate) {
   register address          pc = istate->bcp();
   register jubyte opcode;
   register intptr_t*        locals = istate->locals();
-  register constantPoolCacheOop  cp = istate->constants(); // method()->constants()->cache()
+  register ConstantPoolCache*    cp = istate->constants(); // method()->constants()->cache()
 #ifdef LOTS_OF_REGS
   register JavaThread*      THREAD = istate->thread();
   register volatile jbyte*  BYTE_MAP_BASE = _byte_map_base;
@@ -618,11 +640,13 @@ BytecodeInterpreter::run(interpreterState istate) {
       // count invocations
       assert(initialized, "Interpreter not initialized");
       if (_compiling) {
+        MethodCounters* mcs;
+        GET_METHOD_COUNTERS(mcs);
         if (ProfileInterpreter) {
-          METHOD->increment_interpreter_invocation_count();
+          METHOD->increment_interpreter_invocation_count(THREAD);
         }
-        INCR_INVOCATION_COUNT;
-        if (INVOCATION_COUNT->reached_InvocationLimit()) {
+        mcs->invocation_counter()->increment();
+        if (mcs->invocation_counter()->reached_InvocationLimit()) {
             CALL_VM((void)InterpreterRuntime::frequency_counter_overflow(THREAD, NULL), handle_exception);
 
             // We no longer retry on a counter overflow
@@ -675,7 +699,7 @@ BytecodeInterpreter::run(interpreterState istate) {
               // The bias pattern is present in the object's header. Need to check
               // whether the bias owner and the epoch are both still current.
               intptr_t xx = ((intptr_t) THREAD) ^ (intptr_t) mark;
-              xx = (intptr_t) rcvr->klass()->klass_part()->prototype_header() ^ xx;
+              xx = (intptr_t) rcvr->klass()->prototype_header() ^ xx;
               intptr_t yy = (xx & ~((int) markOopDesc::age_mask_in_place));
               if (yy != 0 ) {
                 // At this point we know that the header has the bias pattern and
@@ -719,8 +743,8 @@ BytecodeInterpreter::run(interpreterState istate) {
                     // value as the comparison value when doing the cas to acquire the
                     // bias in the current epoch. In other words, we allow transfer of
                     // the bias from one thread to another directly in this situation.
-                    xx = (intptr_t) rcvr->klass()->klass_part()->prototype_header() | (intptr_t) THREAD;
-                    if (Atomic::cmpxchg_ptr((intptr_t)THREAD | (intptr_t) rcvr->klass()->klass_part()->prototype_header(),
+                    xx = (intptr_t) rcvr->klass()->prototype_header() | (intptr_t) THREAD;
+                    if (Atomic::cmpxchg_ptr((intptr_t)THREAD | (intptr_t) rcvr->klass()->prototype_header(),
                                             (intptr_t*) rcvr->mark_addr(),
                                             (intptr_t) mark) != (intptr_t) mark) {
                       CALL_VM(InterpreterRuntime::monitorenter(THREAD, mon), handle_exception);
@@ -737,8 +761,8 @@ BytecodeInterpreter::run(interpreterState istate) {
                   // bias of this particular object, so it's okay to continue in the
                   // normal locking code.
                   //
-                  xx = (intptr_t) rcvr->klass()->klass_part()->prototype_header() | (intptr_t) THREAD;
-                  if (Atomic::cmpxchg_ptr(rcvr->klass()->klass_part()->prototype_header(),
+                  xx = (intptr_t) rcvr->klass()->prototype_header() | (intptr_t) THREAD;
+                  if (Atomic::cmpxchg_ptr(rcvr->klass()->prototype_header(),
                                           (intptr_t*) rcvr->mark_addr(),
                                           mark) == mark) {
                     // (*counters->revoked_lock_entry_count_addr())++;
@@ -1526,7 +1550,7 @@ run:
 
           oop rcvr = LOCALS_OBJECT(0);
           VERIFY_OOP(rcvr);
-          if (rcvr->klass()->klass_part()->has_finalizer()) {
+          if (rcvr->klass()->has_finalizer()) {
             CALL_VM(InterpreterRuntime::register_finalizer(THREAD, rcvr), handle_exception);
           }
           goto handle_return;
@@ -1557,7 +1581,7 @@ run:
 #define ARRAY_LOADTO32(T, T2, format, stackRes, extra)                                \
       {                                                                               \
           ARRAY_INTRO(-2);                                                            \
-          extra;                                                                      \
+          (void)extra;                                                                \
           SET_ ## stackRes(*(T2 *)(((address) arrObj->base(T)) + index * sizeof(T2)), \
                            -2);                                                       \
           UPDATE_PC_AND_TOS_AND_CONTINUE(1, -1);                                      \
@@ -1568,8 +1592,8 @@ run:
       {                                                                                    \
           ARRAY_INTRO(-2);                                                                 \
           SET_ ## stackRes(*(T2 *)(((address) arrObj->base(T)) + index * sizeof(T2)), -1); \
-          extra;                                                                           \
-          UPDATE_PC_AND_CONTINUE(1);                                            \
+          (void)extra;                                                                     \
+          UPDATE_PC_AND_CONTINUE(1);                                                       \
       }
 
       CASE(_iaload):
@@ -1593,7 +1617,7 @@ run:
 #define ARRAY_STOREFROM32(T, T2, format, stackSrc, extra)                            \
       {                                                                              \
           ARRAY_INTRO(-3);                                                           \
-          extra;                                                                     \
+          (void)extra;                                                               \
           *(T2 *)(((address) arrObj->base(T)) + index * sizeof(T2)) = stackSrc( -1); \
           UPDATE_PC_AND_TOS_AND_CONTINUE(1, -3);                                     \
       }
@@ -1602,7 +1626,7 @@ run:
 #define ARRAY_STOREFROM64(T, T2, stackSrc, extra)                                    \
       {                                                                              \
           ARRAY_INTRO(-4);                                                           \
-          extra;                                                                     \
+          (void)extra;                                                               \
           *(T2 *)(((address) arrObj->base(T)) + index * sizeof(T2)) = stackSrc( -1); \
           UPDATE_PC_AND_TOS_AND_CONTINUE(1, -4);                                     \
       }
@@ -1621,14 +1645,13 @@ run:
           // arrObj, index are set
           if (rhsObject != NULL) {
             /* Check assignability of rhsObject into arrObj */
-            klassOop rhsKlassOop = rhsObject->klass(); // EBX (subclass)
-            assert(arrObj->klass()->klass()->klass_part()->oop_is_objArrayKlass(), "Ack not an objArrayKlass");
-            klassOop elemKlassOop = ((objArrayKlass*) arrObj->klass()->klass_part())->element_klass(); // superklass EAX
+            Klass* rhsKlassOop = rhsObject->klass(); // EBX (subclass)
+            Klass* elemKlassOop = ObjArrayKlass::cast(arrObj->klass())->element_klass(); // superklass EAX
             //
             // Check for compatibilty. This check must not GC!!
             // Seems way more expensive now that we must dispatch
             //
-            if (rhsKlassOop != elemKlassOop && !rhsKlassOop->klass_part()->is_subtype_of(elemKlassOop)) { // ebx->is...
+            if (rhsKlassOop != elemKlassOop && !rhsKlassOop->is_subtype_of(elemKlassOop)) { // ebx->is...
               VM_JAVA_ERROR(vmSymbols::java_lang_ArrayStoreException(), "");
             }
           }
@@ -1770,7 +1793,8 @@ run:
 
           oop obj;
           if ((Bytecodes::Code)opcode == Bytecodes::_getstatic) {
-            obj = (oop) cache->f1_as_instance();
+            Klass* k = cache->f1_as_klass();
+            obj = k->java_mirror();
             MORE_STACK(1);  // Assume single slot push
           } else {
             obj = (oop) STACK_OBJECT(-1);
@@ -1881,7 +1905,8 @@ run:
             --count;
           }
           if ((Bytecodes::Code)opcode == Bytecodes::_putstatic) {
-            obj = (oop) cache->f1_as_instance();
+            Klass* k = cache->f1_as_klass();
+            obj = k->java_mirror();
           } else {
             --count;
             obj = (oop) STACK_OBJECT(count);
@@ -1940,14 +1965,14 @@ run:
 
       CASE(_new): {
         u2 index = Bytes::get_Java_u2(pc+1);
-        constantPoolOop constants = istate->method()->constants();
+        ConstantPool* constants = istate->method()->constants();
         if (!constants->tag_at(index).is_unresolved_klass()) {
           // Make sure klass is initialized and doesn't have a finalizer
-          oop entry = constants->slot_at(index).get_oop();
+          Klass* entry = constants->slot_at(index).get_klass();
           assert(entry->is_klass(), "Should be resolved klass");
-          klassOop k_entry = (klassOop) entry;
-          assert(k_entry->klass_part()->oop_is_instance(), "Should be instanceKlass");
-          instanceKlass* ik = (instanceKlass*) k_entry->klass_part();
+          Klass* k_entry = (Klass*) entry;
+          assert(k_entry->oop_is_instance(), "Should be InstanceKlass");
+          InstanceKlass* ik = (InstanceKlass*) k_entry;
           if ( ik->is_initialized() && ik->can_be_fastpath_allocated() ) {
             size_t obj_size = ik->size_helper();
             oop result = NULL;
@@ -2033,17 +2058,17 @@ run:
             if (METHOD->constants()->tag_at(index).is_unresolved_klass()) {
               CALL_VM(InterpreterRuntime::quicken_io_cc(THREAD), handle_exception);
             }
-            klassOop klassOf = (klassOop) METHOD->constants()->slot_at(index).get_oop();
-            klassOop objKlassOop = STACK_OBJECT(-1)->klass(); //ebx
+            Klass* klassOf = (Klass*) METHOD->constants()->slot_at(index).get_klass();
+            Klass* objKlassOop = STACK_OBJECT(-1)->klass(); //ebx
             //
             // Check for compatibilty. This check must not GC!!
             // Seems way more expensive now that we must dispatch
             //
             if (objKlassOop != klassOf &&
-                !objKlassOop->klass_part()->is_subtype_of(klassOf)) {
+                !objKlassOop->is_subtype_of(klassOf)) {
               ResourceMark rm(THREAD);
-              const char* objName = Klass::cast(objKlassOop)->external_name();
-              const char* klassName = Klass::cast(klassOf)->external_name();
+              const char* objName = objKlassOop->external_name();
+              const char* klassName = klassOf->external_name();
               char* message = SharedRuntime::generate_class_cast_message(
                 objName, klassName);
               VM_JAVA_ERROR(vmSymbols::java_lang_ClassCastException(), message);
@@ -2068,13 +2093,13 @@ run:
             if (METHOD->constants()->tag_at(index).is_unresolved_klass()) {
               CALL_VM(InterpreterRuntime::quicken_io_cc(THREAD), handle_exception);
             }
-            klassOop klassOf = (klassOop) METHOD->constants()->slot_at(index).get_oop();
-            klassOop objKlassOop = STACK_OBJECT(-1)->klass();
+            Klass* klassOf = (Klass*) METHOD->constants()->slot_at(index).get_klass();
+            Klass* objKlassOop = STACK_OBJECT(-1)->klass();
             //
             // Check for compatibilty. This check must not GC!!
             // Seems way more expensive now that we must dispatch
             //
-            if ( objKlassOop == klassOf || objKlassOop->klass_part()->is_subtype_of(klassOf)) {
+            if ( objKlassOop == klassOf || objKlassOop->is_subtype_of(klassOf)) {
               SET_STACK_INT(1, -1);
             } else {
               SET_STACK_INT(0, -1);
@@ -2096,7 +2121,7 @@ run:
             wide = true;
           }
 
-          constantPoolOop constants = METHOD->constants();
+          ConstantPool* constants = METHOD->constants();
           switch (constants->tag_at(index).value()) {
           case JVM_CONSTANT_Integer:
             SET_STACK_INT(constants->int_at(index), 0);
@@ -2107,16 +2132,24 @@ run:
             break;
 
           case JVM_CONSTANT_String:
-            VERIFY_OOP(constants->resolved_string_at(index));
-            SET_STACK_OBJECT(constants->resolved_string_at(index), 0);
+            {
+              oop result = constants->resolved_references()->obj_at(index);
+              if (result == NULL) {
+                CALL_VM(InterpreterRuntime::resolve_ldc(THREAD, (Bytecodes::Code) opcode), handle_exception);
+                SET_STACK_OBJECT(THREAD->vm_result(), 0);
+                THREAD->set_vm_result(NULL);
+              } else {
+                VERIFY_OOP(result);
+                SET_STACK_OBJECT(result, 0);
+              }
             break;
+            }
 
           case JVM_CONSTANT_Class:
             VERIFY_OOP(constants->resolved_klass_at(index)->java_mirror());
             SET_STACK_OBJECT(constants->resolved_klass_at(index)->java_mirror(), 0);
             break;
 
-          case JVM_CONSTANT_UnresolvedString:
           case JVM_CONSTANT_UnresolvedClass:
           case JVM_CONSTANT_UnresolvedClassInError:
             CALL_VM(InterpreterRuntime::ldc(THREAD, wide), handle_exception);
@@ -2133,7 +2166,7 @@ run:
         {
           u2 index = Bytes::get_Java_u2(pc+1);
 
-          constantPoolOop constants = METHOD->constants();
+          ConstantPool* constants = METHOD->constants();
           switch (constants->tag_at(index).value()) {
 
           case JVM_CONSTANT_Long:
@@ -2150,15 +2183,6 @@ run:
 
       CASE(_fast_aldc_w):
       CASE(_fast_aldc): {
-        if (!EnableInvokeDynamic) {
-          // We should not encounter this bytecode if !EnableInvokeDynamic.
-          // The verifier will stop it.  However, if we get past the verifier,
-          // this will stop the thread in a reasonable way, without crashing the JVM.
-          CALL_VM(InterpreterRuntime::throw_IncompatibleClassChangeError(THREAD),
-                  handle_exception);
-          ShouldNotReachHere();
-        }
-
         u2 index;
         int incr;
         if (opcode == Bytecodes::_fast_aldc) {
@@ -2172,14 +2196,13 @@ run:
         // We are resolved if the f1 field contains a non-null object (CallSite, etc.)
         // This kind of CP cache entry does not need to match the flags byte, because
         // there is a 1-1 relation between bytecode type and CP entry type.
-        ConstantPoolCacheEntry* cache = cp->entry_at(index);
-        if (cache->f1_as_instance() == NULL) {
+        ConstantPool* constants = METHOD->constants();
+        oop result = constants->resolved_references()->obj_at(index);
+        if (result == NULL) {
           CALL_VM(InterpreterRuntime::resolve_ldc(THREAD, (Bytecodes::Code) opcode),
                   handle_exception);
-          // GC might move cache while returning from VM call.
-          cache = cp->entry_at(index); // reload
+          result = THREAD->vm_result();
         }
-        oop result = cache->f1_as_instance();
 
         VERIFY_OOP(result);
         SET_STACK_OBJECT(result, 0);
@@ -2187,6 +2210,7 @@ run:
       }
 
       CASE(_invokedynamic): {
+
         if (!EnableInvokeDynamic) {
           // We should not encounter this bytecode if !EnableInvokeDynamic.
           // The verifier will stop it.  However, if we get past the verifier,
@@ -2197,24 +2221,22 @@ run:
         }
 
         u4 index = Bytes::get_native_u4(pc+1);
-        ConstantPoolCacheEntry* cache = cp->secondary_entry_at(index);
+        ConstantPoolCacheEntry* cache = cp->constant_pool()->invokedynamic_cp_cache_entry_at(index);
 
-        // We are resolved if the f1 field contains a non-null object (CallSite, etc.)
+        // We are resolved if the resolved_references field contains a non-null object (CallSite, etc.)
         // This kind of CP cache entry does not need to match the flags byte, because
         // there is a 1-1 relation between bytecode type and CP entry type.
-        assert(constantPoolCacheOopDesc::is_secondary_index(index), "incorrect format");
-        if (cache->is_f1_null()) {
+        if (! cache->is_resolved((Bytecodes::Code) opcode)) {
           CALL_VM(InterpreterRuntime::resolve_invokedynamic(THREAD),
                   handle_exception);
-          // GC might move cache while returning from VM call.
-          cache = cp->secondary_entry_at(index); // reload
+          cache = cp->constant_pool()->invokedynamic_cp_cache_entry_at(index);
         }
 
-        methodOop method = cache->f2_as_vfinal_method();
-        VERIFY_OOP(method);
+        Method* method = cache->f1_as_method();
+        if (VerifyOops) method->verify();
 
         if (cache->has_appendix()) {
-          constantPoolOop constants = METHOD->constants();
+          ConstantPool* constants = METHOD->constants();
           SET_STACK_OBJECT(cache->appendix_if_resolved(constants), 0);
           MORE_STACK(1);
         }
@@ -2226,6 +2248,7 @@ run:
 
         UPDATE_PC_AND_RETURN(0); // I'll be back...
       }
+
       CASE(_invokehandle): {
 
         if (!EnableInvokeDynamic) {
@@ -2238,16 +2261,14 @@ run:
         if (! cache->is_resolved((Bytecodes::Code) opcode)) {
           CALL_VM(InterpreterRuntime::resolve_invokehandle(THREAD),
                   handle_exception);
-          // GC might move cache while returning from VM call.
-          cache = cp->entry_at(index); // reload
+          cache = cp->entry_at(index);
         }
 
-        methodOop method = cache->f2_as_vfinal_method();
-
-        VERIFY_OOP(method);
+        Method* method = cache->f1_as_method();
+        if (VerifyOops) method->verify();
 
         if (cache->has_appendix()) {
-          constantPoolOop constants = METHOD->constants();
+          ConstantPool* constants = METHOD->constants();
           SET_STACK_OBJECT(cache->appendix_if_resolved(constants), 0);
           MORE_STACK(1);
         }
@@ -2280,7 +2301,7 @@ run:
         // This code isn't produced by javac, but could be produced by
         // another compliant java compiler.
         if (cache->is_forced_virtual()) {
-          methodOop callee;
+          Method* callee;
           CHECK_NULL(STACK_OBJECT(-(cache->parameter_size())));
           if (cache->is_vfinal()) {
             callee = cache->f2_as_vfinal_method();
@@ -2289,9 +2310,9 @@ run:
             int parms = cache->parameter_size();
             // Same comments as invokevirtual apply here
             VERIFY_OOP(STACK_OBJECT(-parms));
-            instanceKlass* rcvrKlass = (instanceKlass*)
-                                 STACK_OBJECT(-parms)->klass()->klass_part();
-            callee = (methodOop) rcvrKlass->start_of_vtable()[ cache->f2_as_index()];
+            InstanceKlass* rcvrKlass = (InstanceKlass*)
+                                 STACK_OBJECT(-parms)->klass();
+            callee = (Method*) rcvrKlass->start_of_vtable()[ cache->f2_as_index()];
           }
           istate->set_callee(callee);
           istate->set_callee_entry_point(callee->from_interpreted_entry());
@@ -2305,14 +2326,14 @@ run:
         }
 
         // this could definitely be cleaned up QQQ
-        methodOop callee;
-        klassOop iclass = cache->f1_as_klass();
-        // instanceKlass* interface = (instanceKlass*) iclass->klass_part();
+        Method* callee;
+        Klass* iclass = cache->f1_as_klass();
+        // InstanceKlass* interface = (InstanceKlass*) iclass;
         // get receiver
         int parms = cache->parameter_size();
         oop rcvr = STACK_OBJECT(-parms);
         CHECK_NULL(rcvr);
-        instanceKlass* int2 = (instanceKlass*) rcvr->klass()->klass_part();
+        InstanceKlass* int2 = (InstanceKlass*) rcvr->klass();
         itableOffsetEntry* ki = (itableOffsetEntry*) int2->start_of_itable();
         int i;
         for ( i = 0 ; i < int2->itable_length() ; i++, ki++ ) {
@@ -2359,7 +2380,7 @@ run:
 
         istate->set_msg(call_method);
         {
-          methodOop callee;
+          Method* callee;
           if ((Bytecodes::Code)opcode == Bytecodes::_invokevirtual) {
             CHECK_NULL(STACK_OBJECT(-(cache->parameter_size())));
             if (cache->is_vfinal()) callee = cache->f2_as_vfinal_method();
@@ -2367,13 +2388,13 @@ run:
               // get receiver
               int parms = cache->parameter_size();
               // this works but needs a resourcemark and seems to create a vtable on every call:
-              // methodOop callee = rcvr->klass()->klass_part()->vtable()->method_at(cache->f2_as_index());
+              // Method* callee = rcvr->klass()->vtable()->method_at(cache->f2_as_index());
               //
               // this fails with an assert
-              // instanceKlass* rcvrKlass = instanceKlass::cast(STACK_OBJECT(-parms)->klass());
+              // InstanceKlass* rcvrKlass = InstanceKlass::cast(STACK_OBJECT(-parms)->klass());
               // but this works
               VERIFY_OOP(STACK_OBJECT(-parms));
-              instanceKlass* rcvrKlass = (instanceKlass*) STACK_OBJECT(-parms)->klass()->klass_part();
+              InstanceKlass* rcvrKlass = (InstanceKlass*) STACK_OBJECT(-parms)->klass();
               /*
                 Executing this code in java.lang.String:
                     public String(char value[]) {
@@ -2381,16 +2402,16 @@ run:
                           this.value = (char[])value.clone();
                      }
 
-                 a find on rcvr->klass()->klass_part() reports:
+                 a find on rcvr->klass() reports:
                  {type array char}{type array class}
                   - klass: {other class}
 
-                  but using instanceKlass::cast(STACK_OBJECT(-parms)->klass()) causes in assertion failure
-                  because rcvr->klass()->klass_part()->oop_is_instance() == 0
+                  but using InstanceKlass::cast(STACK_OBJECT(-parms)->klass()) causes in assertion failure
+                  because rcvr->klass()->oop_is_instance() == 0
                   However it seems to have a vtable in the right location. Huh?
 
               */
-              callee = (methodOop) rcvrKlass->start_of_vtable()[ cache->f2_as_index()];
+              callee = (Method*) rcvrKlass->start_of_vtable()[ cache->f2_as_index()];
             }
           } else {
             if ((Bytecodes::Code)opcode == Bytecodes::_invokespecial) {
@@ -2536,7 +2557,7 @@ run:
     CALL_VM(continuation_bci = (intptr_t)InterpreterRuntime::exception_handler_for_exception(THREAD, except_oop()),
             handle_exception);
 
-    except_oop = (oop) THREAD->vm_result();
+    except_oop = THREAD->vm_result();
     THREAD->set_vm_result(NULL);
     if (continuation_bci >= 0) {
       // Place exception on top of stack
@@ -3101,9 +3122,9 @@ BytecodeInterpreter::print() {
   tty->print_cr("&native_fresult: " INTPTR_FORMAT, (uintptr_t) &this->_native_fresult);
   tty->print_cr("native_lresult: " INTPTR_FORMAT, (uintptr_t) this->_native_lresult);
 #endif
-#if defined(IA64) && !defined(ZERO)
+#if !defined(ZERO)
   tty->print_cr("last_Java_fp: " INTPTR_FORMAT, (uintptr_t) this->_last_Java_fp);
-#endif // IA64 && !ZERO
+#endif // !ZERO
   tty->print_cr("self_link: " INTPTR_FORMAT, (uintptr_t) this->_self_link);
 }
 

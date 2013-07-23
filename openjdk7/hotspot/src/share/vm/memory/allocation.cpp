@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,10 @@
 #include "precompiled.hpp"
 #include "memory/allocation.hpp"
 #include "memory/allocation.inline.hpp"
+#include "memory/genCollectedHeap.hpp"
+#include "memory/metaspaceShared.hpp"
 #include "memory/resourceArea.hpp"
+#include "memory/universe.hpp"
 #include "runtime/atomic.hpp"
 #include "runtime/os.hpp"
 #include "runtime/task.hpp"
@@ -46,10 +49,36 @@
 # include "os_bsd.inline.hpp"
 #endif
 
-void* StackObj::operator new(size_t size)  { ShouldNotCallThis(); return 0; };
-void  StackObj::operator delete(void* p)   { ShouldNotCallThis(); };
-void* _ValueObj::operator new(size_t size)  { ShouldNotCallThis(); return 0; };
-void  _ValueObj::operator delete(void* p)   { ShouldNotCallThis(); };
+void* StackObj::operator new(size_t size)       { ShouldNotCallThis(); return 0; }
+void  StackObj::operator delete(void* p)        { ShouldNotCallThis(); }
+void* StackObj::operator new [](size_t size)    { ShouldNotCallThis(); return 0; }
+void  StackObj::operator delete [](void* p)     { ShouldNotCallThis(); }
+
+void* _ValueObj::operator new(size_t size)      { ShouldNotCallThis(); return 0; }
+void  _ValueObj::operator delete(void* p)       { ShouldNotCallThis(); }
+void* _ValueObj::operator new [](size_t size)   { ShouldNotCallThis(); return 0; }
+void  _ValueObj::operator delete [](void* p)    { ShouldNotCallThis(); }
+
+void* MetaspaceObj::operator new(size_t size, ClassLoaderData* loader_data,
+                                 size_t word_size, bool read_only,
+                                 MetaspaceObj::Type type, TRAPS) {
+  // Klass has it's own operator new
+  return Metaspace::allocate(loader_data, word_size, read_only,
+                             type, CHECK_NULL);
+}
+
+bool MetaspaceObj::is_shared() const {
+  return MetaspaceShared::is_in_shared_space(this);
+}
+
+
+bool MetaspaceObj::is_metaspace_object() const {
+  return Metaspace::contains((void*)this);
+}
+
+void MetaspaceObj::print_address_on(outputStream* st) const {
+  st->print(" {"INTPTR_FORMAT"}", this);
+}
 
 void* ResourceObj::operator new(size_t size, allocation_type type, MEMFLAGS flags) {
   address res;
@@ -68,11 +97,43 @@ void* ResourceObj::operator new(size_t size, allocation_type type, MEMFLAGS flag
   return res;
 }
 
+void* ResourceObj::operator new [](size_t size, allocation_type type, MEMFLAGS flags) {
+  return (address) operator new(size, type, flags);
+}
+
+void* ResourceObj::operator new(size_t size, const std::nothrow_t&  nothrow_constant,
+    allocation_type type, MEMFLAGS flags) {
+  //should only call this with std::nothrow, use other operator new() otherwise
+  address res;
+  switch (type) {
+   case C_HEAP:
+    res = (address)AllocateHeap(size, flags, CALLER_PC, AllocFailStrategy::RETURN_NULL);
+    DEBUG_ONLY(if (res!= NULL) set_allocation_type(res, C_HEAP);)
+    break;
+   case RESOURCE_AREA:
+    // new(size) sets allocation type RESOURCE_AREA.
+    res = (address)operator new(size, std::nothrow);
+    break;
+   default:
+    ShouldNotReachHere();
+  }
+  return res;
+}
+
+void* ResourceObj::operator new [](size_t size, const std::nothrow_t&  nothrow_constant,
+    allocation_type type, MEMFLAGS flags) {
+  return (address)operator new(size, nothrow_constant, type, flags);
+}
+
 void ResourceObj::operator delete(void* p) {
   assert(((ResourceObj *)p)->allocated_on_C_heap(),
          "delete only allowed for C_HEAP objects");
   DEBUG_ONLY(((ResourceObj *)p)->_allocation_t[0] = (uintptr_t)badHeapOopVal;)
   FreeHeap(p);
+}
+
+void ResourceObj::operator delete [](void* p) {
+  operator delete(p);
 }
 
 #ifdef ASSERT
@@ -164,8 +225,6 @@ void trace_heap_free(void* p) {
   tty->print_cr("Heap free   " INTPTR_FORMAT, p);
 }
 
-bool warn_new_operator = false; // see vm_main
-
 //--------------------------------------------------------------------------------------
 // ChunkPool implementation
 
@@ -177,10 +236,11 @@ class ChunkPool: public CHeapObj<mtInternal> {
   size_t       _num_used;     // number of chunks currently checked out
   const size_t _size;         // size of each chunk (must be uniform)
 
-  // Our three static pools
+  // Our four static pools
   static ChunkPool* _large_pool;
   static ChunkPool* _medium_pool;
   static ChunkPool* _small_pool;
+  static ChunkPool* _tiny_pool;
 
   // return first element or null
   void* get_first() {
@@ -197,7 +257,7 @@ class ChunkPool: public CHeapObj<mtInternal> {
    ChunkPool(size_t size) : _size(size) { _first = NULL; _num_chunks = _num_used = 0; }
 
   // Allocate a new chunk from the pool (might expand the pool)
-  _NOINLINE_ void* allocate(size_t bytes) {
+  _NOINLINE_ void* allocate(size_t bytes, AllocFailType alloc_failmode) {
     assert(bytes == _size, "bad size");
     void* p = NULL;
     // No VM lock can be taken inside ThreadCritical lock, so os::malloc
@@ -207,9 +267,9 @@ class ChunkPool: public CHeapObj<mtInternal> {
       p = get_first();
     }
     if (p == NULL) p = os::malloc(bytes, mtChunk, CURRENT_PC);
-    if (p == NULL)
-      vm_exit_out_of_memory(bytes, "ChunkPool::allocate");
-
+    if (p == NULL && alloc_failmode == AllocFailStrategy::EXIT_OOM) {
+      vm_exit_out_of_memory(bytes, OOM_MALLOC_ERROR, "ChunkPool::allocate");
+    }
     return p;
   }
 
@@ -260,15 +320,18 @@ class ChunkPool: public CHeapObj<mtInternal> {
   static ChunkPool* large_pool()  { assert(_large_pool  != NULL, "must be initialized"); return _large_pool;  }
   static ChunkPool* medium_pool() { assert(_medium_pool != NULL, "must be initialized"); return _medium_pool; }
   static ChunkPool* small_pool()  { assert(_small_pool  != NULL, "must be initialized"); return _small_pool;  }
+  static ChunkPool* tiny_pool()   { assert(_tiny_pool   != NULL, "must be initialized"); return _tiny_pool;   }
 
   static void initialize() {
     _large_pool  = new ChunkPool(Chunk::size        + Chunk::aligned_overhead_size());
     _medium_pool = new ChunkPool(Chunk::medium_size + Chunk::aligned_overhead_size());
     _small_pool  = new ChunkPool(Chunk::init_size   + Chunk::aligned_overhead_size());
+    _tiny_pool   = new ChunkPool(Chunk::tiny_size   + Chunk::aligned_overhead_size());
   }
 
   static void clean() {
     enum { BlocksToKeep = 5 };
+     _tiny_pool->free_all_but(BlocksToKeep);
      _small_pool->free_all_but(BlocksToKeep);
      _medium_pool->free_all_but(BlocksToKeep);
      _large_pool->free_all_but(BlocksToKeep);
@@ -278,6 +341,7 @@ class ChunkPool: public CHeapObj<mtInternal> {
 ChunkPool* ChunkPool::_large_pool  = NULL;
 ChunkPool* ChunkPool::_medium_pool = NULL;
 ChunkPool* ChunkPool::_small_pool  = NULL;
+ChunkPool* ChunkPool::_tiny_pool   = NULL;
 
 void chunkpool_init() {
   ChunkPool::initialize();
@@ -306,21 +370,23 @@ class ChunkPoolCleaner : public PeriodicTask {
 //--------------------------------------------------------------------------------------
 // Chunk implementation
 
-void* Chunk::operator new(size_t requested_size, size_t length) {
+void* Chunk::operator new (size_t requested_size, AllocFailType alloc_failmode, size_t length) {
   // requested_size is equal to sizeof(Chunk) but in order for the arena
   // allocations to come out aligned as expected the size must be aligned
-  // to expected arean alignment.
+  // to expected arena alignment.
   // expect requested_size but if sizeof(Chunk) doesn't match isn't proper size we must align it.
   assert(ARENA_ALIGN(requested_size) == aligned_overhead_size(), "Bad alignment");
   size_t bytes = ARENA_ALIGN(requested_size) + length;
   switch (length) {
-   case Chunk::size:        return ChunkPool::large_pool()->allocate(bytes);
-   case Chunk::medium_size: return ChunkPool::medium_pool()->allocate(bytes);
-   case Chunk::init_size:   return ChunkPool::small_pool()->allocate(bytes);
+   case Chunk::size:        return ChunkPool::large_pool()->allocate(bytes, alloc_failmode);
+   case Chunk::medium_size: return ChunkPool::medium_pool()->allocate(bytes, alloc_failmode);
+   case Chunk::init_size:   return ChunkPool::small_pool()->allocate(bytes, alloc_failmode);
+   case Chunk::tiny_size:   return ChunkPool::tiny_pool()->allocate(bytes, alloc_failmode);
    default: {
-     void *p =  os::malloc(bytes, mtChunk, CALLER_PC);
-     if (p == NULL)
-       vm_exit_out_of_memory(bytes, "Chunk::new");
+     void* p = os::malloc(bytes, mtChunk, CALLER_PC);
+     if (p == NULL && alloc_failmode == AllocFailStrategy::EXIT_OOM) {
+       vm_exit_out_of_memory(bytes, OOM_MALLOC_ERROR, "Chunk::new");
+     }
      return p;
    }
   }
@@ -332,6 +398,7 @@ void Chunk::operator delete(void* p) {
    case Chunk::size:        ChunkPool::large_pool()->free(c); break;
    case Chunk::medium_size: ChunkPool::medium_pool()->free(c); break;
    case Chunk::init_size:   ChunkPool::small_pool()->free(c); break;
+   case Chunk::tiny_size:   ChunkPool::tiny_pool()->free(c); break;
    default:                 os::free(c, mtChunk);
   }
 }
@@ -374,7 +441,7 @@ NOT_PRODUCT(volatile jint Arena::_instance_count = 0;)
 Arena::Arena(size_t init_size) {
   size_t round_size = (sizeof (char *)) - 1;
   init_size = (init_size+round_size) & ~round_size;
-  _first = _chunk = new (init_size) Chunk(init_size);
+  _first = _chunk = new (AllocFailStrategy::EXIT_OOM, init_size) Chunk(init_size);
   _hwm = _chunk->bottom();      // Save the cached hwm, max
   _max = _chunk->top();
   set_size_in_bytes(init_size);
@@ -382,7 +449,7 @@ Arena::Arena(size_t init_size) {
 }
 
 Arena::Arena() {
-  _first = _chunk = new (Chunk::init_size) Chunk(Chunk::init_size);
+  _first = _chunk = new (AllocFailStrategy::EXIT_OOM, Chunk::init_size) Chunk(Chunk::init_size);
   _hwm = _chunk->bottom();      // Save the cached hwm, max
   _max = _chunk->top();
   set_size_in_bytes(Chunk::init_size);
@@ -480,19 +547,19 @@ size_t Arena::used() const {
 }
 
 void Arena::signal_out_of_memory(size_t sz, const char* whence) const {
-  vm_exit_out_of_memory(sz, whence);
+  vm_exit_out_of_memory(sz, OOM_MALLOC_ERROR, whence);
 }
 
 // Grow a new Chunk
-void* Arena::grow( size_t x ) {
+void* Arena::grow(size_t x, AllocFailType alloc_failmode) {
   // Get minimal required size.  Either real big, or even bigger for giant objs
   size_t len = MAX2(x, (size_t) Chunk::size);
 
   Chunk *k = _chunk;            // Get filled-up chunk address
-  _chunk = new (len) Chunk(len);
+  _chunk = new (alloc_failmode, len) Chunk(len);
 
   if (_chunk == NULL) {
-    signal_out_of_memory(len * Chunk::aligned_overhead_size(), "Arena::grow");
+    return NULL;
   }
   if (k) k->set_next(_chunk);   // Append new chunk to end of linked list
   else _first = _chunk;
@@ -507,13 +574,16 @@ void* Arena::grow( size_t x ) {
 
 
 // Reallocate storage in Arena.
-void *Arena::Arealloc(void* old_ptr, size_t old_size, size_t new_size) {
+void *Arena::Arealloc(void* old_ptr, size_t old_size, size_t new_size, AllocFailType alloc_failmode) {
   assert(new_size >= 0, "bad size");
   if (new_size == 0) return NULL;
 #ifdef ASSERT
   if (UseMallocOnly) {
     // always allocate a new object  (otherwise we'll free this one twice)
-    char* copy = (char*)Amalloc(new_size);
+    char* copy = (char*)Amalloc(new_size, alloc_failmode);
+    if (copy == NULL) {
+      return NULL;
+    }
     size_t n = MIN2(old_size, new_size);
     if (n > 0) memcpy(copy, old_ptr, n);
     Afree(old_ptr,old_size);    // Mostly done to keep stats accurate
@@ -539,7 +609,10 @@ void *Arena::Arealloc(void* old_ptr, size_t old_size, size_t new_size) {
   }
 
   // Oops, got to relocate guts
-  void *new_ptr = Amalloc(new_size);
+  void *new_ptr = Amalloc(new_size, alloc_failmode);
+  if (new_ptr == NULL) {
+    return NULL;
+  }
   memcpy( new_ptr, c_old, old_size );
   Afree(c_old,old_size);        // Mostly done to keep stats accurate
   return new_ptr;
@@ -609,19 +682,40 @@ void* Arena::internal_malloc_4(size_t x) {
 // a memory leak.  Use CHeapObj as the base class of such objects to make it explicit
 // that they're allocated on the C heap.
 // Commented out in product version to avoid conflicts with third-party C++ native code.
-// %% note this is causing a problem on solaris debug build. the global
-// new is being called from jdk source and causing data corruption.
-// src/share/native/sun/awt/font/fontmanager/textcache/hsMemory.cpp::hsSoftNew
-// define CATCH_OPERATOR_NEW_USAGE if you want to use this.
-#ifdef CATCH_OPERATOR_NEW_USAGE
+// On certain platforms, such as Mac OS X (Darwin), in debug version, new is being called
+// from jdk source and causing data corruption. Such as
+//  Java_sun_security_ec_ECKeyPairGenerator_generateECKeyPair
+// define ALLOW_OPERATOR_NEW_USAGE for platform on which global operator new allowed.
+//
+#ifndef ALLOW_OPERATOR_NEW_USAGE
 void* operator new(size_t size){
-  static bool warned = false;
-  if (!warned && warn_new_operator)
-    warning("should not call global (default) operator new");
-  warned = true;
-  return (void *) AllocateHeap(size, "global operator new");
+  assert(false, "Should not call global operator new");
+  return 0;
 }
-#endif
+
+void* operator new [](size_t size){
+  assert(false, "Should not call global operator new[]");
+  return 0;
+}
+
+void* operator new(size_t size, const std::nothrow_t&  nothrow_constant){
+  assert(false, "Should not call global operator new");
+  return 0;
+}
+
+void* operator new [](size_t size, std::nothrow_t&  nothrow_constant){
+  assert(false, "Should not call global operator new[]");
+  return 0;
+}
+
+void operator delete(void* p) {
+  assert(false, "Should not call global delete");
+}
+
+void operator delete [](void* p) {
+  assert(false, "Should not call global delete []");
+}
+#endif // ALLOW_OPERATOR_NEW_USAGE
 
 void AllocatedObj::print() const       { print_on(tty); }
 void AllocatedObj::print_value() const { print_value_on(tty); }

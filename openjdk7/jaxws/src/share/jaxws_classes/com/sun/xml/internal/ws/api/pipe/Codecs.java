@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@ package com.sun.xml.internal.ws.api.pipe;
 import com.sun.istack.internal.NotNull;
 import com.sun.xml.internal.ws.api.SOAPVersion;
 import com.sun.xml.internal.ws.api.WSBinding;
+import com.sun.xml.internal.ws.api.WSFeatureList;
 
 /**
  * Factory methods for some of the {@link Codec} implementations.
@@ -48,6 +49,27 @@ import com.sun.xml.internal.ws.api.WSBinding;
 public abstract class Codecs {
 
     /**
+     * This creates a full {@link Codec} for SOAP binding.
+     *
+     * @param feature the WebServiceFeature objects
+     * @return non null codec to parse entire SOAP message(including MIME parts)
+     */
+    public static @NotNull SOAPBindingCodec createSOAPBindingCodec(WSFeatureList feature) {
+        return new com.sun.xml.internal.ws.encoding.SOAPBindingCodec(feature);
+    }
+
+    /**
+     * This creates a full {@link Codec} for XML binding.
+     *
+     * @param feature the WebServiceFeature objects
+     * @return non null codec to parse entire XML message.
+     */
+    public static @NotNull Codec createXMLCodec(WSFeatureList feature) {
+        return new com.sun.xml.internal.ws.encoding.XMLHTTPBindingCodec(feature);
+    }
+
+
+    /**
      * This creates a full {@link Codec} for SOAP binding using the primary
      * XML codec argument. The codec argument is used to encode/decode SOAP envelopes
      * while the returned codec is responsible for encoding/decoding the whole
@@ -64,7 +86,7 @@ public abstract class Codecs {
      * @return non null codec to parse entire SOAP message(including MIME parts)
      */
     public static @NotNull SOAPBindingCodec createSOAPBindingCodec(WSBinding binding, StreamSOAPCodec xmlEnvelopeCodec) {
-        return new com.sun.xml.internal.ws.encoding.SOAPBindingCodec(binding, xmlEnvelopeCodec);
+        return new com.sun.xml.internal.ws.encoding.SOAPBindingCodec(binding.getFeatures(), xmlEnvelopeCodec);
     }
 
     /**
@@ -78,5 +100,33 @@ public abstract class Codecs {
     public static @NotNull
     StreamSOAPCodec createSOAPEnvelopeXmlCodec(@NotNull SOAPVersion version) {
         return com.sun.xml.internal.ws.encoding.StreamSOAPCodec.create(version);
+    }
+
+    /**
+     * Creates a default {@link Codec} that can be used to used to
+     * decode XML infoset in SOAP envelope(primary part in MIME message).
+     * New codecs can be written using this codec as delegate. WSBinding
+     * parameter is used to get SOAP version and features.
+     *
+     * @param binding SOAP version and features are used from this binding
+     * @return non null default xml codec
+     *
+     * @deprecated use {@link #createSOAPEnvelopeXmlCodec(WSFeatureList)}
+     */
+    public static @NotNull StreamSOAPCodec createSOAPEnvelopeXmlCodec(@NotNull WSBinding binding) {
+        return com.sun.xml.internal.ws.encoding.StreamSOAPCodec.create(binding);
+    }
+
+    /**
+     * Creates a default {@link Codec} that can be used to used to
+     * decode XML infoset in SOAP envelope(primary part in MIME message).
+     * New codecs can be written using this codec as delegate. WSFeatureList
+     * parameter is used to get SOAP version and features.
+     *
+     * @param features SOAP version and features are used from this WSFeatureList
+     * @return non null default xml codec
+     */
+    public static @NotNull StreamSOAPCodec createSOAPEnvelopeXmlCodec(@NotNull WSFeatureList features) {
+        return com.sun.xml.internal.ws.encoding.StreamSOAPCodec.create(features);
     }
 }

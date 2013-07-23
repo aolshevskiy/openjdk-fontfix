@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,15 +35,15 @@ import java.util.List;
  * the <a href="http://www.w3.org/TR/xmldsig-core/">
  * W3C Recommendation for XML-Signature Syntax and Processing</a>.
  * The XML Schema Definition is defined as:
- * <pre><code>
- * &lt;element name="Manifest" type="ds:ManifestType"/&gt;
- *   &lt;complexType name="ManifestType"&gt;
- *     &lt;sequence>
- *       &lt;element ref="ds:Reference" maxOccurs="unbounded"/&gt;
- *     &lt;/sequence&gt;
- *     &lt;attribute name="Id" type="ID" use="optional"/&gt;
- *   &lt;/complexType&gt;
- * </code></pre>
+ * <pre>{@code
+ * <element name="Manifest" type="ds:ManifestType"/>
+ *   <complexType name="ManifestType">
+ *     <sequence>
+ *       <element ref="ds:Reference" maxOccurs="unbounded"/>
+ *     </sequence>
+ *     <attribute name="Id" type="ID" use="optional"/>
+ *   </complexType>
+ * }</pre>
  *
  * A <code>Manifest</code> instance may be created by invoking
  * one of the {@link XMLSignatureFactory#newManifest newManifest}
@@ -86,5 +86,6 @@ public interface Manifest extends XMLStructure {
      *
      * @return an unmodifiable list of one or more <code>Reference</code>s
      */
+    @SuppressWarnings("rawtypes")
     List getReferences();
 }

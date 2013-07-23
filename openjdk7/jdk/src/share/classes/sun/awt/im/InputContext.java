@@ -79,7 +79,7 @@ public class InputContext extends java.awt.im.InputContext
     private boolean inputMethodCreationFailed;
 
     // holding bin for previously used input method instances, but not the current one
-    private HashMap usedInputMethods;
+    private HashMap<InputMethodLocator, InputMethod> usedInputMethods;
 
     // the current client component is kept until the user focusses on a different
     // client component served by the same input context. When that happens, we call
@@ -106,7 +106,7 @@ public class InputContext extends java.awt.im.InputContext
     // cache location notification
     private Rectangle clientWindowLocation = null;
     // holding the state of clientWindowNotificationEnabled of only non-current input methods
-    private HashMap perInputMethodState;
+    private HashMap<InputMethod, Boolean> perInputMethodState;
 
     // Input Method selection hot key stuff
     private static AWTKeyStroke inputMethodSelectionKey;
@@ -219,6 +219,7 @@ public class InputContext extends java.awt.im.InputContext
     /**
      * @see java.awt.im.InputContext#dispatchEvent
      */
+    @SuppressWarnings("fallthrough")
     public void dispatchEvent(AWTEvent event) {
 
         if (event instanceof InputMethodEvent) {
@@ -386,7 +387,9 @@ public class InputContext extends java.awt.im.InputContext
             }
             previousInputMethod = null;
 
-            if (log.isLoggable(PlatformLogger.FINE)) log.fine("Current client component " + currentClientComponent);
+            if (log.isLoggable(PlatformLogger.Level.FINE)) {
+                log.fine("Current client component " + currentClientComponent);
+            }
             if (inputMethod instanceof InputMethodAdapter) {
                 ((InputMethodAdapter) inputMethod).setClientComponent(currentClientComponent);
             }
@@ -394,7 +397,7 @@ public class InputContext extends java.awt.im.InputContext
             isInputMethodActive = true;
 
             if (perInputMethodState != null) {
-                Boolean state = (Boolean) perInputMethodState.remove(inputMethod);
+                Boolean state = perInputMethodState.remove(inputMethod);
                 if (state != null) {
                     clientWindowNotificationEnabled = state.booleanValue();
                 }
@@ -549,10 +552,10 @@ public class InputContext extends java.awt.im.InputContext
 
             // keep the input method instance around for future use
             if (usedInputMethods == null) {
-                usedInputMethods = new HashMap(5);
+                usedInputMethods = new HashMap<>(5);
             }
             if (perInputMethodState == null) {
-                perInputMethodState = new HashMap(5);
+                perInputMethodState = new HashMap<>(5);
             }
             usedInputMethods.put(inputMethodLocator.deriveLocator(null), inputMethod);
             perInputMethodState.put(inputMethod,
@@ -689,10 +692,10 @@ public class InputContext extends java.awt.im.InputContext
         }
         inputMethodLocator = null;
         if (usedInputMethods != null && !usedInputMethods.isEmpty()) {
-            Iterator iterator = usedInputMethods.values().iterator();
+            Iterator<InputMethod> iterator = usedInputMethods.values().iterator();
             usedInputMethods = null;
             while (iterator.hasNext()) {
-                ((InputMethod) iterator.next()).dispose();
+                iterator.next().dispose();
             }
         }
 
@@ -830,13 +833,13 @@ public class InputContext extends java.awt.im.InputContext
 
         // see whether we have a previously used input method
         if (usedInputMethods != null) {
-            inputMethodInstance = (InputMethod) usedInputMethods.remove(locator.deriveLocator(null));
+            inputMethodInstance = usedInputMethods.remove(locator.deriveLocator(null));
             if (inputMethodInstance != null) {
                 if (locale != null) {
                     inputMethodInstance.setLocale(locale);
                 }
                 inputMethodInstance.setCharacterSubsets(characterSubsets);
-                Boolean state = (Boolean) perInputMethodState.remove(inputMethodInstance);
+                Boolean state = perInputMethodState.remove(inputMethodInstance);
                 if (state != null) {
                     enableClientWindowNotification(inputMethodInstance, state.booleanValue());
                 }
@@ -883,14 +886,16 @@ public class InputContext extends java.awt.im.InputContext
     }
 
     private void logCreationFailed(Throwable throwable) {
-        String errorTextFormat = Toolkit.getProperty("AWT.InputMethodCreationFailed",
-                                                     "Could not create {0}. Reason: {1}");
-        Object[] args =
-            {inputMethodLocator.getDescriptor().getInputMethodDisplayName(null, Locale.getDefault()),
-             throwable.getLocalizedMessage()};
-        MessageFormat mf = new MessageFormat(errorTextFormat);
         PlatformLogger logger = PlatformLogger.getLogger("sun.awt.im");
-        logger.config(mf.format(args));
+        if (logger.isLoggable(PlatformLogger.Level.CONFIG)) {
+            String errorTextFormat = Toolkit.getProperty("AWT.InputMethodCreationFailed",
+                                                         "Could not create {0}. Reason: {1}");
+            Object[] args =
+                {inputMethodLocator.getDescriptor().getInputMethodDisplayName(null, Locale.getDefault()),
+                 throwable.getLocalizedMessage()};
+            MessageFormat mf = new MessageFormat(errorTextFormat);
+            logger.config(mf.format(args));
+        }
     }
 
     InputMethodLocator getInputMethodLocator() {
@@ -919,7 +924,7 @@ public class InputContext extends java.awt.im.InputContext
         // method becomes the current one.
         if (requester != inputMethod) {
             if (perInputMethodState == null) {
-                perInputMethodState = new HashMap(5);
+                perInputMethodState = new HashMap<>(5);
             }
             perInputMethodState.put(requester, Boolean.valueOf(enable));
             return;
@@ -1029,7 +1034,7 @@ public class InputContext extends java.awt.im.InputContext
      * Initializes the input method selection key definition in preference trees
      */
     private void initializeInputMethodSelectionKey() {
-        AccessController.doPrivileged(new PrivilegedAction() {
+        AccessController.doPrivileged(new PrivilegedAction<Object>() {
             public Object run() {
                 // Look in user's tree
                 Preferences root = Preferences.userRoot();

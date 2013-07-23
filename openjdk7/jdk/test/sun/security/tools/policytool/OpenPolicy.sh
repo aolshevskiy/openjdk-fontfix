@@ -22,7 +22,7 @@
 #
 
 # @test
-# @bug 4224186 7083664
+# @bug 4224186
 # @summary missing File.separatorChar when initially opening policy file
 #
 # @run applet/manual=done OpenPolicy.html
@@ -55,7 +55,6 @@ case "$OS" in
     NULL=/dev/null
     PS=";"
     FS="/"
-    CP="cp -f"
     ;;
   Windows* )
     NULL=NUL

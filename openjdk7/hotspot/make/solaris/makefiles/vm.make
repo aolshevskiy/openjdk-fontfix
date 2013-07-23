@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1998, 2012, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1998, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -88,7 +88,17 @@ CXXFLAGS =           \
 # This is VERY important! The version define must only be supplied to vm_version.o
 # If not, ccache will not re-use the cache at all, since the version string might contain
 # a time and date.
-vm_version.o: CXXFLAGS += ${JRE_VERSION}
+CXXFLAGS/vm_version.o += ${JRE_VERSION}
+
+CXXFLAGS/BYFILE = $(CXXFLAGS/$@)
+
+# File specific flags
+CXXFLAGS += $(CXXFLAGS/BYFILE)
+
+# Large File Support
+ifneq ($(LP64), 1)
+CXXFLAGS/ostream.o += -D_FILE_OFFSET_BITS=64
+endif # ifneq ($(LP64), 1)
 
 # CFLAGS_WARN holds compiler options to suppress/enable warnings.
 CFLAGS += $(CFLAGS_WARN)
@@ -98,10 +108,6 @@ CFLAGS += $(CFLAGS/NOEX)
 
 # Extra flags from gnumake's invocation or environment
 CFLAGS += $(EXTRA_CFLAGS)
-
-ifeq ($(INCLUDE_TRACE), 1)
-CFLAGS += -DINCLUDE_TRACE=1
-endif
 
 # Math Library (libm.so), do not use -lm.
 #    There might be two versions of libm.so on the build system:
@@ -159,12 +165,9 @@ include $(MAKEFILES_DIR)/fix_empty_sec_hdr_flags.make
 
 JVM      = jvm
 LIBJVM   = lib$(JVM).so
-LIBJVM_G = lib$(JVM)$(G_SUFFIX).so
 
 LIBJVM_DEBUGINFO   = lib$(JVM).debuginfo
 LIBJVM_DIZ         = lib$(JVM).diz
-LIBJVM_G_DEBUGINFO = lib$(JVM)$(G_SUFFIX).debuginfo
-LIBJVM_G_DIZ       = lib$(JVM)$(G_SUFFIX).diz
 
 SPECIAL_PATHS:=adlc c1 dist gc_implementation opto shark libadt
 
@@ -176,12 +179,14 @@ SOURCE_PATHS+=$(HS_COMMON_SRC)/os/posix/vm
 SOURCE_PATHS+=$(HS_COMMON_SRC)/cpu/$(Platform_arch)/vm
 SOURCE_PATHS+=$(HS_COMMON_SRC)/os_cpu/$(Platform_os_arch)/vm
 
-SOURCE_PATHS+=$(shell if [ -d $(HS_ALT_SRC)/share/vm/jfr ]; then \
-  find $(HS_ALT_SRC)/share/vm/jfr -type d; \
-  fi)
-
 CORE_PATHS=$(foreach path,$(SOURCE_PATHS),$(call altsrc,$(path)) $(path))
 CORE_PATHS+=$(GENERATED)/jvmtifiles $(GENERATED)/tracefiles
+
+ifneq ($(INCLUDE_TRACE), false)
+CORE_PATHS+=$(shell if [ -d $(HS_ALT_SRC)/share/vm/jfr ]; then \
+  find $(HS_ALT_SRC)/share/vm/jfr -type d; \
+  fi)
+endif
 
 COMPILER1_PATHS := $(call altsrc,$(HS_COMMON_SRC)/share/vm/c1)
 COMPILER1_PATHS += $(HS_COMMON_SRC)/share/vm/c1
@@ -201,7 +206,7 @@ Src_Dirs/ZERO      := $(CORE_PATHS)
 Src_Dirs/SHARK     := $(CORE_PATHS)
 Src_Dirs := $(Src_Dirs/$(TYPE))
 
-COMPILER2_SPECIFIC_FILES := opto libadt bcEscapeAnalyzer.cpp chaitin\* c2_\* runtime_\*
+COMPILER2_SPECIFIC_FILES := opto libadt bcEscapeAnalyzer.cpp c2_\* runtime_\*
 COMPILER1_SPECIFIC_FILES := c1_\*
 SHARK_SPECIFIC_FILES     := shark
 ZERO_SPECIFIC_FILES      := zero
@@ -253,7 +258,7 @@ mapfile : $(MAPFILE) $(MAPFILE_DTRACE_OPT) vm.def
 	              }                                          \
 	          }' > $@
 
-mapfile_reorder : mapfile $(MAPFILE_DTRACE_OPT) $(REORDERFILE)
+mapfile_extended : mapfile $(MAPFILE_DTRACE_OPT)
 	rm -f $@
 	cat $^ > $@
 
@@ -266,7 +271,7 @@ ifeq ($(LINK_INTO),AOUT)
   LIBS_VM                  = $(LIBS)
 else
   LIBJVM.o                 = $(JVM_OBJ_FILES)
-  LIBJVM_MAPFILE$(LDNOMAP) = mapfile_reorder
+  LIBJVM_MAPFILE$(LDNOMAP) = mapfile_extended
   LFLAGS_VM$(LDNOMAP)      += $(MAPFLAG:FILENAME=$(LIBJVM_MAPFILE))
   LFLAGS_VM                += $(SONAMEFLAG:SONAME=$(LIBJVM))
 ifndef USE_GCC
@@ -290,11 +295,9 @@ $(LIBJVM): $(ADD_GNU_DEBUGLINK) $(FIX_EMPTY_SEC_HDR_FLAGS) $(LIBJVM.o) $(LIBJVM_
 ifeq ($(filter -sbfast -xsbfast, $(CFLAGS_BROWSE)),)
 	@echo Linking vm...
 	$(QUIETLY) $(LINK_LIB.CXX/PRE_HOOK)
-	$(QUIETLY) $(LINK_VM) $(LFLAGS_VM) -o $@ $(LIBJVM.o) $(LIBS_VM)
+	$(QUIETLY) $(LINK_VM) $(LFLAGS_VM) -o $@ $(sort $(LIBJVM.o)) $(LIBS_VM)
 	$(QUIETLY) $(LINK_LIB.CXX/POST_HOOK)
 	$(QUIETLY) rm -f $@.1 && ln -s $@ $@.1
-	$(QUIETLY) [ -f $(LIBJVM_G) ] || ln -s $@ $(LIBJVM_G)
-	$(QUIETLY) [ -f $(LIBJVM_G).1 ] || ln -s $@.1 $(LIBJVM_G).1
 ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
 # gobjcopy crashes on "empty" section headers with the SHF_ALLOC flag set.
 # Clear the SHF_ALLOC flag (if set) from empty section headers.
@@ -315,11 +318,9 @@ ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
     # implied else here is no stripping at all
     endif
   endif
-	$(QUIETLY) [ -f $(LIBJVM_G_DEBUGINFO) ] || ln -s $(LIBJVM_DEBUGINFO) $(LIBJVM_G_DEBUGINFO)
   ifeq ($(ZIP_DEBUGINFO_FILES),1)
-	$(ZIPEXE) -q -y $(LIBJVM_DIZ) $(LIBJVM_DEBUGINFO) $(LIBJVM_G_DEBUGINFO)
-	$(RM) $(LIBJVM_DEBUGINFO) $(LIBJVM_G_DEBUGINFO)
-	[ -f $(LIBJVM_G_DIZ) ] || { ln -s $(LIBJVM_DIZ) $(LIBJVM_G_DIZ); }
+	$(ZIPEXE) -q -y $(LIBJVM_DIZ) $(LIBJVM_DEBUGINFO)
+	$(RM) $(LIBJVM_DEBUGINFO)
   endif
 endif
 endif # filter -sbfast -xsbfast
@@ -340,9 +341,6 @@ install_jvm: $(LIBJVM)
 
 #----------------------------------------------------------------------
 # Other files
-
-# Gamma launcher
-include $(MAKEFILES_DIR)/launcher.make
 
 # Signal interposition library
 include $(MAKEFILES_DIR)/jsig.make

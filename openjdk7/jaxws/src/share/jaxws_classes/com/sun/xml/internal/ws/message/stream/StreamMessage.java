@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,10 +36,12 @@ import com.sun.xml.internal.ws.api.message.AttachmentSet;
 import com.sun.xml.internal.ws.api.message.Header;
 import com.sun.xml.internal.ws.api.message.HeaderList;
 import com.sun.xml.internal.ws.api.message.Message;
+import com.sun.xml.internal.ws.api.message.MessageHeaders;
 import com.sun.xml.internal.ws.api.streaming.XMLStreamReaderFactory;
 import com.sun.xml.internal.ws.encoding.TagInfoset;
 import com.sun.xml.internal.ws.message.AbstractMessageImpl;
 import com.sun.xml.internal.ws.message.AttachmentUnmarshallerImpl;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
 import com.sun.xml.internal.ws.streaming.XMLStreamReaderUtil;
 import com.sun.xml.internal.ws.util.xml.DummyLocation;
 import com.sun.xml.internal.ws.util.xml.StAXSource;
@@ -59,7 +61,6 @@ import static javax.xml.stream.XMLStreamConstants.END_ELEMENT;
 import javax.xml.transform.Source;
 import javax.xml.ws.WebServiceException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.List;
 
@@ -69,7 +70,7 @@ import java.util.List;
  * TODO: we need another message class that keeps {@link XMLStreamReader} that points
  * at the start of the envelope element.
  */
-public final class StreamMessage extends AbstractMessageImpl {
+public class StreamMessage extends AbstractMessageImpl {
     /**
      * The reader will be positioned at
      * the first child of the SOAP body
@@ -77,7 +78,20 @@ public final class StreamMessage extends AbstractMessageImpl {
     private @NotNull XMLStreamReader reader;
 
     // lazily created
-    private @Nullable HeaderList headers;
+    private @Nullable MessageHeaders headers;
+
+    /**
+     * Because the StreamMessage leaves out the white spaces around payload
+     * when being instantiated the space characters between soap:Body opening and
+     * payload is stored in this field to be reused later (necessary for message security);
+     * Instantiated after StreamMessage creation
+     */
+    private String bodyPrologue = null;
+
+    /**
+     * instantiated after writing message to XMLStreamWriter
+     */
+    private String bodyEpilogue = null;
 
     private final String payloadLocalName;
 
@@ -90,14 +104,39 @@ public final class StreamMessage extends AbstractMessageImpl {
      * If the creater of this object didn't care about those,
      * we use stock values.
      */
-    private /*almost final*/ @NotNull TagInfoset envelopeTag,headerTag,bodyTag;
+    private @NotNull TagInfoset envelopeTag;
+    private @NotNull TagInfoset headerTag;
+    private @NotNull TagInfoset bodyTag;
 
+    /**
+     * Used only for debugging. This records where the message was consumed.
+     */
+    private Throwable consumedAt;
+
+    /**
+     * Default s:Envelope, s:Header, and s:Body tag infoset definitions.
+     *
+     * We need 3 for SOAP 1.1, 3 for SOAP 1.2.
+     */
+    private static final TagInfoset[] DEFAULT_TAGS;
+
+    static {
+        DEFAULT_TAGS = new TagInfoset[6];
+        create(SOAPVersion.SOAP_11);
+        create(SOAPVersion.SOAP_12);
+    }
+
+    public StreamMessage(SOAPVersion v) {
+        super(v);
+        payloadLocalName = null;
+        payloadNamespaceURI = null;
+    }
     /**
      * Creates a {@link StreamMessage} from a {@link XMLStreamReader}
      * that points at the start element of the payload, and headers.
      *
      * <p>
-     * This method creaets a {@link Message} from a payload.
+     * This method creates a {@link Message} from a payload.
      *
      * @param headers
      *      if null, it means no headers. if non-null,
@@ -106,7 +145,7 @@ public final class StreamMessage extends AbstractMessageImpl {
      *      points at the start element/document of the payload (or the end element of the &lt;s:Body>
      *      if there's no payload)
      */
-    public StreamMessage(@Nullable HeaderList headers, @NotNull AttachmentSet attachmentSet, @NotNull XMLStreamReader reader, @NotNull SOAPVersion soapVersion) {
+    public StreamMessage(@Nullable MessageHeaders headers, @NotNull AttachmentSet attachmentSet, @NotNull XMLStreamReader reader, @NotNull SOAPVersion soapVersion) {
         super(soapVersion);
         this.headers = headers;
         this.attachmentSet = attachmentSet;
@@ -146,14 +185,18 @@ public final class StreamMessage extends AbstractMessageImpl {
      * and the complete infoset of the SOAP envelope.
      *
      * <p>
-     * See {@link #StreamMessage(HeaderList, AttachmentSet, XMLStreamReader, SOAPVersion)} for
+     * See {@link #StreamMessage(MessageHeaders, AttachmentSet, XMLStreamReader, SOAPVersion)} for
      * the description of the basic parameters.
      *
      * @param headerTag
      *      Null if the message didn't have a header tag.
      *
      */
-    public StreamMessage(@NotNull TagInfoset envelopeTag, @Nullable TagInfoset headerTag, @NotNull AttachmentSet attachmentSet, @Nullable HeaderList headers, @NotNull TagInfoset bodyTag, @NotNull XMLStreamReader reader, @NotNull SOAPVersion soapVersion) {
+    public StreamMessage(@NotNull TagInfoset envelopeTag, @Nullable TagInfoset headerTag, @NotNull AttachmentSet attachmentSet, @Nullable MessageHeaders headers, @NotNull TagInfoset bodyTag, @NotNull XMLStreamReader reader, @NotNull SOAPVersion soapVersion) {
+        this(envelopeTag, headerTag, attachmentSet, headers, null, bodyTag, null, reader, soapVersion);
+    }
+
+    public StreamMessage(@NotNull TagInfoset envelopeTag, @Nullable TagInfoset headerTag, @NotNull AttachmentSet attachmentSet, @Nullable MessageHeaders headers, @Nullable String bodyPrologue, @NotNull TagInfoset bodyTag, @Nullable String bodyEpilogue, @NotNull XMLStreamReader reader, @NotNull SOAPVersion soapVersion) {
         this(headers,attachmentSet,reader,soapVersion);
         if(envelopeTag == null ) {
             throw new IllegalArgumentException("EnvelopeTag TagInfoset cannot be null");
@@ -162,18 +205,19 @@ public final class StreamMessage extends AbstractMessageImpl {
             throw new IllegalArgumentException("BodyTag TagInfoset cannot be null");
         }
         this.envelopeTag = envelopeTag;
-        this.headerTag = headerTag!=null ? headerTag :
-            new TagInfoset(envelopeTag.nsUri,"Header",envelopeTag.prefix,EMPTY_ATTS);
+        this.headerTag = headerTag;
         this.bodyTag = bodyTag;
+        this.bodyPrologue = bodyPrologue;
+        this.bodyEpilogue = bodyEpilogue;
     }
 
     public boolean hasHeaders() {
-        return headers!=null && !headers.isEmpty();
+        return headers!=null && headers.hasHeaders();
     }
 
-    public HeaderList getHeaders() {
+    public MessageHeaders getHeaders() {
         if (headers == null) {
-            headers = new HeaderList();
+            headers = new HeaderList(getSOAPVersion());
         }
         return headers;
     }
@@ -243,8 +287,20 @@ public final class StreamMessage extends AbstractMessageImpl {
             XMLStreamReaderFactory.recycle(reader);
         }
     }
-
+    /** @deprecated */
     public <T> T readPayloadAsJAXB(Bridge<T> bridge) throws JAXBException {
+        if(!hasPayload())
+            return null;
+        assert unconsumed();
+        T r = bridge.unmarshal(reader,
+            hasAttachments() ? new AttachmentUnmarshallerImpl(getAttachments()) : null);
+        XMLStreamReaderUtil.readRest(reader);
+        XMLStreamReaderUtil.close(reader);
+        XMLStreamReaderFactory.recycle(reader);
+        return r;
+    }
+
+    public <T> T readPayloadAsJAXB(XMLBridge<T> bridge) throws JAXBException {
         if(!hasPayload())
             return null;
         assert unconsumed();
@@ -273,33 +329,53 @@ public final class StreamMessage extends AbstractMessageImpl {
     }
 
     public void writePayloadTo(XMLStreamWriter writer)throws XMLStreamException {
-        if(payloadLocalName==null)
-            return; // no body
         assert unconsumed();
+
+        if(payloadLocalName==null) {
+            return; // no body
+        }
+
+        if (bodyPrologue != null) {
+            writer.writeCharacters(bodyPrologue);
+        }
+
         XMLStreamReaderToXMLStreamWriter conv = new XMLStreamReaderToXMLStreamWriter();
+
         while(reader.getEventType() != XMLStreamConstants.END_DOCUMENT){
             String name = reader.getLocalName();
             String nsUri = reader.getNamespaceURI();
 
-            //after previous conv.bridge() call the cursor will be at
-            //END_ELEMENT. Check if its not soapenv:Body then move to next
-            // ELEMENT
+            // After previous conv.bridge() call the cursor will be at END_ELEMENT.
+            // Check if its not soapenv:Body then move to next ELEMENT
             if(reader.getEventType() == XMLStreamConstants.END_ELEMENT){
-                if(!name.equals("Body") || !nsUri.equals(soapVersion.nsUri)){
-                    XMLStreamReaderUtil.nextElementContent(reader);
-                    if(reader.getEventType() == XMLStreamConstants.END_DOCUMENT)
-                        break;
-                    name = reader.getLocalName();
-                    nsUri = reader.getNamespaceURI();
+
+                if (!isBodyElement(name, nsUri)){
+                    // closing payload element: store epilogue for further signing, if applicable
+                    // however if there more than one payloads exist - the last one is stored
+                    String whiteSpaces = XMLStreamReaderUtil.nextWhiteSpaceContent(reader);
+                    if (whiteSpaces != null) {
+                        this.bodyEpilogue = whiteSpaces;
+                        // write it to the message too
+                        writer.writeCharacters(whiteSpaces);
+                    }
+                } else {
+                    // body closed > exit
+                    break;
                 }
+
+            } else {
+                // payload opening element: copy payload to writer
+                conv.bridge(reader,writer);
             }
-            if(name.equals("Body") && nsUri.equals(soapVersion.nsUri) || (reader.getEventType() == XMLStreamConstants.END_DOCUMENT))
-                break;
-            conv.bridge(reader,writer);
         }
+
         XMLStreamReaderUtil.readRest(reader);
         XMLStreamReaderUtil.close(reader);
         XMLStreamReaderFactory.recycle(reader);
+    }
+
+    private boolean isBodyElement(String name, String nsUri) {
+        return name.equals("Body") && nsUri.equals(soapVersion.nsUri);
     }
 
     public void writeTo(XMLStreamWriter sw) throws XMLStreamException{
@@ -315,11 +391,14 @@ public final class StreamMessage extends AbstractMessageImpl {
         envelopeTag.writeStart(writer);
 
         //write headers
-        HeaderList hl = getHeaders();
-        if(hl.size() > 0){
+        MessageHeaders hl = getHeaders();
+        if (hl.hasHeaders() && headerTag == null) headerTag = new TagInfoset(envelopeTag.nsUri,"Header",envelopeTag.prefix,EMPTY_ATTS);
+        if (headerTag != null) {
             headerTag.writeStart(writer);
-            for(Header h:hl){
-                h.writeTo(writer);
+            if (hl.hasHeaders()){
+                for(Header h : hl.asList()){
+                    h.writeTo(writer);
+                }
             }
             writer.writeEndElement();
         }
@@ -333,33 +412,45 @@ public final class StreamMessage extends AbstractMessageImpl {
 
     public void writePayloadTo(ContentHandler contentHandler, ErrorHandler errorHandler, boolean fragment) throws SAXException {
         assert unconsumed();
+
         try {
             if(payloadLocalName==null)
                 return; // no body
 
-            XMLStreamReaderToContentHandler conv =
-                new XMLStreamReaderToContentHandler(reader,contentHandler,true,fragment,getInscopeNamespaces());
+            if (bodyPrologue != null) {
+                char[] chars = bodyPrologue.toCharArray();
+                contentHandler.characters(chars, 0, chars.length);
+            }
+
+            XMLStreamReaderToContentHandler conv = new XMLStreamReaderToContentHandler(reader,contentHandler,true,fragment,getInscopeNamespaces());
 
             while(reader.getEventType() != XMLStreamConstants.END_DOCUMENT){
                 String name = reader.getLocalName();
                 String nsUri = reader.getNamespaceURI();
 
-                //after previous conv.bridge() call the cursor will be at
-                //END_ELEMENT. Check if its not soapenv:Body then move to next
-                // ELEMENT
+                // After previous conv.bridge() call the cursor will be at END_ELEMENT.
+                // Check if its not soapenv:Body then move to next ELEMENT
                 if(reader.getEventType() == XMLStreamConstants.END_ELEMENT){
-                    if(!name.equals("Body") || !nsUri.equals(soapVersion.nsUri)){
-                        XMLStreamReaderUtil.nextElementContent(reader);
-                        if(reader.getEventType() == XMLStreamConstants.END_DOCUMENT)
-                            break;
-                        name = reader.getLocalName();
-                        nsUri = reader.getNamespaceURI();
-                    }
-                }
-                if(name.equals("Body") && nsUri.equals(soapVersion.nsUri) || (reader.getEventType() == XMLStreamConstants.END_DOCUMENT))
-                    break;
 
-                conv.bridge();
+                    if (!isBodyElement(name, nsUri)){
+                        // closing payload element: store epilogue for further signing, if applicable
+                        // however if there more than one payloads exist - the last one is stored
+                        String whiteSpaces = XMLStreamReaderUtil.nextWhiteSpaceContent(reader);
+                        if (whiteSpaces != null) {
+                            this.bodyEpilogue = whiteSpaces;
+                            // write it to the message too
+                            char[] chars = whiteSpaces.toCharArray();
+                            contentHandler.characters(chars, 0, chars.length);
+                        }
+                    } else {
+                        // body closed > exit
+                        break;
+                    }
+
+                } else {
+                    // payload opening element: copy payload to writer
+                    conv.bridge();
+                }
             }
             XMLStreamReaderUtil.readRest(reader);
             XMLStreamReaderUtil.close(reader);
@@ -374,6 +465,7 @@ public final class StreamMessage extends AbstractMessageImpl {
         }
     }
 
+    // TODO: this method should be probably rewritten to respect spaces between eelements; is it used at all?
     public Message copy() {
         try {
             assert unconsumed();
@@ -391,12 +483,18 @@ public final class StreamMessage extends AbstractMessageImpl {
                 while(reader.getEventType() != XMLStreamConstants.END_DOCUMENT){
                     String name = reader.getLocalName();
                     String nsUri = reader.getNamespaceURI();
-                    if(name.equals("Body") && nsUri.equals(soapVersion.nsUri) || (reader.getEventType() == XMLStreamConstants.END_DOCUMENT))
+                    if(isBodyElement(name, nsUri) || (reader.getEventType() == XMLStreamConstants.END_DOCUMENT))
                         break;
                     c.create(reader);
+
                     // Skip whitespaces in between payload and </Body> or between elements
+                    // those won't be in the message itself, but we store them in field bodyEpilogue
                     if (reader.isWhiteSpace()) {
-                        XMLStreamReaderUtil.nextElementContent(reader);
+                        bodyEpilogue = XMLStreamReaderUtil.currentWhiteSpaceContent(reader);
+                    } else {
+                        // clear it in case the existing was not the last one
+                        // (we are interested only in the last one?)
+                        bodyEpilogue = null;
                     }
                 }
             }
@@ -415,7 +513,7 @@ public final class StreamMessage extends AbstractMessageImpl {
             proceedToRootElement(reader);
             proceedToRootElement(clone);
 
-            return new StreamMessage(envelopeTag, headerTag, attachmentSet, HeaderList.copy(headers), bodyTag, clone, soapVersion);
+            return new StreamMessage(envelopeTag, headerTag, attachmentSet, HeaderList.copy(headers), bodyPrologue, bodyTag, bodyEpilogue, clone, soapVersion);
         } catch (XMLStreamException e) {
             throw new WebServiceException("Failed to copy a message",e);
         }
@@ -429,25 +527,27 @@ public final class StreamMessage extends AbstractMessageImpl {
         assert xsr.getEventType()==START_ELEMENT || xsr.getEventType()==END_ELEMENT;
     }
 
-    public void writeTo( ContentHandler contentHandler, ErrorHandler errorHandler ) throws SAXException {
+    public void writeTo(ContentHandler contentHandler, ErrorHandler errorHandler ) throws SAXException {
         contentHandler.setDocumentLocator(NULL_LOCATOR);
         contentHandler.startDocument();
         envelopeTag.writeStart(contentHandler);
-        headerTag.writeStart(contentHandler);
-        if(hasHeaders()) {
-            HeaderList headers = getHeaders();
-            int len = headers.size();
-            for( int i=0; i<len; i++ ) {
-                // shouldn't JDK be smart enough to use array-style indexing for this foreach!?
-                headers.get(i).writeTo(contentHandler,errorHandler);
+        if (hasHeaders() && headerTag == null) headerTag = new TagInfoset(envelopeTag.nsUri,"Header",envelopeTag.prefix,EMPTY_ATTS);
+        if (headerTag != null) {
+            headerTag.writeStart(contentHandler);
+            if (hasHeaders()) {
+                MessageHeaders headers = getHeaders();
+                for (Header h : headers.asList()) {
+                    // shouldn't JDK be smart enough to use array-style indexing for this foreach!?
+                    h.writeTo(contentHandler,errorHandler);
+                }
             }
+            headerTag.writeEnd(contentHandler);
         }
-        headerTag.writeEnd(contentHandler);
         bodyTag.writeStart(contentHandler);
         writePayloadTo(contentHandler,errorHandler, true);
         bodyTag.writeEnd(contentHandler);
         envelopeTag.writeEnd(contentHandler);
-
+        contentHandler.endDocument();
     }
 
     /**
@@ -470,28 +570,23 @@ public final class StreamMessage extends AbstractMessageImpl {
         return true;
     }
 
-    /**
-     * Used only for debugging. This records where the message was consumed.
-     */
-    private Throwable consumedAt;
-
-    /**
-     * Default s:Envelope, s:Header, and s:Body tag infoset definitions.
-     *
-     * We need 3 for SOAP 1.1, 3 for SOAP 1.2.
-     */
-    private static final TagInfoset[] DEFAULT_TAGS;
-
-    static {
-        DEFAULT_TAGS = new TagInfoset[6];
-        create(SOAPVersion.SOAP_11);
-        create(SOAPVersion.SOAP_12);
-    }
-
     private static void create(SOAPVersion v) {
         int base = v.ordinal()*3;
         DEFAULT_TAGS[base  ] = new TagInfoset(v.nsUri,"Envelope","S",EMPTY_ATTS,"S",v.nsUri);
         DEFAULT_TAGS[base+1] = new TagInfoset(v.nsUri,"Header","S",EMPTY_ATTS);
         DEFAULT_TAGS[base+2] = new TagInfoset(v.nsUri,"Body","S",EMPTY_ATTS);
+    }
+
+    public String getBodyPrologue() {
+        return bodyPrologue;
+    }
+
+    public String getBodyEpilogue() {
+        return bodyEpilogue;
+    }
+
+    public XMLStreamReader getReader() {
+        assert unconsumed();
+        return reader;
     }
 }

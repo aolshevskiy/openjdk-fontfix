@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,36 +24,86 @@
 
 package sun.jvm.hotspot;
 
-import java.io.*;
-import java.math.*;
-import java.util.*;
-import java.util.regex.*;
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Stack;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import sun.jvm.hotspot.types.Type;
-import sun.jvm.hotspot.types.Field;
-import sun.jvm.hotspot.HotSpotTypeDataBase;
-import sun.jvm.hotspot.types.basic.BasicType;
-import sun.jvm.hotspot.types.CIntegerType;
-import sun.jvm.hotspot.code.*;
-import sun.jvm.hotspot.compiler.*;
-import sun.jvm.hotspot.debugger.*;
-import sun.jvm.hotspot.interpreter.*;
-import sun.jvm.hotspot.memory.*;
-import sun.jvm.hotspot.oops.*;
-import sun.jvm.hotspot.opto.*;
-import sun.jvm.hotspot.ci.*;
-import sun.jvm.hotspot.runtime.*;
-import sun.jvm.hotspot.utilities.*;
-import sun.jvm.hotspot.utilities.soql.*;
-import sun.jvm.hotspot.ui.classbrowser.*;
-import sun.jvm.hotspot.ui.tree.*;
-import sun.jvm.hotspot.tools.*;
+import sun.jvm.hotspot.ci.ciEnv;
+import sun.jvm.hotspot.code.CodeBlob;
+import sun.jvm.hotspot.code.CodeCacheVisitor;
+import sun.jvm.hotspot.code.NMethod;
+import sun.jvm.hotspot.debugger.Address;
+import sun.jvm.hotspot.debugger.OopHandle;
+import sun.jvm.hotspot.memory.SymbolTable;
+import sun.jvm.hotspot.memory.SystemDictionary;
+import sun.jvm.hotspot.memory.Universe;
+import sun.jvm.hotspot.oops.DefaultHeapVisitor;
+import sun.jvm.hotspot.oops.HeapVisitor;
+import sun.jvm.hotspot.oops.InstanceKlass;
+import sun.jvm.hotspot.oops.Klass;
+import sun.jvm.hotspot.oops.Metadata;
+import sun.jvm.hotspot.oops.Method;
+import sun.jvm.hotspot.oops.MethodData;
+import sun.jvm.hotspot.oops.Oop;
+import sun.jvm.hotspot.oops.RawHeapVisitor;
+import sun.jvm.hotspot.oops.Symbol;
+import sun.jvm.hotspot.oops.UnknownOopException;
+import sun.jvm.hotspot.opto.Compile;
+import sun.jvm.hotspot.opto.InlineTree;
+import sun.jvm.hotspot.runtime.CompiledVFrame;
+import sun.jvm.hotspot.runtime.CompilerThread;
+import sun.jvm.hotspot.runtime.JavaThread;
+import sun.jvm.hotspot.runtime.JavaVFrame;
+import sun.jvm.hotspot.runtime.Threads;
+import sun.jvm.hotspot.runtime.VM;
 import sun.jvm.hotspot.tools.ObjectHistogram;
+import sun.jvm.hotspot.tools.PMap;
+import sun.jvm.hotspot.tools.PStack;
 import sun.jvm.hotspot.tools.StackTrace;
 import sun.jvm.hotspot.tools.jcore.ClassDump;
 import sun.jvm.hotspot.tools.jcore.ClassFilter;
+import sun.jvm.hotspot.types.CIntegerType;
+import sun.jvm.hotspot.types.Field;
+import sun.jvm.hotspot.types.Type;
+import sun.jvm.hotspot.types.basic.BasicType;
+import sun.jvm.hotspot.ui.classbrowser.HTMLGenerator;
+import sun.jvm.hotspot.ui.tree.CTypeTreeNodeAdapter;
+import sun.jvm.hotspot.ui.tree.OopTreeNodeAdapter;
+import sun.jvm.hotspot.ui.tree.SimpleTreeNode;
+import sun.jvm.hotspot.utilities.AddressOps;
+import sun.jvm.hotspot.utilities.Assert;
+import sun.jvm.hotspot.utilities.HeapProgressThunk;
+import sun.jvm.hotspot.utilities.LivenessPathElement;
+import sun.jvm.hotspot.utilities.MethodArray;
+import sun.jvm.hotspot.utilities.ObjectReader;
+import sun.jvm.hotspot.utilities.PointerFinder;
+import sun.jvm.hotspot.utilities.PointerLocation;
+import sun.jvm.hotspot.utilities.ReversePtrs;
+import sun.jvm.hotspot.utilities.ReversePtrsAnalysis;
+import sun.jvm.hotspot.utilities.RobustOopDeterminator;
+import sun.jvm.hotspot.utilities.SystemDictionaryHelper;
+import sun.jvm.hotspot.utilities.soql.JSJavaFactory;
+import sun.jvm.hotspot.utilities.soql.JSJavaFactoryImpl;
+import sun.jvm.hotspot.utilities.soql.JSJavaScriptEngine;
 
 public class CommandProcessor {
+
+    volatile boolean quit;
+
     public abstract static class DebuggerInterface {
         public abstract HotSpotAgent getAgent();
         public abstract boolean isAttached();
@@ -447,6 +497,112 @@ public class CommandProcessor {
                 }
             }
         },
+        new Command("dumpreplaydata", "dumpreplaydata { <address > | -a | <thread_id> }", false) {
+            // This is used to dump replay data from ciInstanceKlass, ciMethodData etc
+            // default file name is replay.txt, also if java crashes in compiler
+            // thread, this file will be dumped in error processing.
+            public void doit(Tokens t) {
+                if (t.countTokens() != 1) {
+                    usage();
+                    return;
+                }
+                String name = t.nextToken();
+                Address a = null;
+                try {
+                    a = VM.getVM().getDebugger().parseAddress(name);
+                } catch (NumberFormatException e) { }
+                if (a != null) {
+                    // only nmethod, Method, MethodData and InstanceKlass needed to
+                    // dump replay data
+
+                    CodeBlob cb = VM.getVM().getCodeCache().findBlob(a);
+                    if (cb != null && (cb instanceof NMethod)) {
+                        ((NMethod)cb).dumpReplayData(out);
+                        return;
+                    }
+                    // assume it is Metadata
+                    Metadata meta = Metadata.instantiateWrapperFor(a);
+                    if (meta != null) {
+                        meta.dumpReplayData(out);
+                    } else {
+                        usage();
+                        return;
+                    }
+                }
+                // Not an address
+                boolean all = name.equals("-a");
+                Threads threads = VM.getVM().getThreads();
+                for (JavaThread thread = threads.first(); thread != null; thread = thread.next()) {
+                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                    thread.printThreadIDOn(new PrintStream(bos));
+                    if (all || bos.toString().equals(name)) {
+                        if (thread instanceof CompilerThread) {
+                            CompilerThread ct = (CompilerThread)thread;
+                            ciEnv env = ct.env();
+                            if (env != null) {
+                               env.dumpReplayData(out);
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        new Command("buildreplayjars", "buildreplayjars [ all | app | boot ]  | [ prefix ]", false) {
+            // This is used to dump jar files of all the classes
+            // loaded in the core.  Everything on the bootclasspath
+            // will go in boot.jar and everything else will go in
+            // app.jar.  Then the classes can be loaded by the replay
+            // jvm using -Xbootclasspath/p:boot.jar -cp app.jar. boot.jar usually
+            // not needed, unless changed by jvmti.
+            public void doit(Tokens t) {
+                int tcount = t.countTokens();
+                if (tcount > 2) {
+                    usage();
+                    return;
+                }
+                try {
+                   String prefix = "";
+                   String option = "all"; // default
+                   switch(tcount) {
+                       case 0:
+                           break;
+                       case 1:
+                           option = t.nextToken();
+                           if (!option.equalsIgnoreCase("all") && !option.equalsIgnoreCase("app") &&
+                               !option.equalsIgnoreCase("root")) {
+                              prefix = option;
+                              option = "all";
+                           }
+                           break;
+                       case 2:
+                           option = t.nextToken();
+                           prefix = t.nextToken();
+                           break;
+                       default:
+                           usage();
+                           return;
+                   }
+                   if (!option.equalsIgnoreCase("all") && !option.equalsIgnoreCase("app") &&
+                               !option.equalsIgnoreCase("boot")) {
+                       usage();
+                       return;
+                   }
+                   ClassDump cd = new ClassDump();
+                   if (option.equalsIgnoreCase("all") || option.equalsIgnoreCase("boot")) {
+                     cd.setClassFilter(new BootFilter());
+                     cd.setJarOutput(prefix + "boot.jar");
+                     cd.run();
+                   }
+                   if (option.equalsIgnoreCase("all") || option.equalsIgnoreCase("app")) {
+                     cd.setClassFilter(new NonBootFilter());
+                     cd.setJarOutput(prefix + "app.jar");
+                     cd.run();
+                   }
+                } catch (IOException ioe) {
+                   ioe.printStackTrace();
+                }
+            }
+        },
         new Command("findpc", "findpc address", false) {
             public void doit(Tokens t) {
                 if (t.countTokens() != 1) {
@@ -564,6 +720,71 @@ public class CommandProcessor {
                 }
             }
         },
+        // decode raw address
+        new Command("dis", "dis address [length]", false) {
+            public void doit(Tokens t) {
+                int tokens = t.countTokens();
+                if (tokens != 1 && tokens != 2) {
+                    usage();
+                    return;
+                }
+                String name = t.nextToken();
+                Address addr = null;
+                int len = 0x10; // default length
+                try {
+                    addr = VM.getVM().getDebugger().parseAddress(name);
+                } catch (NumberFormatException e) {
+                   out.println(e);
+                   return;
+                }
+                if (tokens == 2) {
+                    try {
+                        len = Integer.parseInt(t.nextToken());
+                    } catch (NumberFormatException e) {
+                        out.println(e);
+                        return;
+                    }
+                }
+                HTMLGenerator generator = new HTMLGenerator(false);
+                out.println(generator.genHTMLForRawDisassembly(addr, len));
+            }
+
+        },
+        // decode codeblob or nmethod
+        new Command("disassemble", "disassemble address", false) {
+            public void doit(Tokens t) {
+                int tokens = t.countTokens();
+                if (tokens != 1) {
+                    usage();
+                    return;
+                }
+                String name = t.nextToken();
+                Address addr = null;
+                try {
+                    addr = VM.getVM().getDebugger().parseAddress(name);
+                } catch (NumberFormatException e) {
+                   out.println(e);
+                   return;
+                }
+
+                HTMLGenerator generator = new HTMLGenerator(false);
+                out.println(generator.genHTML(addr));
+            }
+        },
+        // print Java bytecode disassembly
+        new Command("jdis", "jdis address", false) {
+            public void doit(Tokens t) {
+                int tokens = t.countTokens();
+                if (tokens != 1) {
+                    usage();
+                    return;
+                }
+                Address a = VM.getVM().getDebugger().parseAddress(t.nextToken());
+                Method m = (Method)Metadata.instantiateWrapperFor(a);
+                HTMLGenerator html = new HTMLGenerator(false);
+                out.println(html.genHTML(m));
+            }
+        },
         new Command("revptrs", "revptrs address", false) {
             public void doit(Tokens t) {
                 int tokens = t.countTokens();
@@ -634,26 +855,54 @@ public class CommandProcessor {
                 } else {
                     String s = t.nextToken();
                     if (s.equals("-a")) {
-                        HeapVisitor iterator = new DefaultHeapVisitor() {
-                                public boolean doObj(Oop obj) {
-                                    if (obj instanceof MethodData) {
-                                        Method m = ((MethodData)obj).getMethod();
-                                        out.println("MethodData " + obj.getHandle() + " for " +
+                        SystemDictionary sysDict = VM.getVM().getSystemDictionary();
+                        sysDict.allClassesDo(new SystemDictionary.ClassVisitor() {
+                                public void visit(Klass k) {
+                                    if (k instanceof InstanceKlass) {
+                                        MethodArray methods = ((InstanceKlass)k).getMethods();
+                                        for (int i = 0; i < methods.length(); i++) {
+                                            Method m = methods.at(i);
+                                            MethodData mdo = m.getMethodData();
+                                            if (mdo != null) {
+                                                out.println("MethodData " + mdo.getAddress() + " for " +
                                                     "method " + m.getMethodHolder().getName().asString() + "." +
                                                     m.getName().asString() +
-                                                    m.getSignature().asString() + "@" + m.getHandle());
-                                        ((MethodData)obj).printDataOn(out);
+                                                            m.getSignature().asString() + "@" + m.getAddress());
+                                                mdo.printDataOn(out);
                                     }
-                                    return false;
                                 }
-                            };
-                        VM.getVM().getObjectHeap().iteratePerm(iterator);
+                                    }
+                                }
+                            }
+                            );
                     } else {
                         Address a = VM.getVM().getDebugger().parseAddress(s);
-                        OopHandle handle = a.addOffsetToAsOopHandle(0);
-                        MethodData mdo = (MethodData)VM.getVM().getObjectHeap().newOop(handle);
+                        MethodData mdo = (MethodData) Metadata.instantiateWrapperFor(a);
                         mdo.printDataOn(out);
                     }
+                }
+            }
+        },
+        new Command("printall", "printall", false) {
+            // Print every MDO in the heap or the one referenced by expression.
+            public void doit(Tokens t) {
+                if (t.countTokens() != 0) {
+                    usage();
+                } else {
+                    SystemDictionary sysDict = VM.getVM().getSystemDictionary();
+                    sysDict.allClassesDo(new SystemDictionary.ClassVisitor() {
+                            public void visit(Klass k) {
+                                if (k instanceof InstanceKlass && ((InstanceKlass)k).getConstants().getCache() != null) {
+                                    MethodArray methods = ((InstanceKlass)k).getMethods();
+                                    for (int i = 0; i < methods.length(); i++) {
+                                        Method m = methods.at(i);
+                                        HTMLGenerator gen = new HTMLGenerator(false);
+                                        out.println(gen.genHTML(m));
+                                    }
+                                }
+                            }
+                        }
+                        );
                 }
             }
         },
@@ -889,7 +1138,7 @@ public class CommandProcessor {
                     usage();
                 } else {
                     debugger.detach();
-                    System.exit(0);
+                    quit = true;
                 }
             }
         },
@@ -931,6 +1180,10 @@ public class CommandProcessor {
                     Klass klass = null;
                     if (t.countTokens() == 1) {
                         klass = SystemDictionaryHelper.findInstanceKlass(t.nextToken());
+                        if (klass == null) {
+                            out.println("No such type.");
+                            return;
+                        }
                     }
                     while (base != null && base.lessThan(end)) {
                         long step = stride;
@@ -1229,7 +1482,7 @@ public class CommandProcessor {
                             }
                         };
                     VM.getVM().getObjectHeap().iterateRaw(iterator);
-                } else if (type.equals("heap") || type.equals("perm")) {
+                } else if (type.equals("heap")) {
                     HeapVisitor iterator = new DefaultHeapVisitor() {
                             public boolean doObj(Oop obj) {
                                 int index = 0;
@@ -1246,11 +1499,7 @@ public class CommandProcessor {
                                 return false;
                             }
                         };
-                    if (type.equals("heap")) {
                         VM.getVM().getObjectHeap().iterate(iterator);
-                    } else {
-                        VM.getVM().getObjectHeap().iteratePerm(iterator);
-                    }
                 } else if (type.equals("codecache")) {
                     CodeCacheVisitor v = new CodeCacheVisitor() {
                             public void prologue(Address start, Address end) {
@@ -1320,7 +1569,7 @@ public class CommandProcessor {
                         ByteArrayOutputStream bos = new ByteArrayOutputStream();
                         thread.printThreadIDOn(new PrintStream(bos));
                         if (all || bos.toString().equals(name)) {
-                            out.println(bos.toString() + " = " + thread.getAddress());
+                            out.println("Thread " + bos.toString() + " Address: " + thread.getAddress());
                             HTMLGenerator gen = new HTMLGenerator(false);
                             try {
                                 out.println(gen.genHTMLForJavaStackTrace(thread));
@@ -1349,7 +1598,7 @@ public class CommandProcessor {
                         ByteArrayOutputStream bos = new ByteArrayOutputStream();
                         thread.printThreadIDOn(new PrintStream(bos));
                         if (all || bos.toString().equals(name)) {
-                            out.println(bos.toString() + " = " + thread.getAddress());
+                            out.println("Thread " + bos.toString() + " Address " + thread.getAddress());
                             if (!all) return;
                         }
                     }
@@ -1468,7 +1717,7 @@ public class CommandProcessor {
                         }
                         protected void quit() {
                             debugger.detach();
-                            System.exit(0);
+                            quit = true;
                         }
                         protected BufferedReader getInputReader() {
                             return in;
@@ -1535,7 +1784,7 @@ public class CommandProcessor {
 
     public void run(boolean prompt) {
         // Process interactive commands.
-        while (true) {
+        while (!quit) {
             if (prompt) printPrompt();
             String ln = null;
             try {

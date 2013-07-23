@@ -71,6 +71,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
         serverCache = new SSLSessionContextImpl();
     }
 
+    @Override
     protected void engineInit(KeyManager[] km, TrustManager[] tm,
                                 SecureRandom sr) throws KeyManagementException {
         isInitialized = false;
@@ -177,6 +178,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
         return DummyX509KeyManager.INSTANCE;
     }
 
+    @Override
     protected SSLSocketFactory engineGetSocketFactory() {
         if (!isInitialized) {
             throw new IllegalStateException(
@@ -185,6 +187,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
        return new SSLSocketFactoryImpl(this);
     }
 
+    @Override
     protected SSLServerSocketFactory engineGetServerSocketFactory() {
         if (!isInitialized) {
             throw new IllegalStateException("SSLContext is not initialized");
@@ -192,6 +195,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
         return new SSLServerSocketFactoryImpl(this);
     }
 
+    @Override
     protected SSLEngine engineCreateSSLEngine() {
         if (!isInitialized) {
             throw new IllegalStateException(
@@ -200,6 +204,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
         return new SSLEngineImpl(this);
     }
 
+    @Override
     protected SSLEngine engineCreateSSLEngine(String host, int port) {
         if (!isInitialized) {
             throw new IllegalStateException(
@@ -208,10 +213,12 @@ public abstract class SSLContextImpl extends SSLContextSpi {
         return new SSLEngineImpl(this, host, port);
     }
 
+    @Override
     protected SSLSessionContext engineGetClientSessionContext() {
         return clientCache;
     }
 
+    @Override
     protected SSLSessionContext engineGetServerSessionContext() {
         return serverCache;
     }
@@ -463,14 +470,17 @@ public abstract class SSLContextImpl extends SSLContextSpi {
             }
         }
 
+        @Override
         SSLParameters getDefaultServerSSLParams() {
             return defaultServerSSLParams;
         }
 
+        @Override
         SSLParameters getDefaultClientSSLParams() {
             return defaultClientSSLParams;
         }
 
+        @Override
         SSLParameters getSupportedSSLParams() {
             return supportedSSLParams;
         }
@@ -506,6 +516,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
             }
         }
 
+        @Override
         protected void engineInit(KeyManager[] km, TrustManager[] tm,
             SecureRandom sr) throws KeyManagementException {
             throw new KeyManagementException
@@ -544,6 +555,7 @@ public abstract class SSLContextImpl extends SSLContextSpi {
             final Map<String,String> props = new HashMap<>();
             AccessController.doPrivileged(
                         new PrivilegedExceptionAction<Object>() {
+                @Override
                 public Object run() throws Exception {
                     props.put("keyStore",  System.getProperty(
                                 "javax.net.ssl.keyStore", ""));
@@ -576,42 +588,47 @@ public abstract class SSLContextImpl extends SSLContextSpi {
             }
 
             FileInputStream fs = null;
-            if (defaultKeyStore.length() != 0 && !NONE.equals(defaultKeyStore)) {
-                fs = AccessController.doPrivileged(
-                        new PrivilegedExceptionAction<FileInputStream>() {
-                    public FileInputStream run() throws Exception {
-                        return new FileInputStream(defaultKeyStore);
-                    }
-                });
-            }
-
-            String defaultKeyStorePassword = props.get("keyStorePasswd");
-            char[] passwd = null;
-            if (defaultKeyStorePassword.length() != 0) {
-                passwd = defaultKeyStorePassword.toCharArray();
-            }
-
-            /**
-             * Try to initialize key store.
-             */
             KeyStore ks = null;
-            if ((defaultKeyStoreType.length()) != 0) {
-                if (debug != null && Debug.isOn("defaultctx")) {
-                    System.out.println("init keystore");
-                }
-                if (defaultKeyStoreProvider.length() == 0) {
-                    ks = KeyStore.getInstance(defaultKeyStoreType);
-                } else {
-                    ks = KeyStore.getInstance(defaultKeyStoreType,
-                                        defaultKeyStoreProvider);
+            char[] passwd = null;
+            try {
+                if (defaultKeyStore.length() != 0 &&
+                        !NONE.equals(defaultKeyStore)) {
+                    fs = AccessController.doPrivileged(
+                            new PrivilegedExceptionAction<FileInputStream>() {
+                        @Override
+                        public FileInputStream run() throws Exception {
+                            return new FileInputStream(defaultKeyStore);
+                        }
+                    });
                 }
 
-                // if defaultKeyStore is NONE, fs will be null
-                ks.load(fs, passwd);
-            }
-            if (fs != null) {
-                fs.close();
-                fs = null;
+                String defaultKeyStorePassword = props.get("keyStorePasswd");
+                if (defaultKeyStorePassword.length() != 0) {
+                    passwd = defaultKeyStorePassword.toCharArray();
+                }
+
+                /**
+                 * Try to initialize key store.
+                 */
+                if ((defaultKeyStoreType.length()) != 0) {
+                    if (debug != null && Debug.isOn("defaultctx")) {
+                        System.out.println("init keystore");
+                    }
+                    if (defaultKeyStoreProvider.length() == 0) {
+                        ks = KeyStore.getInstance(defaultKeyStoreType);
+                    } else {
+                        ks = KeyStore.getInstance(defaultKeyStoreType,
+                                            defaultKeyStoreProvider);
+                    }
+
+                    // if defaultKeyStore is NONE, fs will be null
+                    ks.load(fs, passwd);
+                }
+            } finally {
+                if (fs != null) {
+                    fs.close();
+                    fs = null;
+                }
             }
 
             /*
@@ -693,14 +710,17 @@ public abstract class SSLContextImpl extends SSLContextSpi {
             }
         }
 
+        @Override
         SSLParameters getDefaultServerSSLParams() {
             return defaultServerSSLParams;
         }
 
+        @Override
         SSLParameters getDefaultClientSSLParams() {
             return defaultClientSSLParams;
         }
 
+        @Override
         SSLParameters getSupportedSSLParams() {
             return supportedSSLParams;
         }
@@ -757,14 +777,17 @@ public abstract class SSLContextImpl extends SSLContextSpi {
             }
         }
 
+        @Override
         SSLParameters getDefaultServerSSLParams() {
             return defaultServerSSLParams;
         }
 
+        @Override
         SSLParameters getDefaultClientSSLParams() {
             return defaultClientSSLParams;
         }
 
+        @Override
         SSLParameters getSupportedSSLParams() {
             return supportedSSLParams;
         }
@@ -1037,28 +1060,34 @@ final class AbstractKeyManagerWrapper extends X509ExtendedKeyManager {
         this.km = km;
     }
 
+    @Override
     public String[] getClientAliases(String keyType, Principal[] issuers) {
         return km.getClientAliases(keyType, issuers);
     }
 
+    @Override
     public String chooseClientAlias(String[] keyType, Principal[] issuers,
             Socket socket) {
         return km.chooseClientAlias(keyType, issuers, socket);
     }
 
+    @Override
     public String[] getServerAliases(String keyType, Principal[] issuers) {
         return km.getServerAliases(keyType, issuers);
     }
 
+    @Override
     public String chooseServerAlias(String keyType, Principal[] issuers,
             Socket socket) {
         return km.chooseServerAlias(keyType, issuers, socket);
     }
 
+    @Override
     public X509Certificate[] getCertificateChain(String alias) {
         return km.getCertificateChain(alias);
     }
 
+    @Override
     public PrivateKey getPrivateKey(String alias) {
         return km.getPrivateKey(alias);
     }
@@ -1083,6 +1112,7 @@ final class DummyX509KeyManager extends X509ExtendedKeyManager {
      * socket given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String[] getClientAliases(String keyType, Principal[] issuers) {
         return null;
     }
@@ -1092,6 +1122,7 @@ final class DummyX509KeyManager extends X509ExtendedKeyManager {
      * socket given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String chooseClientAlias(String[] keyTypes, Principal[] issuers,
             Socket socket) {
         return null;
@@ -1102,6 +1133,7 @@ final class DummyX509KeyManager extends X509ExtendedKeyManager {
      * engine given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String chooseEngineClientAlias(
             String[] keyTypes, Principal[] issuers, SSLEngine engine) {
         return null;
@@ -1112,6 +1144,7 @@ final class DummyX509KeyManager extends X509ExtendedKeyManager {
      * socket given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String[] getServerAliases(String keyType, Principal[] issuers) {
         return null;
     }
@@ -1121,6 +1154,7 @@ final class DummyX509KeyManager extends X509ExtendedKeyManager {
      * socket given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String chooseServerAlias(String keyType, Principal[] issuers,
             Socket socket) {
         return null;
@@ -1131,6 +1165,7 @@ final class DummyX509KeyManager extends X509ExtendedKeyManager {
      * given the public key type and the list of
      * certificate issuer authorities recognized by the peer (if any).
      */
+    @Override
     public String chooseEngineServerAlias(
             String keyType, Principal[] issuers, SSLEngine engine) {
         return null;
@@ -1144,6 +1179,7 @@ final class DummyX509KeyManager extends X509ExtendedKeyManager {
      * @return the certificate chain (ordered with the user's certificate first
      * and the root certificate authority last)
      */
+    @Override
     public X509Certificate[] getCertificateChain(String alias) {
         return null;
     }
@@ -1156,6 +1192,7 @@ final class DummyX509KeyManager extends X509ExtendedKeyManager {
      *
      * @return the requested key
      */
+    @Override
     public PrivateKey getPrivateKey(String alias) {
         return null;
     }

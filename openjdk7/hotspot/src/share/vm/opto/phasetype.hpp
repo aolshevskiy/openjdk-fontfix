@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ enum CompilerPhaseType {
   PHASE_BEFORE_REMOVEUSELESS,
   PHASE_AFTER_PARSING,
   PHASE_ITER_GVN1,
-  PHASE_INCREMENTAL_INLINE,
   PHASE_PHASEIDEAL_BEFORE_EA,
   PHASE_ITER_GVN_AFTER_EA,
   PHASE_ITER_GVN_AFTER_ELIMINATION,
@@ -50,6 +49,8 @@ enum CompilerPhaseType {
   PHASE_BEFORE_BEAUTIFY_LOOPS,
   PHASE_AFTER_BEAUTIFY_LOOPS,
   PHASE_BEFORE_MATCHING,
+  PHASE_INCREMENTAL_INLINE,
+  PHASE_INCREMENTAL_BOXING_INLINE,
   PHASE_END,
   PHASE_FAILURE,
 
@@ -65,7 +66,6 @@ class CompilerPhaseTypeHelper {
       case PHASE_BEFORE_REMOVEUSELESS:       return "Before RemoveUseless";
       case PHASE_AFTER_PARSING:              return "After Parsing";
       case PHASE_ITER_GVN1:                  return "Iter GVN 1";
-      case PHASE_INCREMENTAL_INLINE:         return "Incremental Inline";
       case PHASE_PHASEIDEAL_BEFORE_EA:       return "PhaseIdealLoop before EA";
       case PHASE_ITER_GVN_AFTER_EA:          return "Iter GVN after EA";
       case PHASE_ITER_GVN_AFTER_ELIMINATION: return "Iter GVN after eliminating allocations and locks";
@@ -84,6 +84,8 @@ class CompilerPhaseTypeHelper {
       case PHASE_BEFORE_BEAUTIFY_LOOPS:      return "Before beautify loops";
       case PHASE_AFTER_BEAUTIFY_LOOPS:       return "After beautify loops";
       case PHASE_BEFORE_MATCHING:            return "Before Matching";
+      case PHASE_INCREMENTAL_INLINE:         return "Incremental Inline";
+      case PHASE_INCREMENTAL_BOXING_INLINE:  return "Incremental Boxing Inline";
       case PHASE_END:                        return "End";
       case PHASE_FAILURE:                    return "Failure";
       default:

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,12 +23,11 @@
  * questions.
  */
 
-
 package com.sun.xml.internal.ws.resources;
 
-import com.sun.xml.internal.ws.util.localization.Localizable;
-import com.sun.xml.internal.ws.util.localization.LocalizableMessageFactory;
-import com.sun.xml.internal.ws.util.localization.Localizer;
+import com.sun.istack.internal.localization.Localizable;
+import com.sun.istack.internal.localization.LocalizableMessageFactory;
+import com.sun.istack.internal.localization.Localizer;
 
 
 /**
@@ -362,18 +361,6 @@ public final class AddressingMessages {
      */
     public static String NON_ANONYMOUS_UNKNOWN_PROTOCOL(Object arg0) {
         return localizer.localize(localizableNON_ANONYMOUS_UNKNOWN_PROTOCOL(arg0));
-    }
-
-    public static Localizable localizableNON_ANONYMOUS_RESPONSE_NULL_MESSAGE(Object arg0) {
-        return messageFactory.getMessage("nonAnonymous.response.nullMessage", arg0);
-    }
-
-    /**
-     * No message for non-anonymous response from "{0}"
-     *
-     */
-    public static String NON_ANONYMOUS_RESPONSE_NULL_MESSAGE(Object arg0) {
-        return localizer.localize(localizableNON_ANONYMOUS_RESPONSE_NULL_MESSAGE(arg0));
     }
 
     public static Localizable localizableNULL_HEADERS() {

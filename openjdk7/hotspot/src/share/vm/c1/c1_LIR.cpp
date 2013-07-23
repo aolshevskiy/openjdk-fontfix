@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -85,14 +85,21 @@ LIR_Opr LIR_OprFact::illegalOpr = LIR_OprFact::illegal();
 LIR_Opr LIR_OprFact::value_type(ValueType* type) {
   ValueTag tag = type->tag();
   switch (tag) {
-  case objectTag : {
+  case metaDataTag : {
     ClassConstant* c = type->as_ClassConstant();
     if (c != NULL && !c->value()->is_loaded()) {
-      return LIR_OprFact::oopConst(NULL);
+      return LIR_OprFact::metadataConst(NULL);
+    } else if (c != NULL) {
+      return LIR_OprFact::metadataConst(c->value()->constant_encoding());
     } else {
-      return LIR_OprFact::oopConst(type->as_ObjectType()->encoding());
+      MethodConstant* m = type->as_MethodConstant();
+      assert (m != NULL, "not a class or a method?");
+      return LIR_OprFact::metadataConst(m->value()->constant_encoding());
     }
   }
+  case objectTag : {
+      return LIR_OprFact::oopConst(type->as_ObjectType()->encoding());
+    }
   case addressTag: return LIR_OprFact::addressConst(type->as_AddressConstant()->value());
   case intTag    : return LIR_OprFact::intConst(type->as_IntConstant()->value());
   case floatTag  : return LIR_OprFact::floatConst(type->as_FloatConstant()->value());
@@ -148,12 +155,12 @@ void LIR_Address::verify() const {
 #ifdef _LP64
   assert(base()->is_cpu_register(), "wrong base operand");
   assert(index()->is_illegal() || index()->is_double_cpu(), "wrong index operand");
-  assert(base()->type() == T_OBJECT || base()->type() == T_LONG,
+  assert(base()->type() == T_OBJECT || base()->type() == T_LONG || base()->type() == T_METADATA,
          "wrong type for addresses");
 #else
   assert(base()->is_single_cpu(), "wrong base operand");
   assert(index()->is_illegal() || index()->is_single_cpu(), "wrong index operand");
-  assert(base()->type() == T_OBJECT || base()->type() == T_INT,
+  assert(base()->type() == T_OBJECT || base()->type() == T_INT || base()->type() == T_METADATA,
          "wrong type for addresses");
 #endif
 }
@@ -176,6 +183,7 @@ char LIR_OprDesc::type_char(BasicType t) {
     case T_LONG:
     case T_OBJECT:
     case T_ADDRESS:
+    case T_METADATA:
     case T_VOID:
       return ::type2char(t);
 
@@ -193,23 +201,24 @@ void LIR_OprDesc::validate_type() const {
 
 #ifdef ASSERT
   if (!is_pointer() && !is_illegal()) {
+    OprKind kindfield = kind_field(); // Factored out because of compiler bug, see 8002160
     switch (as_BasicType(type_field())) {
     case T_LONG:
-      assert((kind_field() == cpu_register || kind_field() == stack_value) &&
+      assert((kindfield == cpu_register || kindfield == stack_value) &&
              size_field() == double_size, "must match");
       break;
     case T_FLOAT:
       // FP return values can be also in CPU registers on ARM and PPC (softfp ABI)
-      assert((kind_field() == fpu_register || kind_field() == stack_value
-             ARM_ONLY(|| kind_field() == cpu_register)
-             PPC_ONLY(|| kind_field() == cpu_register) ) &&
+      assert((kindfield == fpu_register || kindfield == stack_value
+             ARM_ONLY(|| kindfield == cpu_register)
+             PPC_ONLY(|| kindfield == cpu_register) ) &&
              size_field() == single_size, "must match");
       break;
     case T_DOUBLE:
       // FP return values can be also in CPU registers on ARM and PPC (softfp ABI)
-      assert((kind_field() == fpu_register || kind_field() == stack_value
-             ARM_ONLY(|| kind_field() == cpu_register)
-             PPC_ONLY(|| kind_field() == cpu_register) ) &&
+      assert((kindfield == fpu_register || kindfield == stack_value
+             ARM_ONLY(|| kindfield == cpu_register)
+             PPC_ONLY(|| kindfield == cpu_register) ) &&
              size_field() == double_size, "must match");
       break;
     case T_BOOLEAN:
@@ -219,8 +228,9 @@ void LIR_OprDesc::validate_type() const {
     case T_INT:
     case T_ADDRESS:
     case T_OBJECT:
+    case T_METADATA:
     case T_ARRAY:
-      assert((kind_field() == cpu_register || kind_field() == stack_value) &&
+      assert((kindfield == cpu_register || kindfield == stack_value) &&
              size_field() == single_size, "must match");
       break;
 
@@ -420,6 +430,11 @@ LIR_OpArrayCopy::LIR_OpArrayCopy(LIR_Opr src, LIR_Opr src_pos, LIR_Opr dst, LIR_
   _stub = new ArrayCopyStub(this);
 }
 
+LIR_OpUpdateCRC32::LIR_OpUpdateCRC32(LIR_Opr crc, LIR_Opr val, LIR_Opr res)
+  : LIR_Op(lir_updatecrc32, res, NULL)
+  , _crc(crc)
+  , _val(val) {
+}
 
 //-------------------verify--------------------------
 
@@ -624,6 +639,7 @@ void LIR_OpVisitState::visit(LIR_Op* op) {
     case lir_ushr:
     case lir_xadd:
     case lir_xchg:
+    case lir_assert:
     {
       assert(op->as_Op2() != NULL, "must be");
       LIR_Op2* op2 = (LIR_Op2*)op;
@@ -865,6 +881,20 @@ void LIR_OpVisitState::visit(LIR_Op* op) {
     }
 
 
+// LIR_OpUpdateCRC32
+    case lir_updatecrc32: {
+      assert(op->as_OpUpdateCRC32() != NULL, "must be");
+      LIR_OpUpdateCRC32* opUp = (LIR_OpUpdateCRC32*)op;
+
+      assert(opUp->_crc->is_valid(), "used");          do_input(opUp->_crc);     do_temp(opUp->_crc);
+      assert(opUp->_val->is_valid(), "used");          do_input(opUp->_val);     do_temp(opUp->_val);
+      assert(opUp->_result->is_valid(), "used");       do_output(opUp->_result);
+      assert(opUp->_info == NULL, "no info for LIR_OpUpdateCRC32");
+
+      break;
+    }
+
+
 // LIR_OpLock
     case lir_lock:
     case lir_unlock: {
@@ -1045,6 +1075,10 @@ void LIR_OpArrayCopy::emit_code(LIR_Assembler* masm) {
   masm->emit_code_stub(stub());
 }
 
+void LIR_OpUpdateCRC32::emit_code(LIR_Assembler* masm) {
+  masm->emit_updatecrc32(this);
+}
+
 void LIR_Op0::emit_code(LIR_Assembler* masm) {
   masm->emit_op0(this);
 }
@@ -1103,6 +1137,11 @@ void LIR_OpLock::emit_code(LIR_Assembler* masm) {
   }
 }
 
+#ifdef ASSERT
+void LIR_OpAssert::emit_code(LIR_Assembler* masm) {
+  masm->emit_assert(this);
+}
+#endif
 
 void LIR_OpDelay::emit_code(LIR_Assembler* masm) {
   masm->emit_delay(this);
@@ -1171,9 +1210,14 @@ void LIR_List::append(LIR_InsertionBuffer* buffer) {
 
 
 void LIR_List::oop2reg_patch(jobject o, LIR_Opr reg, CodeEmitInfo* info) {
+  assert(reg->type() == T_OBJECT, "bad reg");
   append(new LIR_Op1(lir_move, LIR_OprFact::oopConst(o),  reg, T_OBJECT, lir_patch_normal, info));
 }
 
+void LIR_List::klass2reg_patch(Metadata* o, LIR_Opr reg, CodeEmitInfo* info) {
+  assert(reg->type() == T_METADATA, "bad reg");
+  append(new LIR_Op1(lir_move, LIR_OprFact::metadataConst(o), reg, T_METADATA, lir_patch_normal, info));
+}
 
 void LIR_List::load(LIR_Address* addr, LIR_Opr src, CodeEmitInfo* info, LIR_PatchCode patch_code) {
   append(new LIR_Op1(
@@ -1549,10 +1593,11 @@ void LIR_Const::print_value_on(outputStream* out) const {
   switch (type()) {
     case T_ADDRESS:out->print("address:%d",as_jint());          break;
     case T_INT:    out->print("int:%d",   as_jint());           break;
-    case T_LONG:   out->print("lng:%lld", as_jlong());          break;
+    case T_LONG:   out->print("lng:" JLONG_FORMAT, as_jlong()); break;
     case T_FLOAT:  out->print("flt:%f",   as_jfloat());         break;
     case T_DOUBLE: out->print("dbl:%f",   as_jdouble());        break;
     case T_OBJECT: out->print("obj:0x%x", as_jobject());        break;
+    case T_METADATA: out->print("metadata:0x%x", as_metadata());break;
     default:       out->print("%3d:0x%x",type(), as_jdouble()); break;
   }
 }
@@ -1741,6 +1786,8 @@ const char * LIR_Op::name() const {
      case lir_dynamic_call:          s = "dynamic";       break;
      // LIR_OpArrayCopy
      case lir_arraycopy:             s = "arraycopy";     break;
+     // LIR_OpUpdateCRC32
+     case lir_updatecrc32:           s = "updatecrc32";   break;
      // LIR_OpLock
      case lir_lock:                  s = "lock";          break;
      case lir_unlock:                s = "unlock";        break;
@@ -1756,6 +1803,10 @@ const char * LIR_Op::name() const {
      case lir_cas_int:               s = "cas_int";      break;
      // LIR_OpProfileCall
      case lir_profile_call:          s = "profile_call";  break;
+     // LIR_OpAssert
+#ifdef ASSERT
+     case lir_assert:                s = "assert";        break;
+#endif
      case lir_none:                  ShouldNotReachHere();break;
     default:                         s = "illegal_op";    break;
   }
@@ -1787,6 +1838,13 @@ void LIR_OpArrayCopy::print_instr(outputStream* out) const {
   dst_pos()->print(out); out->print(" ");
   length()->print(out);  out->print(" ");
   tmp()->print(out);     out->print(" ");
+}
+
+// LIR_OpUpdateCRC32
+void LIR_OpUpdateCRC32::print_instr(outputStream* out) const {
+  crc()->print(out);     out->print(" ");
+  val()->print(out);     out->print(" ");
+  result_opr()->print(out); out->print(" ");
 }
 
 // LIR_OpCompareAndSwap
@@ -2001,6 +2059,15 @@ void LIR_OpLock::print_instr(outputStream* out) const {
   }
   out->print("[lbl:0x%x]", stub()->entry());
 }
+
+#ifdef ASSERT
+void LIR_OpAssert::print_instr(outputStream* out) const {
+  print_condition(out, condition()); out->print(" ");
+  in_opr1()->print(out);             out->print(" ");
+  in_opr2()->print(out);             out->print(", \"");
+  out->print(msg());                 out->print("\"");
+}
+#endif
 
 
 void LIR_OpDelay::print_instr(outputStream* out) const {

@@ -36,64 +36,85 @@ class Atomic : AllStatic {
   // a means to test availability.
 
   // Atomically store to a location
-  static void store    (jbyte    store_value, jbyte*    dest);
-  static void store    (jshort   store_value, jshort*   dest);
-  static void store    (jint     store_value, jint*     dest);
+  inline static void store    (jbyte    store_value, jbyte*    dest);
+  inline static void store    (jshort   store_value, jshort*   dest);
+  inline static void store    (jint     store_value, jint*     dest);
   // See comment above about using jlong atomics on 32-bit platforms
-  static void store    (jlong    store_value, jlong*    dest);
-  static void store_ptr(intptr_t store_value, intptr_t* dest);
-  static void store_ptr(void*    store_value, void*     dest);
+  inline static void store    (jlong    store_value, jlong*    dest);
+  inline static void store_ptr(intptr_t store_value, intptr_t* dest);
+  inline static void store_ptr(void*    store_value, void*     dest);
 
-  static void store    (jbyte    store_value, volatile jbyte*    dest);
-  static void store    (jshort   store_value, volatile jshort*   dest);
-  static void store    (jint     store_value, volatile jint*     dest);
+  inline static void store    (jbyte    store_value, volatile jbyte*    dest);
+  inline static void store    (jshort   store_value, volatile jshort*   dest);
+  inline static void store    (jint     store_value, volatile jint*     dest);
   // See comment above about using jlong atomics on 32-bit platforms
-  static void store    (jlong    store_value, volatile jlong*    dest);
-  static void store_ptr(intptr_t store_value, volatile intptr_t* dest);
-  static void store_ptr(void*    store_value, volatile void*     dest);
+  inline static void store    (jlong    store_value, volatile jlong*    dest);
+  inline static void store_ptr(intptr_t store_value, volatile intptr_t* dest);
+  inline static void store_ptr(void*    store_value, volatile void*     dest);
 
   // See comment above about using jlong atomics on 32-bit platforms
-  static jlong load(volatile jlong* src);
+  inline static jlong load(volatile jlong* src);
 
   // Atomically add to a location, return updated value
-  static jint     add    (jint     add_value, volatile jint*     dest);
-  static intptr_t add_ptr(intptr_t add_value, volatile intptr_t* dest);
-  static void*    add_ptr(intptr_t add_value, volatile void*     dest);
+  inline static jint     add    (jint     add_value, volatile jint*     dest);
+  inline static intptr_t add_ptr(intptr_t add_value, volatile intptr_t* dest);
+  inline static void*    add_ptr(intptr_t add_value, volatile void*     dest);
   // See comment above about using jlong atomics on 32-bit platforms
-  static jlong    add    (jlong    add_value, volatile jlong*    dest);
+         static jlong    add    (jlong    add_value, volatile jlong*    dest);
 
   // Atomically increment location
-  static void inc    (volatile jint*     dest);
-  static void inc_ptr(volatile intptr_t* dest);
-  static void inc_ptr(volatile void*     dest);
+  inline static void inc    (volatile jint*     dest);
+         static void inc    (volatile jshort*   dest);
+  inline static void inc_ptr(volatile intptr_t* dest);
+  inline static void inc_ptr(volatile void*     dest);
 
   // Atomically decrement a location
-  static void dec    (volatile jint*     dest);
-  static void dec_ptr(volatile intptr_t* dest);
-  static void dec_ptr(volatile void*     dest);
+  inline static void dec    (volatile jint*     dest);
+         static void dec    (volatile jshort*    dest);
+  inline static void dec_ptr(volatile intptr_t* dest);
+  inline static void dec_ptr(volatile void*     dest);
 
   // Performs atomic exchange of *dest with exchange_value.  Returns old prior value of *dest.
-  static jint         xchg(jint     exchange_value, volatile jint*     dest);
-  static unsigned int xchg(unsigned int exchange_value,
-                           volatile unsigned int* dest);
+  inline static jint         xchg(jint         exchange_value, volatile jint*         dest);
+         static unsigned int xchg(unsigned int exchange_value, volatile unsigned int* dest);
 
-  static intptr_t xchg_ptr(intptr_t exchange_value, volatile intptr_t* dest);
-  static void*    xchg_ptr(void*    exchange_value, volatile void*   dest);
+  inline static intptr_t xchg_ptr(intptr_t exchange_value, volatile intptr_t* dest);
+  inline static void*    xchg_ptr(void*    exchange_value, volatile void*   dest);
 
   // Performs atomic compare of *dest and compare_value, and exchanges *dest with exchange_value
   // if the comparison succeeded.  Returns prior value of *dest.  Guarantees a two-way memory
   // barrier across the cmpxchg.  I.e., it's really a 'fence_cmpxchg_acquire'.
-  static jbyte    cmpxchg    (jbyte    exchange_value, volatile jbyte*    dest, jbyte    compare_value);
-  static jint     cmpxchg    (jint     exchange_value, volatile jint*     dest, jint     compare_value);
+         static jbyte    cmpxchg    (jbyte    exchange_value, volatile jbyte*    dest, jbyte    compare_value);
+  inline static jint     cmpxchg    (jint     exchange_value, volatile jint*     dest, jint     compare_value);
   // See comment above about using jlong atomics on 32-bit platforms
-  static jlong    cmpxchg    (jlong    exchange_value, volatile jlong*    dest, jlong    compare_value);
+  inline static jlong    cmpxchg    (jlong    exchange_value, volatile jlong*    dest, jlong    compare_value);
 
-  static unsigned int cmpxchg(unsigned int exchange_value,
-                              volatile unsigned int* dest,
-                              unsigned int compare_value);
+         static unsigned int cmpxchg(unsigned int exchange_value,
+                                     volatile unsigned int* dest,
+                                     unsigned int compare_value);
 
-  static intptr_t cmpxchg_ptr(intptr_t exchange_value, volatile intptr_t* dest, intptr_t compare_value);
-  static void*    cmpxchg_ptr(void*    exchange_value, volatile void*     dest, void*    compare_value);
+  inline static intptr_t cmpxchg_ptr(intptr_t exchange_value, volatile intptr_t* dest, intptr_t compare_value);
+  inline static void*    cmpxchg_ptr(void*    exchange_value, volatile void*     dest, void*    compare_value);
 };
+
+// To use Atomic::inc(jshort* dest) and Atomic::dec(jshort* dest), the address must be specially
+// aligned, such that (*dest) occupies the upper 16 bits of an aligned 32-bit word. The best way to
+// achieve is to place your short value next to another short value, which doesn't need atomic ops.
+//
+// Example
+//  ATOMIC_SHORT_PAIR(
+//    volatile short _refcount,  // needs atomic operation
+//    unsigned short _length     // number of UTF8 characters in the symbol (does not need atomic op)
+//  );
+
+#ifdef VM_LITTLE_ENDIAN
+#define ATOMIC_SHORT_PAIR(atomic_decl, non_atomic_decl) \
+    non_atomic_decl; \
+    atomic_decl
+#else
+#define ATOMIC_SHORT_PAIR(atomic_decl, non_atomic_decl) \
+    atomic_decl ; \
+    non_atomic_decl
+#endif
 
 #endif // SHARE_VM_RUNTIME_ATOMIC_HPP

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2009, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,6 @@ BUILDDIR = ../../../..
 PACKAGE = com.sun.nio.sctp
 LIBRARY = sctp
 PRODUCT = sun
-#OTHER_JAVACFLAGS += -Xmaxwarns 1000 -Xlint
 include $(BUILDDIR)/common/Defs.gmk
 
 #
@@ -48,14 +47,16 @@ include $(BUILDDIR)/common/Library.gmk
 #
 # Find platform-specific C source files
 #
-vpath %.c $(PLATFORM_SRC)/native/sun/nio/ch
+vpath %.c $(PLATFORM_SRC)/native/sun/nio/ch/sctp
 
 #
 # Include nio.h, net_util.h, sun_nio_ch_IOStatus.h, etc
 #
 OTHER_INCLUDES += \
   -I$(SHARE_SRC)/native/sun/nio/ch \
+  -I$(SHARE_SRC)/native/sun/nio/ch/sctp \
   -I$(SHARE_SRC)/native/java/net \
+  -I$(PLATFORM_SRC)/native/sun/nio/ch \
   -I$(PLATFORM_SRC)/native/java/net \
   -I$(CLASSHDRDIR)/../../../../java/java.nio/nio/CClassHeaders
 
@@ -76,5 +77,5 @@ endif # ifneq windows
 
 clean clobber::
 	$(RM) -r $(CLASSDESTDIR)/com/sun/nio/sctp
-	$(RM) -r $(CLASSDESTDIR)/sun/nio/ch
+	$(RM) -r $(CLASSDESTDIR)/sun/nio/ch/sctp
 

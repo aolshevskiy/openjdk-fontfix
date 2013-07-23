@@ -478,9 +478,11 @@ CreateExecutionEnvironment(int *pargc, char ***pargv,
         JLI_TraceLauncher("mustsetenv: %s\n", mustsetenv ? "TRUE" : "FALSE");
 
         if (mustsetenv == JNI_FALSE) {
+            JLI_MemFree(newargv);
             return;
         }
 #else
+        JLI_MemFree(newargv);
         return;
 #endif /* SETENV_REQUIRED */
       } else {  /* do the same speculatively or exit */
@@ -647,9 +649,9 @@ CreateExecutionEnvironment(int *pargc, char ***pargv,
                         && (dmpath == NULL) /* data model specific variables not set  */
 #endif /* __solaris__ */
                         ) {
-
+                    JLI_MemFree(newargv);
+                    JLI_MemFree(new_runpath);
                     return;
-
                 }
             }
 
@@ -933,7 +935,7 @@ SetExecname(char **argv)
         char buf[PATH_MAX+1];
         int len = readlink(self, buf, PATH_MAX);
         if (len >= 0) {
-            buf[len] = '\0';            /* readlink doesn't nul terminate */
+            buf[len] = '\0';            /* readlink(2) doesn't NUL terminate */
             exec_path = JLI_StringDup(buf);
         }
     }
@@ -981,18 +983,7 @@ void SplashFreeLibrary() {
 int
 ContinueInNewThread0(int (JNICALL *continuation)(void *), jlong stack_size, void * args) {
     int rslt;
-#ifdef __solaris__
-    thread_t tid;
-    long flags = 0;
-    if (thr_create(NULL, stack_size, (void *(*)(void *))continuation, args, flags, &tid) == 0) {
-      void * tmp;
-      thr_join(tid, NULL, &tmp);
-      rslt = (int)tmp;
-    } else {
-      /* See below. Continue in current thread if thr_create() failed */
-      rslt = continuation(args);
-    }
-#else /* ! __solaris__ */
+#ifdef __linux__
     pthread_t tid;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
@@ -1017,7 +1008,18 @@ ContinueInNewThread0(int (JNICALL *continuation)(void *), jlong stack_size, void
     }
 
     pthread_attr_destroy(&attr);
-#endif /* __solaris__ */
+#else /* ! __linux__ */
+    thread_t tid;
+    long flags = 0;
+    if (thr_create(NULL, stack_size, (void *(*)(void *))continuation, args, flags, &tid) == 0) {
+      void * tmp;
+      thr_join(tid, NULL, &tmp);
+      rslt = (int)tmp;
+    } else {
+      /* See above. Continue in current thread if thr_create() failed */
+      rslt = continuation(args);
+    }
+#endif /* __linux__ */
     return rslt;
 }
 

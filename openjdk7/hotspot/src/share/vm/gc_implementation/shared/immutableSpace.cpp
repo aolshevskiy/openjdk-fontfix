@@ -23,11 +23,12 @@
  */
 
 #include "precompiled.hpp"
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/shared/immutableSpace.hpp"
 #include "memory/universe.hpp"
 #include "oops/oop.inline.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 void ImmutableSpace::initialize(MemRegion mr) {
   HeapWord* bottom = mr.start();
@@ -40,7 +41,7 @@ void ImmutableSpace::initialize(MemRegion mr) {
   _end = end;
 }
 
-void ImmutableSpace::oop_iterate(OopClosure* cl) {
+void ImmutableSpace::oop_iterate(ExtendedOopClosure* cl) {
   HeapWord* obj_addr = bottom();
   HeapWord* t = end();
   // Could call objects iterate, but this is easier.

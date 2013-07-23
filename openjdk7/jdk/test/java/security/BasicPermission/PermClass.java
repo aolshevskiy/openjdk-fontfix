@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -57,7 +57,7 @@ public class PermClass {
         File sFile = new File(dir, "PermClass.1.2.1");
         try (FileInputStream fis = new FileInputStream(sFile);
                 ObjectInputStream ois = new ObjectInputStream(fis)) {
-            PermissionCollection pc = (PermissionCollection) ois.readObject();
+            PermissionCollection pc = (PermissionCollection)ois.readObject();
             System.out.println("1.2.1 collection = " + pc);
 
             if (pc.implies(mp)) {

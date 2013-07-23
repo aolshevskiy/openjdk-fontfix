@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,9 +26,10 @@
 #define SHARE_VM_MEMORY_SPECIALIZED_OOP_CLOSURES_HPP
 
 #include "runtime/atomic.hpp"
-#ifndef SERIALGC
+#include "utilities/macros.hpp"
+#if INCLUDE_ALL_GCS
 #include "gc_implementation/g1/g1_specialized_oop_closures.hpp"
-#endif
+#endif // INCLUDE_ALL_GCS
 
 // The following OopClosure types get specialized versions of
 // "oop_oop_iterate" that invoke the closures' do_oop methods
@@ -54,6 +55,8 @@ class PushOrMarkClosure;
 class Par_PushOrMarkClosure;
 class CMSKeepAliveClosure;
 class CMSInnerParMarkAndPushClosure;
+// Misc
+class NoHeaderExtendedOopClosure;
 
 // This macro applies an argument macro to all OopClosures for which we
 // want specialized bodies of "oop_oop_iterate".  The arguments to "f" are:
@@ -78,19 +81,20 @@ class CMSInnerParMarkAndPushClosure;
   f(FastScanClosure,_nv)                                \
   f(FilteringClosure,_nv)
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #define SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_P(f)       \
   f(ParScanWithBarrierClosure,_nv)                      \
   f(ParScanWithoutBarrierClosure,_nv)
-#else  // SERIALGC
+#else  // INCLUDE_ALL_GCS
 #define SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_P(f)
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
 #define SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_1(f)       \
+  f(NoHeaderExtendedOopClosure,_nv)                     \
   SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_S(f)             \
   SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_P(f)
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #define SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_2(f)       \
   f(MarkRefsIntoAndScanClosure,_nv)                     \
   f(Par_MarkRefsIntoAndScanClosure,_nv)                 \
@@ -101,9 +105,9 @@ class CMSInnerParMarkAndPushClosure;
   f(CMSKeepAliveClosure,_nv)                            \
   f(CMSInnerParMarkAndPushClosure,_nv)                  \
   FURTHER_SPECIALIZED_OOP_OOP_ITERATE_CLOSURES(f)
-#else  // SERIALGC
+#else  // INCLUDE_ALL_GCS
 #define SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_2(f)
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
 
 // We separate these out, because sometime the general one has
@@ -111,13 +115,13 @@ class CMSInnerParMarkAndPushClosure;
 // doesn't.
 
 #define ALL_OOP_OOP_ITERATE_CLOSURES_1(f)               \
-  f(OopClosure,_v)                                      \
+  f(ExtendedOopClosure,_v)                              \
   SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_1(f)
 
 #define ALL_OOP_OOP_ITERATE_CLOSURES_2(f)               \
   SPECIALIZED_OOP_OOP_ITERATE_CLOSURES_2(f)
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 // This macro applies an argument macro to all OopClosures for which we
 // want specialized bodies of a family of methods related to
 // "par_oop_iterate".  The arguments to f are the same as above.
@@ -131,9 +135,9 @@ class CMSInnerParMarkAndPushClosure;
   f(Par_PushAndMarkClosure,_nv)
 
 #define ALL_PAR_OOP_ITERATE_CLOSURES(f)                \
-  f(OopClosure,_v)                                     \
+  f(ExtendedOopClosure,_v)                             \
   SPECIALIZED_PAR_OOP_ITERATE_CLOSURES(f)
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
 // This macro applies an argument macro to all OopClosures for which we
 // want specialized bodies of a family of methods related to
@@ -152,14 +156,14 @@ class CMSInnerParMarkAndPushClosure;
   f(ScanClosure,_nv)                                     \
   f(FastScanClosure,_nv)
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
 #define SPECIALIZED_SINCE_SAVE_MARKS_CLOSURES_YOUNG_P(f) \
   f(ParScanWithBarrierClosure,_nv)                       \
   f(ParScanWithoutBarrierClosure,_nv)                    \
   FURTHER_SPECIALIZED_SINCE_SAVE_MARKS_CLOSURES(f)
-#else  // SERIALGC
+#else  // INCLUDE_ALL_GCS
 #define SPECIALIZED_SINCE_SAVE_MARKS_CLOSURES_YOUNG_P(f)
-#endif // SERIALGC
+#endif // INCLUDE_ALL_GCS
 
 #define SPECIALIZED_SINCE_SAVE_MARKS_CLOSURES_YOUNG(f)  \
   SPECIALIZED_SINCE_SAVE_MARKS_CLOSURES_YOUNG_S(f)      \
@@ -195,9 +199,9 @@ class CMSInnerParMarkAndPushClosure;
 class SpecializationStats {
 public:
   enum Kind {
-    ik,             // instanceKlass
-    irk,            // instanceRefKlass
-    oa,             // objArrayKlass
+    ik,             // InstanceKlass
+    irk,            // InstanceRefKlass
+    oa,             // ObjArrayKlass
     NUM_Kinds
   };
 

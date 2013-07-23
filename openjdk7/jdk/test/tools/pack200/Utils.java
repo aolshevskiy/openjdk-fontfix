@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -45,6 +46,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import static java.nio.file.StandardCopyOption.*;
+import static java.nio.file.StandardOpenOption.*;
 
 /**
  *
@@ -70,8 +72,10 @@ class Utils {
     static final String JAR_FILE_EXT    = ".jar";
 
     static final File   TEST_SRC_DIR = new File(System.getProperty("test.src"));
+    static final File   TEST_CLS_DIR = new File(System.getProperty("test.classes"));
     static final String VERIFIER_DIR_NAME = "pack200-verifier";
     static final File   VerifierJar = new File(VERIFIER_DIR_NAME + JAR_FILE_EXT);
+    static final File   XCLASSES = new File("xclasses");
 
     private Utils() {} // all static
 
@@ -86,10 +90,13 @@ class Utils {
             return;
         }
         File srcDir = new File(TEST_SRC_DIR, VERIFIER_DIR_NAME);
+        if (!srcDir.exists()) {
+            // if not available try one level above
+            srcDir = new File(TEST_SRC_DIR.getParentFile(), VERIFIER_DIR_NAME);
+        }
         List<File> javaFileList = findFiles(srcDir, createFilter(JAVA_FILE_EXT));
         File tmpFile = File.createTempFile("javac", ".tmp");
-        File classesDir = new File("xclasses");
-        classesDir.mkdirs();
+        XCLASSES.mkdirs();
         FileOutputStream fos = null;
         PrintStream ps = null;
         try {
@@ -104,14 +111,14 @@ class Utils {
         }
 
         compiler("-d",
-                "xclasses",
+                XCLASSES.getName(),
                 "@" + tmpFile.getAbsolutePath());
 
         jar("cvfe",
             VerifierJar.getName(),
             "sun.tools.pack.verify.Main",
             "-C",
-            "xclasses",
+            XCLASSES.getName(),
             ".");
     }
 
@@ -129,8 +136,10 @@ class Utils {
         init();
         List<String> cmds = new ArrayList<String>();
         cmds.add(getJavaCmd());
-        cmds.add("-jar");
-        cmds.add(VerifierJar.getName());
+        cmds.add("-cp");
+        cmds.add(Utils.locateJar("tools.jar") +
+                System.getProperty("path.separator") + VerifierJar.getName());
+        cmds.add("sun.tools.pack.verify.Main");
         cmds.add(reference.getAbsolutePath());
         cmds.add(specimen.getAbsolutePath());
         cmds.add("-O");
@@ -142,8 +151,10 @@ class Utils {
         init();
         List<String> cmds = new ArrayList<String>();
         cmds.add(getJavaCmd());
-        cmds.add("-jar");
-        cmds.add(VerifierJar.getName());
+        cmds.add("-cp");
+        cmds.add(Utils.locateJar("tools.jar")
+                + System.getProperty("path.separator") + VerifierJar.getName());
+        cmds.add("sun.tools.pack.verify.Main");
         cmds.add(reference.getName());
         cmds.add(specimen.getName());
         cmds.add("-O");
@@ -162,6 +173,33 @@ class Utils {
                 return false;
             }
         };
+    }
+
+    /*
+     * clean up all the usual suspects
+     */
+    static void cleanup() throws IOException {
+        recursiveDelete(XCLASSES);
+        List<File> toDelete = new ArrayList<>();
+        toDelete.addAll(Utils.findFiles(new File("."),
+                Utils.createFilter(".out")));
+        toDelete.addAll(Utils.findFiles(new File("."),
+                Utils.createFilter(".bak")));
+        toDelete.addAll(Utils.findFiles(new File("."),
+                Utils.createFilter(".jar")));
+        toDelete.addAll(Utils.findFiles(new File("."),
+                Utils.createFilter(".pack")));
+        toDelete.addAll(Utils.findFiles(new File("."),
+                Utils.createFilter(".bnd")));
+        toDelete.addAll(Utils.findFiles(new File("."),
+                Utils.createFilter(".txt")));
+        toDelete.addAll(Utils.findFiles(new File("."),
+                Utils.createFilter(".idx")));
+        toDelete.addAll(Utils.findFiles(new File("."),
+                Utils.createFilter(".gidx")));
+        for (File f : toDelete) {
+            f.delete();
+        }
     }
 
     static final FileFilter DIR_FILTER = new FileFilter() {
@@ -188,6 +226,9 @@ class Utils {
             Files.createDirectories(parent);
         }
         Files.copy(src.toPath(), dst.toPath(), COPY_ATTRIBUTES, REPLACE_EXISTING);
+        if (dst.isDirectory() && !dst.canWrite()) {
+            dst.setWritable(true);
+        }
     }
 
     static String baseName(File file, String extension) {
@@ -200,6 +241,10 @@ class Utils {
                 ? name.substring(0, cut)
                 : name;
 
+    }
+   static void createFile(File outFile, List<String> content) throws IOException {
+        Files.write(outFile.getAbsoluteFile().toPath(), content,
+                Charset.defaultCharset(), CREATE_NEW, TRUNCATE_EXISTING);
     }
 
     /*
@@ -309,6 +354,41 @@ class Utils {
         if (!jarTool.run(jargs)) {
             throw new RuntimeException("jar command failed");
         }
+    }
+
+    static void testWithRepack(File inFile, String... repackOpts) throws IOException {
+        File cwd = new File(".");
+        // pack using --repack in native mode
+        File nativejarFile = new File(cwd, "out-n" + Utils.JAR_FILE_EXT);
+        repack(inFile, nativejarFile, false, repackOpts);
+        doCompareVerify(inFile, nativejarFile);
+
+        // ensure bit compatibility between the unpacker variants
+        File javajarFile = new File(cwd, "out-j" + Utils.JAR_FILE_EXT);
+        repack(inFile, javajarFile, true, repackOpts);
+        doCompareBitWise(javajarFile, nativejarFile);
+    }
+
+    static List<String> repack(File inFile, File outFile,
+            boolean disableNative, String... extraOpts) {
+        List<String> cmdList = new ArrayList<>();
+        cmdList.clear();
+        cmdList.add(Utils.getJavaCmd());
+        cmdList.add("-ea");
+        cmdList.add("-esa");
+        if (disableNative) {
+            cmdList.add("-Dcom.sun.java.util.jar.pack.disable.native=true");
+        }
+        cmdList.add("com.sun.java.util.jar.pack.Driver");
+        cmdList.add("--repack");
+        if (extraOpts != null) {
+           for (String opt: extraOpts) {
+               cmdList.add(opt);
+           }
+        }
+        cmdList.add(outFile.getName());
+        cmdList.add(inFile.getName());
+        return Utils.runExec(cmdList);
     }
 
     // given a jar file foo.jar will write to foo.pack

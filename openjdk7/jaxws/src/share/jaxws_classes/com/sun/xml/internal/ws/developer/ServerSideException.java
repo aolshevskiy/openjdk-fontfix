@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,6 +42,12 @@ public class ServerSideException extends Exception {
     public ServerSideException(String className, String message) {
         super(message);
         this.className = className;
+    }
+
+    public String getMessage() {
+        return "Client received an exception from server: "
+                + super.getMessage()
+                + " Please see the server log to find more detail regarding exact cause of the failure.";
     }
 
     public String toString() {

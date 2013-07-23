@@ -27,19 +27,7 @@
 #include "gc_implementation/g1/heapRegion.hpp"
 #include "gc_implementation/g1/satbQueue.hpp"
 #include "runtime/mutexLocker.hpp"
-#include "runtime/thread.hpp"
-#ifdef TARGET_OS_FAMILY_linux
-# include "thread_linux.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_solaris
-# include "thread_solaris.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_windows
-# include "thread_windows.inline.hpp"
-#endif
-#ifdef TARGET_OS_FAMILY_bsd
-# include "thread_bsd.inline.hpp"
-#endif
+#include "runtime/thread.inline.hpp"
 
 G1SATBCardTableModRefBS::G1SATBCardTableModRefBS(MemRegion whole_heap,
                                                  int max_covered_regions) :
@@ -59,7 +47,7 @@ void G1SATBCardTableModRefBS::enqueue(oop pre_val) {
     JavaThread* jt = (JavaThread*)thr;
     jt->satb_mark_queue().enqueue(pre_val);
   } else {
-    MutexLocker x(Shared_SATB_Q_lock);
+    MutexLockerEx x(Shared_SATB_Q_lock, Mutex::_no_safepoint_check_flag);
     JavaThread::satb_mark_queue_set().shared_satb_queue()->enqueue(pre_val);
   }
 }

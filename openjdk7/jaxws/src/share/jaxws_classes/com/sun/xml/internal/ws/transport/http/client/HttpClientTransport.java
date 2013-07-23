@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -56,11 +56,10 @@ import java.util.zip.GZIPOutputStream;
 import java.util.zip.GZIPInputStream;
 
 /**
- * TODO: this class seems to be pointless. Just merge it with {@link HttpTransportPipe}.
  *
  * @author WS Development Team
  */
-final class HttpClientTransport {
+public class HttpClientTransport {
 
     private static final byte[] THROW_AWAY_BUFFER = new byte[8192];
 
@@ -197,17 +196,14 @@ final class HttpClientTransport {
         }
     }
 
-    private void createHttpConnection() throws IOException {
+    protected HttpURLConnection openConnection(Packet packet) {
+        // default do nothing
+        return null;
+    }
 
-        httpConnection = (HttpURLConnection) endpoint.openConnection();
-        String scheme = endpoint.getURI().getScheme();
-        if (scheme.equals("https")) {
-            https = true;
-        }
-        if (httpConnection instanceof HttpsURLConnection) {
-            https = true;
+    protected boolean checkHTTPS(HttpURLConnection connection) {
+        if (connection instanceof HttpsURLConnection) {
 
-            boolean verification = false;
             // TODO The above property needs to be removed in future version as the semantics of this property are not preoperly defined.
             // One should use JAXWSProperties.HOSTNAME_VERIFIER to control the behavior
 
@@ -215,29 +211,42 @@ final class HttpClientTransport {
             String verificationProperty =
                 (String) context.invocationProperties.get(HOSTNAME_VERIFICATION_PROPERTY);
             if (verificationProperty != null) {
-                if (verificationProperty.equalsIgnoreCase("true"))
-                    verification = true;
-            }
-            // By default, JAX-WS should not disable any host verification.
-            if (verification) {
-                ((HttpsURLConnection) httpConnection).setHostnameVerifier(new HttpClientVerifier());
+                if (verificationProperty.equalsIgnoreCase("true")) {
+                    ((HttpsURLConnection) connection).setHostnameVerifier(new HttpClientVerifier());
+                }
             }
 
             // Set application's HostNameVerifier for this connection
             HostnameVerifier verifier =
                 (HostnameVerifier) context.invocationProperties.get(JAXWSProperties.HOSTNAME_VERIFIER);
             if (verifier != null) {
-                ((HttpsURLConnection) httpConnection).setHostnameVerifier(verifier);
+                ((HttpsURLConnection) connection).setHostnameVerifier(verifier);
             }
 
             // Set application's SocketFactory for this connection
             SSLSocketFactory sslSocketFactory =
                 (SSLSocketFactory) context.invocationProperties.get(JAXWSProperties.SSL_SOCKET_FACTORY);
             if (sslSocketFactory != null) {
-                ((HttpsURLConnection) httpConnection).setSSLSocketFactory(sslSocketFactory);
+                ((HttpsURLConnection) connection).setSSLSocketFactory(sslSocketFactory);
             }
 
+            return true;
         }
+        return false;
+    }
+
+    private void createHttpConnection() throws IOException {
+        httpConnection = openConnection(context);
+
+        if (httpConnection == null)
+                httpConnection = (HttpURLConnection) endpoint.openConnection();
+
+        String scheme = endpoint.getURI().getScheme();
+        if (scheme.equals("https")) {
+            https = true;
+        }
+        if (checkHTTPS(httpConnection))
+                https = true;
 
         // allow interaction with the web page - user may have to supply
         // username, password id web page is accessed from web browser
@@ -277,14 +286,19 @@ final class HttpClientTransport {
 
         // set the properties on HttpURLConnection
         for (Map.Entry<String, List<String>> entry : reqHeaders.entrySet()) {
-            for(String value : entry.getValue()) {
-                httpConnection.addRequestProperty(entry.getKey(), value);
-            }
+            if ("Content-Length".equals(entry.getKey())) continue;
+                for(String value : entry.getValue()) {
+                    httpConnection.addRequestProperty(entry.getKey(), value);
+                }
         }
     }
 
     boolean isSecure() {
         return https;
+    }
+
+    protected void setStatusCode(int statusCode) {
+        this.statusCode = statusCode;
     }
 
     private boolean requiresOutputStream() {
@@ -297,11 +311,21 @@ final class HttpClientTransport {
         return httpConnection.getContentType();
     }
 
+    public int getContentLength() {
+        return httpConnection.getContentLength();
+    }
+
     // overide default SSL HttpClientVerifier to always return true
     // effectively overiding Hostname client verification when using SSL
     private static class HttpClientVerifier implements HostnameVerifier {
         public boolean verify(String s, SSLSession sslSession) {
             return true;
+        }
+    }
+
+    private static class LocalhostHttpClientVerifier implements HostnameVerifier {
+        public boolean verify(String s, SSLSession sslSession) {
+            return "localhost".equalsIgnoreCase(s) || "127.0.0.1".equals(s);
         }
     }
 

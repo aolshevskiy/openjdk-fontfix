@@ -149,7 +149,7 @@ final class ClassLoaderObjectInputStream extends ObjectInputStream {
     private final Map<Set<String>, ClassLoader> map;
 
     ClassLoaderObjectInputStream(InputStream is,
-                                        Map<Set<String>, ClassLoader> map)
+                                 Map<Set<String>, ClassLoader> map)
       throws IOException {
         super(is);
         if (map == null) {

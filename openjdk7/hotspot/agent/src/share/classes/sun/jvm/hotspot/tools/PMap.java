@@ -31,6 +31,15 @@ import sun.jvm.hotspot.debugger.cdbg.*;
 import sun.jvm.hotspot.runtime.*;
 
 public class PMap extends Tool {
+
+   public PMap() {
+       super();
+   }
+
+   public PMap(JVMDebugger d) {
+       super(d);
+   }
+
    public void run() {
       run(System.out);
    }
@@ -56,10 +65,6 @@ public class PMap extends Tool {
               out.println("not yet implemented (debugger does not support CDebugger)!");
           }
       }
-   }
-
-   protected boolean requiresVM() {
-      return false;
    }
 
    public static void main(String[] args) throws Exception {

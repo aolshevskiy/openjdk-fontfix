@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -392,7 +392,7 @@ int SolarisAttachListener::create_door() {
     return -1;
   }
   assert(fd >= 0, "bad file descriptor");
-  RESTARTABLE(::close(fd), res);
+  ::close(fd);
 
   // attach the door descriptor to the file
   if ((res = ::fattach(dd, initial_path)) == -1) {
@@ -410,7 +410,7 @@ int SolarisAttachListener::create_door() {
   // rename file so that clients can attach
   if (dd >= 0) {
     if (::rename(initial_path, door_path) == -1) {
-        RESTARTABLE(::close(dd), res);
+        ::close(dd);
         ::fdetach(initial_path);
         dd = -1;
     }
@@ -549,7 +549,7 @@ void SolarisAttachOperation::complete(jint res, bufferedStream* st) {
     }
 
     // close socket and we're done
-    RESTARTABLE(::close(this->socket()), rc);
+    ::close(this->socket());
 
     // were we externally suspended while we were waiting?
     thread->check_and_wait_while_suspended();

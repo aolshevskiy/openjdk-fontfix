@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
 package com.sun.xml.internal.ws.streaming;
 
 import com.sun.istack.internal.Nullable;
+import com.sun.xml.internal.ws.encoding.HasEncoding;
+import com.sun.xml.internal.ws.encoding.SOAPBindingCodec;
 
 import javax.xml.namespace.QName;
 import javax.xml.stream.XMLStreamWriter;
@@ -89,6 +91,23 @@ public class XMLStreamWriterUtil {
         return null;
     }
 
+    /**
+     * Gives the encoding with which XMLStreamWriter is created.
+     *
+     * @param writer XMLStreamWriter for which encoding is required
+     * @return null if cannot be found, else the encoding
+     */
+    public static @Nullable String getEncoding(XMLStreamWriter writer) {
+        /*
+         * TODO Add reflection logic to handle woodstox writer
+         * as it implements XMLStreamWriter2#getEncoding()
+         * It's not that important since woodstox writer is typically wrapped
+         * in a writer with HasEncoding
+         */
+        return (writer instanceof HasEncoding)
+                ? ((HasEncoding)writer).getEncoding()
+                : null;
+    }
 
     public static String encodeQName(XMLStreamWriter writer, QName qname,
         PrefixFactory prefixFactory)

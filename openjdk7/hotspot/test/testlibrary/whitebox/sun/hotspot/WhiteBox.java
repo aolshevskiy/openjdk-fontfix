@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2013 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,6 +23,8 @@
  */
 
 package sun.hotspot;
+
+import java.lang.reflect.Executable;
 import java.security.BasicPermission;
 import sun.hotspot.parser.DiagnosticCommand;
 
@@ -59,9 +61,19 @@ public class WhiteBox {
     registerNatives();
   }
 
+  // Arguments
+  public native void printHeapSizes();
+
   // Memory
   public native long getObjectAddress(Object o);
   public native int  getHeapOopSize();
+
+  // Runtime
+  // Make sure class name is in the correct format
+  public boolean isClassAlive(String name) {
+    return isClassAlive0(name.replace('.', '/'));
+  }
+  private native boolean isClassAlive0(String name);
 
   // G1
   public native boolean g1InConcurrentMark();
@@ -78,4 +90,33 @@ public class WhiteBox {
   public native void NMTUncommitMemory(long addr, long size);
   public native void NMTReleaseMemory(long addr, long size);
   public native boolean NMTWaitForDataMerge();
+
+  // Compiler
+  public native void    deoptimizeAll();
+  public native boolean isMethodCompiled(Executable method);
+  public boolean isMethodCompilable(Executable method) {
+      return isMethodCompilable(method, -1 /*any*/);
+  }
+  public native boolean isMethodCompilable(Executable method, int compLevel);
+  public native boolean isMethodQueuedForCompilation(Executable method);
+  public native int     deoptimizeMethod(Executable method);
+  public void makeMethodNotCompilable(Executable method) {
+      makeMethodNotCompilable(method, -1 /*any*/);
+  }
+  public native void    makeMethodNotCompilable(Executable method, int compLevel);
+  public native int     getMethodCompilationLevel(Executable method);
+  public native boolean testSetDontInlineMethod(Executable method, boolean value);
+  public native int     getCompileQueuesSize();
+  public native boolean testSetForceInlineMethod(Executable method, boolean value);
+  public native boolean enqueueMethodForCompilation(Executable method, int compLevel);
+  public native void    clearMethodState(Executable method);
+
+  // Intered strings
+  public native boolean isInStringTable(String str);
+
+  // Memory
+  public native void readReservedMemory();
+
+  // force Full GC
+  public native void fullGC();
 }

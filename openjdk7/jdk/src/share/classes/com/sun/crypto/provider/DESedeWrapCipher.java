@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,7 +25,6 @@
 
 package com.sun.crypto.provider;
 
-import java.util.Arrays;
 import java.security.*;
 import java.security.spec.*;
 import javax.crypto.*;
@@ -151,7 +150,7 @@ public final class DESedeWrapCipher extends CipherSpi {
      * been set.
      */
     protected byte[] engineGetIV() {
-        return (iv == null? null:(byte[]) iv.clone());
+        return (iv == null) ? null : iv.clone();
     }
 
     /**
@@ -218,7 +217,7 @@ public final class DESedeWrapCipher extends CipherSpi {
             if (params == null) {
                 iv = new byte[8];
                 if (random == null) {
-                    random = SunJCE.RANDOM;
+                    random = SunJCE.getRandom();
                 }
                 random.nextBytes(iv);
             }
@@ -277,8 +276,7 @@ public final class DESedeWrapCipher extends CipherSpi {
             try {
                 DESedeParameters paramsEng = new DESedeParameters();
                 paramsEng.engineInit(params.getEncoded());
-                ivSpec = (IvParameterSpec)
-                    paramsEng.engineGetParameterSpec(IvParameterSpec.class);
+                ivSpec = paramsEng.engineGetParameterSpec(IvParameterSpec.class);
             } catch (Exception ex) {
                 InvalidAlgorithmParameterException iape =
                     new InvalidAlgorithmParameterException
@@ -391,17 +389,13 @@ public final class DESedeWrapCipher extends CipherSpi {
         if (iv != null) {
             String algo = cipherKey.getAlgorithm();
             try {
-                params = AlgorithmParameters.getInstance(algo, "SunJCE");
+                params = AlgorithmParameters.getInstance(algo,
+                    SunJCE.getInstance());
+                params.init(new IvParameterSpec(iv));
             } catch (NoSuchAlgorithmException nsae) {
                 // should never happen
                 throw new RuntimeException("Cannot find " + algo +
                     " AlgorithmParameters implementation in SunJCE provider");
-            } catch (NoSuchProviderException nspe) {
-                // should never happen
-                throw new RuntimeException("Cannot find SunJCE provider");
-            }
-            try {
-                params.init(new IvParameterSpec(iv));
             } catch (InvalidParameterSpecException ipse) {
                 // should never happen
                 throw new RuntimeException("IvParameterSpec not supported");

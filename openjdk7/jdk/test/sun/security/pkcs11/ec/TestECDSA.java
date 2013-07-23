@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2006, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -116,6 +116,10 @@ public class TestECDSA extends PKCS11Test {
             System.out.println("ECDSA not supported, skipping");
             return;
         }
+
+        /*
+         * PKCS11Test.main will remove this provider if needed
+         */
         Providers.setAt(provider, 1);
 
         if (false) {
@@ -137,7 +141,6 @@ public class TestECDSA extends PKCS11Test {
         test(provider, pub521, priv521, sig521);
         test(provider, pub571, priv571, sig571);
 
-        Security.removeProvider(provider.getName());
         long stop = System.currentTimeMillis();
         System.out.println("All tests passed (" + (stop - start) + " ms).");
     }
@@ -175,7 +178,6 @@ public class TestECDSA extends PKCS11Test {
         // sign random data using SHA1withECDSA and verify using
         // SHA1withECDSA and NONEwithECDSA
         Signature s = Signature.getInstance("SHA1withECDSA", provider);
-        s.initSign(privateKey);
         s.initSign(privateKey);
         s.update(data);
         byte[] s1 = s.sign();

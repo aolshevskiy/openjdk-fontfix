@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -128,15 +128,6 @@ import sun.net.www.MessageHeader;
  * <blockquote><pre>
  * <a href="http://www.ietf.org/rfc/rfc2616.txt">http://www.ietf.org/rfc/rfc2616.txt</a>
  * </pre></blockquote>
- *
- * Note about <code>fileNameMap</code>: In versions prior to JDK 1.1.6,
- * field <code>fileNameMap</code> of <code>URLConnection</code> was public.
- * In JDK 1.1.6 and later, <code>fileNameMap</code> is private; accessor
- * and mutator methods {@link #getFileNameMap() getFileNameMap} and
- * {@link #setFileNameMap(java.net.FileNameMap) setFileNameMap} are added
- * to access it.  This change is also described on the <a href=
- * "http://java.sun.com/products/jdk/1.2/compatibility.html">
- * Compatibility</a> page.
  *
  * Invoking the <tt>close()</tt> methods on the <tt>InputStream</tt> or <tt>OutputStream</tt> of an
  * <tt>URLConnection</tt> after a request may free network resources associated with this
@@ -305,8 +296,7 @@ public abstract class URLConnection {
      * Loads filename map (a mimetable) from a data file. It will
      * first try to load the user-specific table, defined
      * by &quot;content.types.user.table&quot; property. If that fails,
-     * it tries to load the default built-in table at
-     * lib/content-types.properties under java home.
+     * it tries to load the default built-in table.
      *
      * @return the FileNameMap
      * @since 1.2
@@ -595,7 +585,7 @@ public abstract class URLConnection {
      * @since 1.4
      */
     public Map<String,List<String>> getHeaderFields() {
-        return Collections.EMPTY_MAP;
+        return Collections.emptyMap();
     }
 
     /**
@@ -659,6 +649,7 @@ public abstract class URLConnection {
      *          <code>Default</code> argument is returned if the field is
      *          missing or malformed.
      */
+    @SuppressWarnings("deprecation")
     public long getHeaderFieldDate(String name, long Default) {
         String value = getHeaderField(name);
         try {
@@ -671,7 +662,7 @@ public abstract class URLConnection {
      * Returns the key for the <code>n</code><sup>th</sup> header field.
      * It returns <code>null</code> if there are fewer than <code>n+1</code> fields.
      *
-     * @param   n   an index, where n>=0
+     * @param   n   an index, where {@code n>=0}
      * @return  the key for the <code>n</code><sup>th</sup> header field,
      *          or <code>null</code> if there are fewer than <code>n+1</code>
      *          fields.
@@ -689,7 +680,7 @@ public abstract class URLConnection {
      * {@link #getHeaderFieldKey(int) getHeaderFieldKey} method to iterate through all
      * the headers in the message.
      *
-     * @param   n   an index, where n>=0
+     * @param   n   an index, where {@code n>=0}
      * @return  the value of the <code>n</code><sup>th</sup> header field
      *          or <code>null</code> if there are fewer than <code>n+1</code> fields
      * @see     java.net.URLConnection#getHeaderFieldKey(int)
@@ -1153,7 +1144,7 @@ public abstract class URLConnection {
             throw new IllegalStateException("Already connected");
 
         if (requests == null)
-            return Collections.EMPTY_MAP;
+            return Collections.emptyMap();
 
         return requests.getHeaders(null);
     }
@@ -1236,21 +1227,20 @@ public abstract class URLConnection {
         factory = fac;
     }
 
-    private static Hashtable handlers = new Hashtable();
+    private static Hashtable<String, ContentHandler> handlers = new Hashtable<>();
 
     /**
      * Gets the Content Handler appropriate for this connection.
-     * @param connection the connection to use.
      */
     synchronized ContentHandler getContentHandler()
-    throws UnknownServiceException
+        throws UnknownServiceException
     {
         String contentType = stripOffParameters(getContentType());
         ContentHandler handler = null;
         if (contentType == null)
             throw new UnknownServiceException("no content-type");
         try {
-            handler = (ContentHandler) handlers.get(contentType);
+            handler = handlers.get(contentType);
             if (handler != null)
                 return handler;
         } catch(Exception e) {
@@ -1316,7 +1306,7 @@ public abstract class URLConnection {
 
             try {
                 String clsName = packagePrefix + "." + contentHandlerClassName;
-                Class cls = null;
+                Class<?> cls = null;
                 try {
                     cls = Class.forName(clsName);
                 } catch (ClassNotFoundException e) {

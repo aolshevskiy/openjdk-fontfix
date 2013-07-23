@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,8 +37,13 @@ import com.sun.xml.internal.ws.message.jaxb.JAXBHeader;
 import com.sun.xml.internal.ws.message.saaj.SAAJHeader;
 import com.sun.xml.internal.ws.message.stream.StreamHeader11;
 import com.sun.xml.internal.ws.message.stream.StreamHeader12;
+import com.sun.xml.internal.ws.spi.db.BindingContext;
+import com.sun.xml.internal.ws.spi.db.BindingContextFactory;
+import com.sun.xml.internal.ws.spi.db.XMLBridge;
+
 import org.w3c.dom.Element;
 
+import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBElement;
 import javax.xml.bind.Marshaller;
 import javax.xml.namespace.QName;
@@ -72,16 +77,20 @@ public abstract class Headers {
 
     /**
      * @deprecated
-     *      Use {@link #create(JAXBRIContext, Object)} instead.
+     *      Use {@link #create(BindingContext, Object)} instead.
      */
     public static Header create(SOAPVersion soapVersion, Marshaller m, Object o) {
-        return new JAXBHeader(((MarshallerImpl)m).getContext(),o);
+        return new JAXBHeader(BindingContextFactory.getBindingContext(m),o);
     }
 
     /**
      * Creates a {@link Header} backed a by a JAXB bean.
      */
-    public static Header create(JAXBRIContext context, Object o) {
+    public static Header create(JAXBContext context, Object o) {
+        return new JAXBHeader(BindingContextFactory.create(context),o);
+    }
+
+    public static Header create(BindingContext context, Object o) {
         return new JAXBHeader(context,o);
     }
 
@@ -102,8 +111,13 @@ public abstract class Headers {
 
     /**
      * Creates a {@link Header} backed a by a JAXB bean.
+     * @deprecated
      */
     public static Header create(Bridge bridge, Object jaxbObject) {
+        return new JAXBHeader(new com.sun.xml.internal.ws.db.glassfish.BridgeWrapper(null,bridge), jaxbObject);
+    }
+
+    public static Header create(XMLBridge bridge, Object jaxbObject) {
         return new JAXBHeader(bridge, jaxbObject);
     }
 

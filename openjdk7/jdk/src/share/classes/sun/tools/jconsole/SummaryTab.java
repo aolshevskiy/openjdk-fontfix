@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2007, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -359,6 +359,8 @@ class SummaryTab extends Tab {
                 float cpuUsage =
                     Math.min(99F,
                              elapsedCpu / (elapsedTime * 10000F * result.nCPUs));
+
+                cpuUsage = Math.max(0F, cpuUsage);
 
                 getPlotter().addValues(result.timeStamp,
                                 Math.round(cpuUsage * Math.pow(10.0, CPU_DECIMALS)));

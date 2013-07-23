@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -33,7 +33,6 @@
 
 #include "java_net_SocketOptions.h"
 #include "java_net_TwoStacksPlainSocketImpl.h"
-#include "java_net_SocketImpl.h"
 #include "java_net_InetAddress.h"
 #include "java_io_FileDescriptor.h"
 #include "java_lang_Integer.h"
@@ -395,7 +394,8 @@ Java_java_net_TwoStacksPlainSocketImpl_socketConnect(JNIEnv *env, jobject this,
  */
 JNIEXPORT void JNICALL
 Java_java_net_TwoStacksPlainSocketImpl_socketBind(JNIEnv *env, jobject this,
-                                         jobject iaObj, jint localport) {
+                                         jobject iaObj, jint localport,
+                                         jboolean exclBind) {
 
     /* fdObj is the FileDescriptor field on this */
     jobject fdObj, fd1Obj;
@@ -439,13 +439,12 @@ Java_java_net_TwoStacksPlainSocketImpl_socketBind(JNIEnv *env, jobject this,
                           (struct sockaddr *)&him, &len, JNI_FALSE) != 0) {
       return;
     }
-
     if (ipv6_supported) {
         struct ipv6bind v6bind;
         v6bind.addr = &him;
         v6bind.ipv4_fd = fd;
         v6bind.ipv6_fd = fd1;
-        rv = NET_BindV6(&v6bind);
+        rv = NET_BindV6(&v6bind, exclBind);
         if (rv != -1) {
             /* check if the fds have changed */
             if (v6bind.ipv4_fd != fd) {
@@ -470,7 +469,7 @@ Java_java_net_TwoStacksPlainSocketImpl_socketBind(JNIEnv *env, jobject this,
             }
         }
     } else {
-        rv = NET_Bind(fd, (struct sockaddr *)&him, len);
+        rv = NET_WinBind(fd, (struct sockaddr *)&him, len, exclBind);
     }
 
     if (rv == -1) {
@@ -576,6 +575,7 @@ Java_java_net_TwoStacksPlainSocketImpl_socketAccept(JNIEnv *env, jobject this,
 {
     /* fields on this */
     jint port;
+    jint scope;
     jint timeout = (*env)->GetIntField(env, this, psi_timeoutID);
     jobject fdObj = (*env)->GetObjectField(env, this, psi_fdID);
     jobject fd1Obj = (*env)->GetObjectField(env, this, psi_fd1ID);
@@ -754,7 +754,11 @@ Java_java_net_TwoStacksPlainSocketImpl_socketAccept(JNIEnv *env, jobject this,
         addr = (*env)->GetObjectField (env, socketAddressObj, ia6_ipaddressID);
         (*env)->SetByteArrayRegion (env, addr, 0, 16, (const char *)&him.him6.sin6_addr);
         setInetAddress_family(env, socketAddressObj, IPv6);
-        (*env)->SetIntField(env, socketAddressObj, ia6_scopeidID, him.him6.sin6_scope_id);
+        scope = him.him6.sin6_scope_id;
+        (*env)->SetIntField(env, socketAddressObj, ia6_scopeidID, scope);
+        if(scope>0) {
+            (*env)->SetBooleanField(env, socketAddressObj, ia6_scopeidsetID, JNI_TRUE);
+        }
     }
     /* fields common to AF_INET and AF_INET6 */
 
@@ -831,11 +835,12 @@ Java_java_net_TwoStacksPlainSocketImpl_socketClose0(JNIEnv *env, jobject this,
  *
  *
  * Class:     java_net_TwoStacksPlainSocketImpl
- * Method:    socketSetOption
+ * Method:    socketNativeSetOption
  * Signature: (IZLjava/lang/Object;)V
  */
 JNIEXPORT void JNICALL
-Java_java_net_TwoStacksPlainSocketImpl_socketSetOption(JNIEnv *env, jobject this,
+Java_java_net_TwoStacksPlainSocketImpl_socketNativeSetOption(JNIEnv *env,
+                                              jobject this,
                                               jint cmd, jboolean on,
                                               jobject value) {
     int fd, fd1;

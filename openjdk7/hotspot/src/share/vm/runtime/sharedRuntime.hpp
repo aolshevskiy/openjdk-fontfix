@@ -32,6 +32,7 @@
 #include "memory/resourceArea.hpp"
 #include "runtime/threadLocalStorage.hpp"
 #include "utilities/hashtable.hpp"
+#include "utilities/macros.hpp"
 
 class AdapterHandlerEntry;
 class AdapterHandlerTable;
@@ -168,11 +169,11 @@ class SharedRuntime: AllStatic {
   static address raw_exception_handler_for_return_address(JavaThread* thread, address return_address);
   static address exception_handler_for_return_address(JavaThread* thread, address return_address);
 
-#ifndef SERIALGC
+#if INCLUDE_ALL_GCS
   // G1 write barriers
   static void g1_wb_pre(oopDesc* orig, JavaThread *thread);
   static void g1_wb_post(void* card_addr, JavaThread* thread);
-#endif // !SERIALGC
+#endif // INCLUDE_ALL_GCS
 
   // exception handling and implicit exceptions
   static address compute_compiled_exc_handler(nmethod* nm, address ret_pc, Handle& exception,
@@ -237,7 +238,7 @@ class SharedRuntime: AllStatic {
   static void throw_and_post_jvmti_exception(JavaThread *thread, Symbol* name, const char *message = NULL);
 
   // RedefineClasses() tracing support for obsolete method entry
-  static int rc_trace_method_entry(JavaThread* thread, methodOopDesc* m);
+  static int rc_trace_method_entry(JavaThread* thread, Method* m);
 
   // To be used as the entry point for unresolved native methods.
   static address native_method_throw_unsatisfied_link_error_entry();
@@ -256,8 +257,8 @@ class SharedRuntime: AllStatic {
   // dtrace notifications
   static int dtrace_object_alloc(oopDesc* o);
   static int dtrace_object_alloc_base(Thread* thread, oopDesc* o);
-  static int dtrace_method_entry(JavaThread* thread, methodOopDesc* m);
-  static int dtrace_method_exit(JavaThread* thread, methodOopDesc* m);
+  static int dtrace_method_entry(JavaThread* thread, Method* m);
+  static int dtrace_method_exit(JavaThread* thread, Method* m);
 
   // Utility method for retrieving the Java thread id, returns 0 if the
   // thread is not a well formed Java thread.
@@ -409,7 +410,7 @@ class SharedRuntime: AllStatic {
 
   // Convert a sig into a calling convention register layout
   // and find interesting things about it.
-  static VMRegPair* find_callee_arguments(Symbol* sig, bool has_receiver, int *arg_size);
+  static VMRegPair* find_callee_arguments(Symbol* sig, bool has_receiver, bool has_appendix, int *arg_size);
   static VMReg     name_for_receiver();
 
   // "Top of Stack" slots that may be unused by the calling convention but must
@@ -461,7 +462,7 @@ class SharedRuntime: AllStatic {
 
   // A compiled caller has just called the interpreter, but compiled code
   // exists.  Patch the caller so he no longer calls into the interpreter.
-  static void fixup_callers_callsite(methodOopDesc* moop, address ret_pc);
+  static void fixup_callers_callsite(Method* moop, address ret_pc);
 
   // Slow-path Locking and Unlocking
   static void complete_monitor_locking_C(oopDesc* obj, BasicLock* lock, JavaThread* thread);

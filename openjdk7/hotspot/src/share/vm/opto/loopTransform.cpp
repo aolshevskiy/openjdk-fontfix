@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -613,6 +613,7 @@ bool IdealLoopTree::policy_maximally_unroll( PhaseIdealLoop *phase ) const {
       case Op_StrComp:
       case Op_StrEquals:
       case Op_StrIndexOf:
+      case Op_EncodeISOArray:
       case Op_AryEq: {
         return false;
       }
@@ -717,6 +718,7 @@ bool IdealLoopTree::policy_unroll( PhaseIdealLoop *phase ) const {
       case Op_StrComp:
       case Op_StrEquals:
       case Op_StrIndexOf:
+      case Op_EncodeISOArray:
       case Op_AryEq: {
         // Do not unroll a loop with String intrinsics code.
         // String intrinsics are large and have loops.
@@ -886,6 +888,7 @@ void PhaseIdealLoop::insert_pre_post_loops( IdealLoopTree *loop, Node_List &old_
   CountedLoopNode *main_head = loop->_head->as_CountedLoop();
   assert( main_head->is_normal_loop(), "" );
   CountedLoopEndNode *main_end = main_head->loopexit();
+  guarantee(main_end != NULL, "no loop exit node");
   assert( main_end->outcnt() == 2, "1 true, 1 false path only" );
   uint dd_main_head = dom_depth(main_head);
   uint max = main_head->outcnt();
@@ -2413,7 +2416,7 @@ bool PhaseIdealLoop::match_fill_loop(IdealLoopTree* lpt, Node*& store, Node*& st
         break;
       }
       int opc = n->Opcode();
-      if (opc == Op_StoreP || opc == Op_StoreN || opc == Op_StoreCM) {
+      if (opc == Op_StoreP || opc == Op_StoreN || opc == Op_StoreNKlass || opc == Op_StoreCM) {
         msg = "oop fills not handled";
         break;
       }
@@ -2552,13 +2555,16 @@ bool PhaseIdealLoop::match_fill_loop(IdealLoopTree* lpt, Node*& store, Node*& st
   ok.set(store->_idx);
   ok.set(store->in(MemNode::Memory)->_idx);
 
+  CountedLoopEndNode* loop_exit = head->loopexit();
+  guarantee(loop_exit != NULL, "no loop exit node");
+
   // Loop structure is ok
   ok.set(head->_idx);
-  ok.set(head->loopexit()->_idx);
+  ok.set(loop_exit->_idx);
   ok.set(head->phi()->_idx);
   ok.set(head->incr()->_idx);
-  ok.set(head->loopexit()->cmp_node()->_idx);
-  ok.set(head->loopexit()->in(1)->_idx);
+  ok.set(loop_exit->cmp_node()->_idx);
+  ok.set(loop_exit->in(1)->_idx);
 
   // Address elements are ok
   if (con)   ok.set(con->_idx);
@@ -2570,7 +2576,7 @@ bool PhaseIdealLoop::match_fill_loop(IdealLoopTree* lpt, Node*& store, Node*& st
     if (n->outcnt() == 0) continue; // Ignore dead
     if (ok.test(n->_idx)) continue;
     // Backedge projection is ok
-    if (n->is_IfTrue() && n->in(0) == head->loopexit()) continue;
+    if (n->is_IfTrue() && n->in(0) == loop_exit) continue;
     if (!n->is_AddP()) {
       msg = "unhandled node";
       msg_node = n;
@@ -2583,7 +2589,7 @@ bool PhaseIdealLoop::match_fill_loop(IdealLoopTree* lpt, Node*& store, Node*& st
     Node* n = lpt->_body.at(i);
     // These values can be replaced with other nodes if they are used
     // outside the loop.
-    if (n == store || n == head->loopexit() || n == head->incr() || n == store->in(MemNode::Memory)) continue;
+    if (n == store || n == loop_exit || n == head->incr() || n == store->in(MemNode::Memory)) continue;
     for (SimpleDUIterator iter(n); iter.has_next(); iter.next()) {
       Node* use = iter.get();
       if (!lpt->_body.contains(use)) {

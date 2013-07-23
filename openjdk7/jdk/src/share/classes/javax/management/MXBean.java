@@ -54,9 +54,9 @@ import javax.management.openmbean.TabularType;
 /**
     <p>Annotation to mark an interface explicitly as being an MXBean
     interface, or as not being an MXBean interface.  By default, an
-    interface is an MXBean interface if its name ends with {@code
-    MXBean}, as in {@code SomethingMXBean}.  The following interfaces
-    are MXBean interfaces:</p>
+    interface is an MXBean interface if it is public and its name ends
+    with {@code MXBean}, as in {@code SomethingMXBean}.  The following
+    interfaces are MXBean interfaces:</p>
 
     <pre>
     public interface WhatsitMXBean {}
@@ -71,6 +71,8 @@ import javax.management.openmbean.TabularType;
     <p>The following interfaces are not MXBean interfaces:</p>
 
     <pre>
+    interface NonPublicInterfaceNotMXBean{}
+
     public interface Whatsit3Interface{}
 
     &#64;MXBean(false)
@@ -906,6 +908,14 @@ public interface ModuleMXBean {
 
       <li><p>Otherwise, <em>J</em> is not reconstructible.</p></li>
     </ol>
+
+    <p>Rule 2 is not applicable to subset Profiles of Java SE that do not
+    include the {@code java.beans} package. When targeting a runtime that does
+    not include the {@code java.beans} package, and where there is a mismatch
+    between the compile-time and runtime environment whereby <em>J</em> is
+    compiled with a public constructor and the {@code ConstructorProperties}
+    annotation, then <em>J</em> is not reconstructible unless another rule
+    applies.</p>
 
     <p>Here are examples showing different ways to code a type {@code
       NamedNumber} that consists of an {@code int} and a {@code

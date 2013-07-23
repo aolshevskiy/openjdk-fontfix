@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -31,7 +31,8 @@ BUILDDIR = ../..
 PACKAGE = java.nio
 LIBRARY = nio
 PRODUCT = java
-OTHER_JAVACFLAGS += -Xmaxwarns 1000 -Xlint:serial -Werror
+JAVAC_MAX_WARNINGS = true
+JAVAC_WARNINGS_FATAL = true
 include $(BUILDDIR)/common/Defs.gmk
 
 NIO_SRC = $(SHARE_SRC)/classes/java/nio
@@ -68,6 +69,7 @@ FILES_java += \
 	sun/nio/ch/UnixAsynchronousSocketChannelImpl.java \
 	\
 	sun/nio/fs/GnomeFileTypeDetector.java \
+	sun/nio/fs/MimeTypesFileTypeDetector.java \
 	sun/nio/fs/PollingWatchService.java \
 	sun/nio/fs/SolarisAclFileAttributeView.java \
 	sun/nio/fs/SolarisFileStore.java \
@@ -201,6 +203,8 @@ FILES_java += \
 	sun/nio/ch/UnixAsynchronousSocketChannelImpl.java \
 	\
 	sun/nio/fs/GnomeFileTypeDetector.java \
+	sun/nio/fs/MagicFileTypeDetector.java \
+	sun/nio/fs/MimeTypesFileTypeDetector.java \
 	sun/nio/fs/LinuxDosFileAttributeView.java \
 	sun/nio/fs/LinuxFileStore.java \
 	sun/nio/fs/LinuxFileSystem.java \
@@ -208,7 +212,6 @@ FILES_java += \
 	sun/nio/fs/LinuxUserDefinedFileAttributeView.java \
 	sun/nio/fs/LinuxNativeDispatcher.java \
 	sun/nio/fs/LinuxWatchService.java \
-	sun/nio/fs/PollingWatchService.java \
 	sun/nio/fs/UnixChannelFactory.java \
 	sun/nio/fs/UnixCopyFile.java \
 	sun/nio/fs/UnixDirectoryStream.java \
@@ -239,6 +242,7 @@ FILES_c += \
 	UnixAsynchronousSocketChannelImpl.c \
 	\
 	GnomeFileTypeDetector.c \
+	MagicFileTypeDetector.c \
 	LinuxNativeDispatcher.c \
 	LinuxWatchService.c \
 	UnixCopyFile.c \
@@ -254,6 +258,7 @@ FILES_export += \
 	sun/nio/ch/UnixAsynchronousSocketChannelImpl.java \
 	\
 	sun/nio/fs/GnomeFileTypeDetector.java \
+	sun/nio/fs/MagicFileTypeDetector.java \
 	sun/nio/fs/LinuxNativeDispatcher.java \
 	sun/nio/fs/LinuxWatchService.java \
 	sun/nio/fs/UnixCopyFile.java \
@@ -277,6 +282,7 @@ FILES_java += \
 	sun/nio/ch/UnixAsynchronousServerSocketChannelImpl.java \
 	sun/nio/ch/UnixAsynchronousSocketChannelImpl.java \
 	\
+	sun/nio/fs/MimeTypesFileTypeDetector.java \
 	sun/nio/fs/BsdFileStore.java \
 	sun/nio/fs/BsdFileSystem.java \
 	sun/nio/fs/BsdFileSystemProvider.java \
@@ -378,9 +384,7 @@ OTHER_INCLUDES += \
 ifeq ($(PLATFORM),windows)
   OTHER_LDLIBS += $(JVMLIB) ws2_32.lib \
      -libpath:$(LIBDIR) java.lib \
-     $(OBJDIR)/../../../../sun/java.net/net/$(OBJDIRNAME)/net.lib \
-     $(OBJDIR)/../../../java.lang/java/$(OBJDIRNAME)/io_util.obj \
-     $(OBJDIR)/../../../java.lang/java/$(OBJDIRNAME)/FileDescriptor_md.obj
+     $(OBJDIR)/../../../../sun/java.net/net/$(OBJDIRNAME)/net.lib
 endif
 ifeq ($(PLATFORM), linux)
 OTHER_LDLIBS += -L$(LIBDIR)/$(LIBARCH) -ljava -lnet -lpthread $(LIBDL)
@@ -952,6 +956,7 @@ $(FILES_gensbcs_out): $(GENCSSRC)/SingleByte-X.java.template $(GENCSSRC)/sbcs
 
 GENUC_SRC = $(PLATFORM_SRC)/native/sun/nio/fs/genUnixConstants.c
 
+GENUC_OBJ = $(TEMPDIR)/genUnixConstants.o
 GENUC_EXE = $(TEMPDIR)/genUnixConstants
 
 GENUC_COPYRIGHT_YEARS = $(shell $(CAT) $(GENUC_SRC) | \
@@ -959,7 +964,8 @@ GENUC_COPYRIGHT_YEARS = $(shell $(CAT) $(GENUC_SRC) | \
 
 $(GENUC_EXE) : $(GENUC_SRC)
 	$(prep-target)
-	$(NIO_CC) $(CPPFLAGS) -o $@ $(GENUC_SRC)
+	$(CC) $(CPPFLAGS) -c -o $(GENUC_OBJ) $(GENUC_SRC)
+	$(CC) $(CPPFLAGS) -o $@ $(GENUC_OBJ)
 
 ifdef NIO_PLATFORM_CLASSES_ROOT_DIR
 $(SFS_GEN)/UnixConstants.java: $(NIO_PLATFORM_CLASSES_ROOT_DIR)/sun/nio/fs/UnixConstants-$(PLATFORM)-$(ARCH).java
@@ -974,6 +980,7 @@ endif
 
 GENSC_SRC = $(PLATFORM_SRC)/native/sun/nio/fs/genSolarisConstants.c
 
+GENSC_OBJ = $(TEMPDIR)/genSolarisConstants.o
 GENSC_EXE = $(TEMPDIR)/genSolarisConstants
 
 GENSC_COPYRIGHT_YEARS = $(shell $(CAT) $(GENSC_SRC) | \
@@ -981,7 +988,8 @@ GENSC_COPYRIGHT_YEARS = $(shell $(CAT) $(GENSC_SRC) | \
 
 $(GENSC_EXE) : $(GENSC_SRC)
 	$(prep-target)
-	$(NIO_CC) $(CPPFLAGS) -o $@ $(GENSC_SRC)
+	$(CC) $(CPPFLAGS) -c -o $(GENSC_OBJ) $(GENSC_SRC)
+	$(CC) $(CPPFLAGS) -o $@ $(GENSC_OBJ)
 
 ifdef NIO_PLATFORM_CLASSES_ROOT_DIR
 $(SFS_GEN)/SolarisConstants.java: $(NIO_PLATFORM_CLASSES_ROOT_DIR)/sun/nio/fs/SolarisConstants-$(PLATFORM)-$(ARCH).java

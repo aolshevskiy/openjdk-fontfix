@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,7 +32,7 @@ import com.sun.tools.internal.ws.wscompile.Options;
  *
  * @author WS Development Team
  */
-public class GeneratorUtil implements GeneratorConstants {
+public class GeneratorUtil {
 
     public static boolean classExists(
         Options options,
@@ -54,9 +54,9 @@ public class GeneratorUtil implements GeneratorConstants {
         try {
             Class.forName(className, true, classLoader);
         } catch (ClassNotFoundException e) {
-            int idx = className.lastIndexOf(DOTC);
+            int idx = className.lastIndexOf(GeneratorConstants.DOTC.getValue());
             if (idx > -1) {
-                String tmp = className.substring(0, idx) + SIG_INNERCLASS;
+                String tmp = className.substring(0, idx) + GeneratorConstants.SIG_INNERCLASS.getValue();
                 tmp += className.substring(idx + 1);
                 return getLoadableClassName(tmp, classLoader);
             }

@@ -49,7 +49,7 @@ extern "C" {
   }
 }
 
-#ifndef PRODUCT
+#ifdef ASSERT
 #define VM_SYMBOL_ENUM_NAME_BODY(name, string) #name "\0"
 static const char* vm_symbol_enum_names =
   VM_SYMBOLS_DO(VM_SYMBOL_ENUM_NAME_BODY, VM_ALIAS_IGNORE)
@@ -64,7 +64,7 @@ static const char* vm_symbol_enum_name(vmSymbols::SID sid) {
   }
   return string;
 }
-#endif //PRODUCT
+#endif //ASSERT
 
 // Put all the VM symbol strings in one place.
 // Makes for a more compact libjvm.
@@ -181,7 +181,7 @@ void vmSymbols::symbols_do(SymbolClosure* f) {
   }
 }
 
-void vmSymbols::serialize(SerializeOopClosure* soc) {
+void vmSymbols::serialize(SerializeClosure* soc) {
   soc->do_region((u_char*)&_symbols[FIRST_SID],
                  (SID_LIMIT - FIRST_SID) * sizeof(_symbols[0]));
   soc->do_region((u_char*)_type_signatures, sizeof(_type_signatures));
@@ -211,7 +211,7 @@ vmSymbols::SID vmSymbols::find_sid(Symbol* symbol) {
   // Then, use a binary search over the index.
   // Expected trip count is less than log2_SID_LIMIT, about eight.
   // This is slow but acceptable, given that calls are not
-  // dynamically common.  (methodOop::intrinsic_id has a cache.)
+  // dynamically common.  (Method*::intrinsic_id has a cache.)
   NOT_PRODUCT(find_sid_calls++);
   int min = (int)FIRST_SID, max = (int)SID_LIMIT - 1;
   SID sid = NO_SID, sid1;
@@ -486,12 +486,12 @@ vmIntrinsics::Flags vmIntrinsics::flags_for(vmIntrinsics::ID id) {
 #ifndef PRODUCT
 // verify_method performs an extra check on a matched intrinsic method
 
-static bool match_method(methodOop m, Symbol* n, Symbol* s) {
+static bool match_method(Method* m, Symbol* n, Symbol* s) {
   return (m->name() == n &&
           m->signature() == s);
 }
 
-static vmIntrinsics::ID match_method_with_klass(methodOop m, Symbol* mk) {
+static vmIntrinsics::ID match_method_with_klass(Method* m, Symbol* mk) {
 #define VM_INTRINSIC_MATCH(id, klassname, namepart, sigpart, flags) \
   { Symbol* k = vmSymbols::klassname(); \
     if (mk == k) { \
@@ -506,8 +506,8 @@ static vmIntrinsics::ID match_method_with_klass(methodOop m, Symbol* mk) {
 #undef VM_INTRINSIC_MATCH
 }
 
-void vmIntrinsics::verify_method(ID actual_id, methodOop m) {
-  Symbol* mk = Klass::cast(m->method_holder())->name();
+void vmIntrinsics::verify_method(ID actual_id, Method* m) {
+  Symbol* mk = m->method_holder()->name();
   ID declared_id = match_method_with_klass(m, mk);
 
   if (declared_id == actual_id)  return; // success

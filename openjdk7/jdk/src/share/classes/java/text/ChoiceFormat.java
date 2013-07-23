@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2005, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -338,8 +338,8 @@ public class ChoiceFormat extends NumberFormat {
             throw new IllegalArgumentException(
                 "Array and limit arrays must be of the same length.");
         }
-        choiceLimits = limits;
-        choiceFormats = formats;
+        choiceLimits = Arrays.copyOf(limits, limits.length);
+        choiceFormats = Arrays.copyOf(formats, formats.length);
     }
 
     /**
@@ -347,7 +347,8 @@ public class ChoiceFormat extends NumberFormat {
      * @return the limits.
      */
     public double[] getLimits() {
-        return choiceLimits;
+        double[] newLimits = Arrays.copyOf(choiceLimits, choiceLimits.length);
+        return newLimits;
     }
 
     /**
@@ -355,7 +356,8 @@ public class ChoiceFormat extends NumberFormat {
      * @return the formats.
      */
     public Object[] getFormats() {
-        return choiceFormats;
+        Object[] newFormats = Arrays.copyOf(choiceFormats, choiceFormats.length);
+        return newFormats;
     }
 
     // Overrides
@@ -374,7 +376,7 @@ public class ChoiceFormat extends NumberFormat {
 
     /**
      * Returns pattern with formatted double.
-     * @param number number to be formatted & substituted.
+     * @param number number to be formatted and substituted.
      * @param toAppendTo where text is appended.
      * @param status ignore no useful status is returned.
      */
@@ -457,8 +459,8 @@ public class ChoiceFormat extends NumberFormat {
     {
         ChoiceFormat other = (ChoiceFormat) super.clone();
         // for primitives or immutables, shallow clone is enough
-        other.choiceLimits = (double[]) choiceLimits.clone();
-        other.choiceFormats = (String[]) choiceFormats.clone();
+        other.choiceLimits = choiceLimits.clone();
+        other.choiceFormats = choiceFormats.clone();
         return other;
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,6 +44,7 @@ import sun.java2d.StateTracker;
 import sun.java2d.loops.SurfaceType;
 import sun.java2d.loops.CompositeType;
 import sun.java2d.loops.RenderLoops;
+
 
 public class BufImgSurfaceData extends SurfaceData {
     BufferedImage bufImg;
@@ -324,8 +325,8 @@ public class BufImgSurfaceData extends SurfaceData {
     }
 
     public RenderLoops getRenderLoops(SunGraphics2D sg2d) {
-        if (sg2d.paintState <= sg2d.PAINT_ALPHACOLOR &&
-            sg2d.compositeState <= sg2d.COMP_ISCOPY)
+        if (sg2d.paintState <= SunGraphics2D.PAINT_ALPHACOLOR &&
+            sg2d.compositeState <= SunGraphics2D.COMP_ISCOPY)
         {
             return solidloops;
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2011, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,13 +25,7 @@
 
 package com.sun.java.util.jar.pack;
 
-import com.sun.java.util.jar.pack.ConstantPool.ClassEntry;
-import com.sun.java.util.jar.pack.ConstantPool.DescriptorEntry;
-import com.sun.java.util.jar.pack.ConstantPool.Entry;
-import com.sun.java.util.jar.pack.ConstantPool.Index;
-import com.sun.java.util.jar.pack.ConstantPool.MemberEntry;
-import com.sun.java.util.jar.pack.ConstantPool.SignatureEntry;
-import com.sun.java.util.jar.pack.ConstantPool.Utf8Entry;
+import com.sun.java.util.jar.pack.ConstantPool.*;
 import com.sun.java.util.jar.pack.Package.Class;
 import com.sun.java.util.jar.pack.Package.File;
 import com.sun.java.util.jar.pack.Package.InnerClass;
@@ -46,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -65,6 +60,7 @@ class PackageReader extends BandStructure {
     Package pkg;
     byte[] bytes;
     LimitedBuffer in;
+    Package.Version packageVersion;
 
     PackageReader(Package pkg, InputStream in) throws IOException {
         this.pkg = pkg;
@@ -120,7 +116,7 @@ class PackageReader extends BandStructure {
             int nr = super.read(b, off, len);
             servedPos = pos;
             if (nr >= 0)  served += nr;
-            assert(served <= limit || limit == -1);
+            //assert(served <= limit || limit == -1);
             return nr;
         }
         public long skip(long n) throws IOException {
@@ -225,7 +221,6 @@ class PackageReader extends BandStructure {
     final static int MAGIC_BYTES = 4;
 
     void readArchiveMagic() throws IOException {
-
         // Read a minimum of bytes in the first gulp.
         in.setReadLimit(MAGIC_BYTES + AH_LENGTH_MIN);
 
@@ -235,8 +230,39 @@ class PackageReader extends BandStructure {
         archive_magic.readFrom(in);
 
         // read and check magic numbers:
-        pkg.magic = getMagicInt32();
+        int magic = getMagicInt32();
+        if (pkg.magic != magic) {
+            throw new IOException("Unexpected package magic number: got "
+                    + magic + "; expected " + pkg.magic);
+        }
         archive_magic.doneDisbursing();
+    }
+
+     // Fixed 6211177, converted to throw IOException
+    void checkArchiveVersion() throws IOException {
+        Package.Version versionFound = null;
+        for (Package.Version v : new Package.Version[] {
+                JAVA8_PACKAGE_VERSION,
+                JAVA7_PACKAGE_VERSION,
+                JAVA6_PACKAGE_VERSION,
+                JAVA5_PACKAGE_VERSION
+            }) {
+            if (packageVersion.equals(v)) {
+                versionFound = v;
+                break;
+            }
+        }
+        if (versionFound == null) {
+            String expVer =   JAVA8_PACKAGE_VERSION.toString()
+                            + "OR"
+                            + JAVA7_PACKAGE_VERSION.toString()
+                            + " OR "
+                            + JAVA6_PACKAGE_VERSION.toString()
+                            + " OR "
+                            + JAVA5_PACKAGE_VERSION.toString();
+            throw new IOException("Unexpected package minor version: got "
+                    +  packageVersion.toString() + "; expected " + expVer);
+        }
     }
 
     void readArchiveHeader() throws IOException {
@@ -266,14 +292,14 @@ class PackageReader extends BandStructure {
         //        #band_headers_size :UNSIGNED5[1]
         //        #attr_definition_count :UNSIGNED5[1]
         //
-        assert(AH_LENGTH == 8+(ConstantPool.TAGS_IN_ORDER.length)+6);
         archive_header_0.expectLength(AH_LENGTH_0);
         archive_header_0.readFrom(in);
 
-        pkg.package_minver = archive_header_0.getInt();
-        pkg.package_majver = archive_header_0.getInt();
-        pkg.checkVersion();
-        this.initPackageMajver(pkg.package_majver);
+        int minver = archive_header_0.getInt();
+        int majver = archive_header_0.getInt();
+        packageVersion = Package.Version.of(majver, minver);
+        checkArchiveVersion();
+        this.initHighestClassVersion(JAVA7_MAX_CLASS_VERSION);
 
         archiveOptions = archive_header_0.getInt();
         archive_header_0.doneDisbursing();
@@ -282,6 +308,7 @@ class PackageReader extends BandStructure {
         boolean haveSpecial = testBit(archiveOptions, AO_HAVE_SPECIAL_FORMATS);
         boolean haveFiles   = testBit(archiveOptions, AO_HAVE_FILE_HEADERS);
         boolean haveNumbers = testBit(archiveOptions, AO_HAVE_CP_NUMBERS);
+        boolean haveCPExtra = testBit(archiveOptions, AO_HAVE_CP_EXTRAS);
         initAttrIndexLimit();
 
         // now we are ready to use the data:
@@ -300,11 +327,11 @@ class PackageReader extends BandStructure {
         archive_header_S.doneDisbursing();
         archiveSize0 = in.getBytesServed();
 
-        int remainingHeaders = AH_LENGTH - AH_LENGTH_0 - AH_LENGTH_S;
-        if (!haveFiles)    remainingHeaders -= AH_FILE_HEADER_LEN-AH_LENGTH_S;
-        if (!haveSpecial)  remainingHeaders -= AH_SPECIAL_FORMAT_LEN;
-        if (!haveNumbers)  remainingHeaders -= AH_CP_NUMBER_LEN;
-        assert(remainingHeaders >= AH_LENGTH_MIN - AH_LENGTH_0);
+        int remainingHeaders = AH_LENGTH_MIN - AH_LENGTH_0 - AH_LENGTH_S;
+        if (haveFiles)    remainingHeaders += AH_FILE_HEADER_LEN;
+        if (haveSpecial)  remainingHeaders += AH_SPECIAL_FORMAT_LEN;
+        if (haveNumbers)  remainingHeaders += AH_CP_NUMBER_LEN;
+        if (haveCPExtra)  remainingHeaders += AH_CP_EXTRA_LEN;
         archive_header_1.expectLength(remainingHeaders);
         archive_header_1.readFrom(in);
 
@@ -325,12 +352,13 @@ class PackageReader extends BandStructure {
             numAttrDefs = 0;
         }
 
-        readConstantPoolCounts(haveNumbers);
+        readConstantPoolCounts(haveNumbers, haveCPExtra);
 
         numInnerClasses = archive_header_1.getInt();
 
-        pkg.default_class_minver = (short) archive_header_1.getInt();
-        pkg.default_class_majver = (short) archive_header_1.getInt();
+        minver = (short) archive_header_1.getInt();
+        majver = (short) archive_header_1.getInt();
+        pkg.defaultClassVersion = Package.Version.of(majver, minver);
         numClasses = archive_header_1.getInt();
 
         archive_header_1.doneDisbursing();
@@ -351,7 +379,7 @@ class PackageReader extends BandStructure {
         band_headers.doneDisbursing();
     }
 
-    void readConstantPoolCounts(boolean haveNumbers) throws IOException {
+    void readConstantPoolCounts(boolean haveNumbers, boolean haveCPExtra) throws IOException {
         // size the constant pools:
         for (int k = 0; k < ConstantPool.TAGS_IN_ORDER.length; k++) {
             //  cp_counts:
@@ -364,12 +392,19 @@ class PackageReader extends BandStructure {
             //        #cp_Field_count :UNSIGNED5[1]
             //        #cp_Method_count :UNSIGNED5[1]
             //        #cp_Imethod_count :UNSIGNED5[1]
+            //        (cp_attr_counts) ** (#have_cp_attr_counts)
             //
             //  cp_number_counts:
             //        #cp_Int_count :UNSIGNED5[1]
             //        #cp_Float_count :UNSIGNED5[1]
             //        #cp_Long_count :UNSIGNED5[1]
             //        #cp_Double_count :UNSIGNED5[1]
+            //
+            //  cp_extra_counts:
+            //        #cp_MethodHandle_count :UNSIGNED5[1]
+            //        #cp_MethodType_count :UNSIGNED5[1]
+            //        #cp_InvokeDynamic_count :UNSIGNED5[1]
+            //        #cp_BootstrapMethod_count :UNSIGNED5[1]
             //
             byte tag = ConstantPool.TAGS_IN_ORDER[k];
             if (!haveNumbers) {
@@ -379,6 +414,16 @@ class PackageReader extends BandStructure {
                 case CONSTANT_Float:
                 case CONSTANT_Long:
                 case CONSTANT_Double:
+                    continue;
+                }
+            }
+            if (!haveCPExtra) {
+                // These four counts are optional.
+                switch (tag) {
+                case CONSTANT_MethodHandle:
+                case CONSTANT_MethodType:
+                case CONSTANT_InvokeDynamic:
+                case CONSTANT_BootstrapMethod:
                     continue;
                 }
             }
@@ -401,6 +446,11 @@ class PackageReader extends BandStructure {
         return index;
     }
 
+    void checkLegacy(String bandname) {
+        if (packageVersion.lessThan(JAVA7_PACKAGE_VERSION)) {
+            throw new RuntimeException("unexpected band " + bandname);
+        }
+    }
     void readConstantPool() throws IOException {
         //  cp_bands:
         //        cp_Utf8
@@ -533,8 +583,82 @@ class PackageReader extends BandStructure {
             case CONSTANT_InterfaceMethodref:
                 readMemberRefs(tag, cpMap, cp_Imethod_class, cp_Imethod_desc);
                 break;
+            case CONSTANT_MethodHandle:
+                if (cpMap.length > 0) {
+                    checkLegacy(cp_MethodHandle_refkind.name());
+                }
+                cp_MethodHandle_refkind.expectLength(cpMap.length);
+                cp_MethodHandle_refkind.readFrom(in);
+                cp_MethodHandle_member.expectLength(cpMap.length);
+                cp_MethodHandle_member.readFrom(in);
+                cp_MethodHandle_member.setIndex(getCPIndex(CONSTANT_AnyMember));
+                for (int i = 0; i < cpMap.length; i++) {
+                    byte        refKind = (byte)        cp_MethodHandle_refkind.getInt();
+                    MemberEntry memRef  = (MemberEntry) cp_MethodHandle_member.getRef();
+                    cpMap[i] = ConstantPool.getMethodHandleEntry(refKind, memRef);
+                }
+                cp_MethodHandle_refkind.doneDisbursing();
+                cp_MethodHandle_member.doneDisbursing();
+                break;
+            case CONSTANT_MethodType:
+                if (cpMap.length > 0) {
+                    checkLegacy(cp_MethodType.name());
+                }
+                cp_MethodType.expectLength(cpMap.length);
+                cp_MethodType.readFrom(in);
+                cp_MethodType.setIndex(getCPIndex(CONSTANT_Signature));
+                for (int i = 0; i < cpMap.length; i++) {
+                    SignatureEntry typeRef  = (SignatureEntry) cp_MethodType.getRef();
+                    cpMap[i] = ConstantPool.getMethodTypeEntry(typeRef);
+                }
+                cp_MethodType.doneDisbursing();
+                break;
+            case CONSTANT_InvokeDynamic:
+                if (cpMap.length > 0) {
+                    checkLegacy(cp_InvokeDynamic_spec.name());
+                }
+                cp_InvokeDynamic_spec.expectLength(cpMap.length);
+                cp_InvokeDynamic_spec.readFrom(in);
+                cp_InvokeDynamic_spec.setIndex(getCPIndex(CONSTANT_BootstrapMethod));
+                cp_InvokeDynamic_desc.expectLength(cpMap.length);
+                cp_InvokeDynamic_desc.readFrom(in);
+                cp_InvokeDynamic_desc.setIndex(getCPIndex(CONSTANT_NameandType));
+                for (int i = 0; i < cpMap.length; i++) {
+                    BootstrapMethodEntry bss   = (BootstrapMethodEntry) cp_InvokeDynamic_spec.getRef();
+                    DescriptorEntry      descr = (DescriptorEntry)      cp_InvokeDynamic_desc.getRef();
+                    cpMap[i] = ConstantPool.getInvokeDynamicEntry(bss, descr);
+                }
+                cp_InvokeDynamic_spec.doneDisbursing();
+                cp_InvokeDynamic_desc.doneDisbursing();
+                break;
+            case CONSTANT_BootstrapMethod:
+                if (cpMap.length > 0) {
+                    checkLegacy(cp_BootstrapMethod_ref.name());
+                }
+                cp_BootstrapMethod_ref.expectLength(cpMap.length);
+                cp_BootstrapMethod_ref.readFrom(in);
+                cp_BootstrapMethod_ref.setIndex(getCPIndex(CONSTANT_MethodHandle));
+                cp_BootstrapMethod_arg_count.expectLength(cpMap.length);
+                cp_BootstrapMethod_arg_count.readFrom(in);
+                int totalArgCount = cp_BootstrapMethod_arg_count.getIntTotal();
+                cp_BootstrapMethod_arg.expectLength(totalArgCount);
+                cp_BootstrapMethod_arg.readFrom(in);
+                cp_BootstrapMethod_arg.setIndex(getCPIndex(CONSTANT_LoadableValue));
+                for (int i = 0; i < cpMap.length; i++) {
+                    MethodHandleEntry bsm = (MethodHandleEntry) cp_BootstrapMethod_ref.getRef();
+                    int argc = cp_BootstrapMethod_arg_count.getInt();
+                    Entry[] argRefs = new Entry[argc];
+                    for (int j = 0; j < argc; j++) {
+                        argRefs[j] = cp_BootstrapMethod_arg.getRef();
+                    }
+                    cpMap[i] = ConstantPool.getBootstrapMethodEntry(bsm, argRefs);
+                }
+                cp_BootstrapMethod_ref.doneDisbursing();
+                cp_BootstrapMethod_arg_count.doneDisbursing();
+                cp_BootstrapMethod_arg.doneDisbursing();
+                break;
             default:
-                assert(false);
+                throw new AssertionError("unexpected CP tag in package");
             }
 
             Index index = initCPIndex(tag, cpMap);
@@ -547,6 +671,21 @@ class PackageReader extends BandStructure {
         }
 
         cp_bands.doneDisbursing();
+
+        if (optDumpBands || verbose > 1) {
+            for (byte tag = CONSTANT_GroupFirst; tag < CONSTANT_GroupLimit; tag++) {
+                Index index = pkg.cp.getIndexByTag(tag);
+                if (index == null || index.isEmpty())  continue;
+                Entry[] cpMap = index.cpMap;
+                if (verbose > 1)
+                    Utils.log.info("Index group "+ConstantPool.tagName(tag)+" contains "+cpMap.length+" entries.");
+                if (optDumpBands) {
+                    try (PrintStream ps = new PrintStream(getDumpStream(index.debugName, tag, ".gidx", index))) {
+                        printArrayTo(ps, cpMap, 0, cpMap.length, true);
+                    }
+                }
+            }
+        }
 
         setBandIndexes();
     }
@@ -750,7 +889,7 @@ class PackageReader extends BandStructure {
         file_options.readFrom(in);
         file_bits.setInputStreamFrom(in);
 
-        Iterator nextClass = pkg.getClasses().iterator();
+        Iterator<Class> nextClass = pkg.getClasses().iterator();
 
         // Compute file lengths before reading any file bits.
         long totalFileLength = 0;
@@ -790,14 +929,14 @@ class PackageReader extends BandStructure {
             pkg.addFile(file);
             if (file.isClassStub()) {
                 assert(file.getFileLength() == 0);
-                Class cls = (Class) nextClass.next();
+                Class cls = nextClass.next();
                 cls.initFile(file);
             }
         }
 
         // Do the rest of the classes.
         while (nextClass.hasNext()) {
-            Class cls = (Class) nextClass.next();
+            Class cls = nextClass.next();
             cls.initFile(null);  // implicitly initialize to a trivial one
             cls.file.modtime = pkg.default_modtime;
         }
@@ -841,9 +980,9 @@ class PackageReader extends BandStructure {
                                                             name.stringValue(),
                                                             layout.stringValue());
                 // Check layout string for Java 6 extensions.
-                String pvLayout = def.layoutForPackageMajver(getPackageMajver());
+                String pvLayout = def.layoutForClassVersion(getHighestClassVersion());
                 if (!pvLayout.equals(def.layout())) {
-                    throw new IOException("Bad attribute layout in version 150 archive: "+def.layout());
+                    throw new IOException("Bad attribute layout in archive: "+def.layout());
                 }
                 this.setAttributeLayoutIndex(def, index);
                 if (dump != null)  dump.println(index+" "+def);
@@ -1006,14 +1145,14 @@ class PackageReader extends BandStructure {
         if (k >= 0)
             return k;
         if (e.tag == CONSTANT_Utf8) {
-            Entry se = (Entry) utf8Signatures.get(e);
+            Entry se = utf8Signatures.get(e);
             return pkg.cp.untypedIndexOf(se);
         }
         return -1;
     }
 
     Comparator<Entry> entryOutputOrder = new Comparator<Entry>() {
-        public int compare(Entry  e0, Entry e1) {
+        public int compare(Entry e0, Entry e1) {
             int k0 = getOutputIndex(e0);
             int k1 = getOutputIndex(e1);
             if (k0 >= 0 && k1 >= 0)
@@ -1034,12 +1173,9 @@ class PackageReader extends BandStructure {
         Attribute retroVersion = cls.getAttribute(attrClassFileVersion);
         if (retroVersion != null) {
             cls.removeAttribute(retroVersion);
-            short[] minmajver = parseClassFileVersionAttr(retroVersion);
-            cls.minver = minmajver[0];
-            cls.majver = minmajver[1];
+            cls.version = parseClassFileVersionAttr(retroVersion);
         } else {
-            cls.minver = pkg.default_class_minver;
-            cls.majver = pkg.default_class_majver;
+            cls.version = pkg.defaultClassVersion;
         }
 
         // Replace null SourceFile by "obvious" string.
@@ -1056,8 +1192,16 @@ class PackageReader extends BandStructure {
         // look for constant pool entries:
         cls.visitRefs(VRM_CLASSIC, cpRefs);
 
+        ArrayList<BootstrapMethodEntry> bsms = new ArrayList<>();
+        /*
+         * BootstrapMethod(BSMs) are added here before InnerClasses(ICs),
+         * so as to ensure the order. Noting that the BSMs  may be
+         * removed if they are not found in the CP, after the ICs expansion.
+         */
+        cls.addAttribute(Package.attrBootstrapMethodsEmpty.canonicalInstance());
+
         // flesh out the local constant pool
-        ConstantPool.completeReferencesIn(cpRefs, true);
+        ConstantPool.completeReferencesIn(cpRefs, true, bsms);
 
         // Now that we know all our local class references,
         // compute the InnerClasses attribute.
@@ -1074,14 +1218,23 @@ class PackageReader extends BandStructure {
             }
 
             // flesh out the local constant pool, again
-            ConstantPool.completeReferencesIn(cpRefs, true);
+            ConstantPool.completeReferencesIn(cpRefs, true, bsms);
+        }
+
+        // remove the attr previously set, otherwise add the bsm and
+        // references as required
+        if (bsms.isEmpty()) {
+            cls.attributes.remove(Package.attrBootstrapMethodsEmpty.canonicalInstance());
+        } else {
+            cpRefs.add(Package.getRefString("BootstrapMethods"));
+            Collections.sort(bsms);
+            cls.setBootstrapMethods(bsms);
         }
 
         // construct a local constant pool
         int numDoubles = 0;
         for (Entry e : cpRefs) {
             if (e.isDoubleWord())  numDoubles++;
-            assert(e.tag != CONSTANT_Signature) : (e);
         }
         Entry[] cpMap = new Entry[1+numDoubles+cpRefs.size()];
         int fillp = 1;
@@ -1154,7 +1307,8 @@ class PackageReader extends BandStructure {
         int totalNM = class_method_count.getIntTotal();
         field_descr.expectLength(totalNF);
         method_descr.expectLength(totalNM);
-        if (verbose > 1)  Utils.log.fine("expecting #fields="+totalNF+" and #methods="+totalNM+" in #classes="+numClasses);
+        if (verbose > 1)  Utils.log.fine("expecting #fields="+totalNF+
+                " and #methods="+totalNM+" in #classes="+numClasses);
 
         List<Class.Field> fields = new ArrayList<>(totalNF);
         field_descr.readFrom(in);
@@ -1332,7 +1486,8 @@ class PackageReader extends BandStructure {
     // classes, fields, methods, and codes.
     // The holders is a global list, already collected,
     // of attribute "customers".
-    void countAndReadAttrs(int ctype, Collection holders) throws IOException {
+    void countAndReadAttrs(int ctype, Collection<? extends Attribute.Holder> holders)
+            throws IOException {
         //  class_attr_bands:
         //        *class_flags :UNSIGNED5
         //        *class_attr_count :UNSIGNED5
@@ -1345,6 +1500,7 @@ class PackageReader extends BandStructure {
         //        ic_local_bands
         //        *class_ClassFile_version_minor_H :UNSIGNED5
         //        *class_ClassFile_version_major_H :UNSIGNED5
+        //        class_type_metadata_bands
         //
         //  field_attr_bands:
         //        *field_flags :UNSIGNED5
@@ -1354,6 +1510,7 @@ class PackageReader extends BandStructure {
         //        *field_Signature_RS :UNSIGNED5 (cp_Signature)
         //        field_metadata_bands
         //        *field_ConstantValue_KQ :UNSIGNED5 (cp_Int, etc.; see note)
+        //        field_type_metadata_bands
         //
         //  method_attr_bands:
         //        *method_flags :UNSIGNED5
@@ -1364,6 +1521,10 @@ class PackageReader extends BandStructure {
         //        method_metadata_bands
         //        *method_Exceptions_N :UNSIGNED5
         //        *method_Exceptions_RC :UNSIGNED5  (cp_Class)
+        //        *method_MethodParameters_NB: BYTE1
+        //        *method_MethodParameters_RUN: UNSIGNED5 (cp_Utf8)
+        //        *method_MethodParameters_FH:  UNSIGNED5 (flag)
+        //        method_type_metadata_bands
         //
         //  code_attr_bands:
         //        *code_flags :UNSIGNED5
@@ -1379,6 +1540,7 @@ class PackageReader extends BandStructure {
         //        *code_LocalVariableTable_name_RU :UNSIGNED5 (cp_Utf8)
         //        *code_LocalVariableTable_type_RS :UNSIGNED5 (cp_Signature)
         //        *code_LocalVariableTable_slot :UNSIGNED5
+        //        code_type_metadata_bands
 
         countAttrs(ctype, holders);
         readAttrs(ctype, holders);
@@ -1386,12 +1548,14 @@ class PackageReader extends BandStructure {
 
     // Read flags and count the attributes that are to be placed
     // on the given holders.
-    void countAttrs(int ctype, Collection holders) throws IOException {
+    void countAttrs(int ctype, Collection<? extends Attribute.Holder> holders)
+            throws IOException {
         // Here, xxx stands for one of class, field, method, code.
         MultiBand xxx_attr_bands = attrBands[ctype];
         long flagMask = attrFlagMask[ctype];
         if (verbose > 1) {
-            Utils.log.fine("scanning flags and attrs for "+Attribute.contextName(ctype)+"["+holders.size()+"]");
+            Utils.log.fine("scanning flags and attrs for "+
+                    Attribute.contextName(ctype)+"["+holders.size()+"]");
         }
 
         // Fetch the attribute layout definitions which govern the bands
@@ -1414,8 +1578,7 @@ class PackageReader extends BandStructure {
         xxx_flags_lo.expectLength(holders.size());
         xxx_flags_lo.readFrom(in);
         assert((flagMask & overflowMask) == overflowMask);
-        for (Iterator i = holders.iterator(); i.hasNext(); ) {
-            Attribute.Holder h = (Attribute.Holder) i.next();
+        for (Attribute.Holder h : holders) {
             int flags = xxx_flags_lo.getInt();
             h.flags = flags;
             if ((flags & overflowMask) != 0)
@@ -1433,8 +1596,7 @@ class PackageReader extends BandStructure {
         // (class/field/method/code), and also we accumulate (b) a total
         // count for each attribute type.
         int[] totalCounts = new int[defs.length];
-        for (Iterator i = holders.iterator(); i.hasNext(); ) {
-            Attribute.Holder h = (Attribute.Holder) i.next();
+        for (Attribute.Holder h : holders) {
             assert(h.attributes == null);
             // System.out.println("flags="+h.flags+" using fm="+flagMask);
             long attrBits = ((h.flags & flagMask) << 32) >>> 32;
@@ -1545,8 +1707,9 @@ class PackageReader extends BandStructure {
                     class_InnerClasses_outer_RCN.readFrom(in);
                     class_InnerClasses_name_RUN.expectLength(tupleCount);
                     class_InnerClasses_name_RUN.readFrom(in);
-                } else if (totalCount == 0) {
-                    // Expect no elements at all.  Skip quickly.
+                } else if (!optDebugBands && totalCount == 0) {
+                    // Expect no elements at all.  Skip quickly. however if we
+                    // are debugging bands, read all bands regardless
                     for (int j = 0; j < ab.length; j++) {
                         ab[j].doneWithUnusedBand();
                     }
@@ -1565,9 +1728,15 @@ class PackageReader extends BandStructure {
                             assert(cbles[j].kind == Attribute.EK_CBLE);
                             int entryCount = forwardCounts[j];
                             forwardCounts[j] = -1;  // No more, please!
-                            if (cbles[j].flagTest(Attribute.EF_BACK))
+                            if (totalCount > 0 && cbles[j].flagTest(Attribute.EF_BACK))
                                 entryCount += xxx_attr_calls.getInt();
                             readAttrBands(cbles[j].body, entryCount, forwardCounts, ab);
+                        }
+                    }
+                    // mark them read,  to satisfy asserts
+                    if (optDebugBands && totalCount == 0) {
+                        for (int j = 0; j < ab.length; j++) {
+                            ab[j].doneDisbursing();
                         }
                     }
                 }
@@ -1582,13 +1751,12 @@ class PackageReader extends BandStructure {
                                    ATTR_CONTEXT_NAME[ctype]+" attribute");
     }
 
-    @SuppressWarnings("unchecked")
-    void readAttrs(int ctype, Collection holders) throws IOException {
+    void readAttrs(int ctype, Collection<? extends Attribute.Holder> holders)
+            throws IOException {
         // Decode band values into attributes.
         Set<Attribute.Layout> sawDefs = new HashSet<>();
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        for (Iterator i = holders.iterator(); i.hasNext(); ) {
-            final Attribute.Holder h = (Attribute.Holder) i.next();
+        for (final Attribute.Holder h : holders) {
             if (h.attributes == null)  continue;
             for (ListIterator<Attribute> j = h.attributes.listIterator(); j.hasNext(); ) {
                 Attribute a = j.next();
@@ -1752,8 +1920,10 @@ class PackageReader extends BandStructure {
             bc_local, bc_label,
             bc_intref, bc_floatref,
             bc_longref, bc_doubleref, bc_stringref,
+            bc_loadablevalueref,
             bc_classref, bc_fieldref,
             bc_methodref, bc_imethodref,
+            bc_indyref,
             bc_thisfield, bc_superfield,
             bc_thismethod, bc_supermethod,
             bc_initref,
@@ -1995,11 +2165,10 @@ class PackageReader extends BandStructure {
                         if (size == 1)  ldcRefSet.add(ref);
                         int fmt;
                         switch (size) {
-                        case 1: fmt = Fixups.U1_FORMAT; break;
-                        case 2: fmt = Fixups.U2_FORMAT; break;
+                        case 1: fixupBuf.addU1(pc, ref); break;
+                        case 2: fixupBuf.addU2(pc, ref); break;
                         default: assert(false); fmt = 0;
                         }
-                        fixupBuf.add(pc, fmt, ref);
                         buf[pc+0] = buf[pc+1] = 0;
                         pc += size;
                     }
@@ -2034,7 +2203,7 @@ class PackageReader extends BandStructure {
                         int coding = bc_initref.getInt();
                         // Find the nth overloading of <init> in classRef.
                         MemberEntry ref = pkg.cp.getOverloadingForIndex(CONSTANT_Methodref, classRef, "<init>", coding);
-                        fixupBuf.add(pc, Fixups.U2_FORMAT, ref);
+                        fixupBuf.addU2(pc, ref);
                         buf[pc+0] = buf[pc+1] = 0;
                         pc += 2;
                         assert(Instruction.opLength(origBC) == (pc - curPC));
@@ -2067,7 +2236,7 @@ class PackageReader extends BandStructure {
                             insnMap[numInsns++] = curPC;
                         }
                         buf[pc++] = (byte) origBC;
-                        fixupBuf.add(pc, Fixups.U2_FORMAT, ref);
+                        fixupBuf.addU2(pc, ref);
                         buf[pc+0] = buf[pc+1] = 0;
                         pc += 2;
                         assert(Instruction.opLength(origBC) == (pc - curPC));
@@ -2097,10 +2266,17 @@ class PackageReader extends BandStructure {
                         int origBC = bc;
                         int size = 2;
                         switch (bc) {
+                        case _invokestatic_int:
+                            origBC = _invokestatic;
+                            break;
+                        case _invokespecial_int:
+                            origBC = _invokespecial;
+                            break;
                         case _ildc:
                         case _cldc:
                         case _fldc:
-                        case _aldc:
+                        case _sldc:
+                        case _qldc:
                             origBC = _ldc;
                             size = 1;
                             ldcRefSet.add(ref);
@@ -2108,7 +2284,8 @@ class PackageReader extends BandStructure {
                         case _ildc_w:
                         case _cldc_w:
                         case _fldc_w:
-                        case _aldc_w:
+                        case _sldc_w:
+                        case _qldc_w:
                             origBC = _ldc_w;
                             break;
                         case _lldc2_w:
@@ -2122,11 +2299,10 @@ class PackageReader extends BandStructure {
                         buf[pc++] = (byte) origBC;
                         int fmt;
                         switch (size) {
-                        case 1: fmt = Fixups.U1_FORMAT; break;
-                        case 2: fmt = Fixups.U2_FORMAT; break;
+                        case 1: fixupBuf.addU1(pc, ref); break;
+                        case 2: fixupBuf.addU2(pc, ref); break;
                         default: assert(false); fmt = 0;
                         }
-                        fixupBuf.add(pc, fmt, ref);
                         buf[pc+0] = buf[pc+1] = 0;
                         pc += size;
                         if (origBC == _multianewarray) {
@@ -2136,6 +2312,9 @@ class PackageReader extends BandStructure {
                         } else if (origBC == _invokeinterface) {
                             int argSize = ((MemberEntry)ref).descRef.typeRef.computeSize(true);
                             buf[pc++] = (byte)( 1 + argSize );
+                            buf[pc++] = 0;
+                        } else if (origBC == _invokedynamic) {
+                            buf[pc++] = 0;
                             buf[pc++] = 0;
                         }
                         assert(Instruction.opLength(origBC) == (pc - curPC));

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2009, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2009, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 # 
 # This code is free software; you can redistribute it and/or modify it
@@ -22,6 +22,7 @@
 #
 # @test
 # @bug 6990846 7009092 7009085 7015391 7014948 7005986 7017840 7007596
+# 7157656 8002390 7012868 7012856 8015728
 # @summary Test ZipFileSystem demo
 # @build Basic PathOps ZipFSTester
 # @run shell basic.sh
@@ -39,7 +40,7 @@ fi
 
 OS=`uname -s`
 case "$OS" in
-    Windows_* )
+    Windows_* | CYGWIN* )
         CLASSPATH="${TESTCLASSES};${ZIPFS}"
         ;;
     * )
@@ -52,7 +53,7 @@ failures=0
 
 go() {
     echo ""
-    ${TESTJAVA}/bin/java $1 $2 $3 2>&1
+    ${TESTJAVA}/bin/java ${TESTVMOPTS} $1 $2 $3 2>&1
     if [ $? != 0 ]; then failures=`expr $failures + 1`; fi
 }
 

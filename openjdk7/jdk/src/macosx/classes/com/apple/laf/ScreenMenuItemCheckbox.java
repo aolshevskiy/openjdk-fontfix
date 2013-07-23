@@ -117,9 +117,6 @@ final class ScreenMenuItemCheckbox extends CheckboxMenuItem implements ActionLis
 
     @Override
     public void setAccelerator(final KeyStroke ks) {
-        // We call CMenuItem.setLabel(..,..,..) directly and does not initialize
-        // shortcut property. So shortcut property should not be used from the
-        // peers code directly or indirectly.
         ScreenMenuItem.syncLabelAndKS(this, fMenuItem.getText(), ks);
     }
 

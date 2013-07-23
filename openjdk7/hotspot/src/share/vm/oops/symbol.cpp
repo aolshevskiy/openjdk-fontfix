@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,12 +24,17 @@
 
 
 #include "precompiled.hpp"
-#include "oops/oop.inline.hpp"
+#include "classfile/altHashing.hpp"
+#include "classfile/classLoaderData.hpp"
 #include "oops/symbol.hpp"
+#include "runtime/atomic.inline.hpp"
 #include "runtime/os.hpp"
 #include "memory/allocation.inline.hpp"
+#include "memory/resourceArea.hpp"
 
-Symbol::Symbol(const u1* name, int length, int refcount) : _refcount(refcount), _length(length) {
+Symbol::Symbol(const u1* name, int length, int refcount) {
+  _refcount = refcount;
+  _length = length;
   _identity_hash = os::random();
   for (int i = 0; i < _length; i++) {
     byte_at_put(i, name[i]);
@@ -37,17 +42,28 @@ Symbol::Symbol(const u1* name, int length, int refcount) : _refcount(refcount), 
 }
 
 void* Symbol::operator new(size_t sz, int len, TRAPS) {
-  int alloc_size = object_size(len)*HeapWordSize;
+  int alloc_size = size(len)*HeapWordSize;
   address res = (address) AllocateHeap(alloc_size, mtSymbol);
-  DEBUG_ONLY(set_allocation_type(res, ResourceObj::C_HEAP);)
   return res;
 }
 
 void* Symbol::operator new(size_t sz, int len, Arena* arena, TRAPS) {
-  int alloc_size = object_size(len)*HeapWordSize;
+  int alloc_size = size(len)*HeapWordSize;
   address res = (address)arena->Amalloc(alloc_size);
-  DEBUG_ONLY(set_allocation_type(res, ResourceObj::ARENA);)
   return res;
+}
+
+void* Symbol::operator new(size_t sz, int len, ClassLoaderData* loader_data, TRAPS) {
+  address res;
+  int alloc_size = size(len)*HeapWordSize;
+  res = (address) Metaspace::allocate(loader_data, size(len), true,
+                                      MetaspaceObj::SymbolType, CHECK_NULL);
+  return res;
+}
+
+void Symbol::operator delete(void *p) {
+  assert(((Symbol*)p)->refcount() == 0, "should not call this");
+  FreeHeap(p);
 }
 
 // ------------------------------------------------------------------
@@ -139,18 +155,17 @@ char* Symbol::as_C_string_flexible_buffer(Thread* t,
 }
 
 void Symbol::print_symbol_on(outputStream* st) const {
+  ResourceMark rm;
   st = st ? st : tty;
-  int length = UTF8::unicode_length((const char*)bytes(), utf8_length());
-  const char *ptr = (const char *)bytes();
-  jchar value;
-  for (int index = 0; index < length; index++) {
-    ptr = UTF8::next(ptr, &value);
-    if (value >= 32 && value < 127 || value == '\'' || value == '\\') {
-      st->put(value);
-    } else {
-      st->print("\\u%04x", value);
-    }
-  }
+  st->print("%s", as_quoted_ascii());
+}
+
+char* Symbol::as_quoted_ascii() const {
+  const char *ptr = (const char *)&_body[0];
+  int quoted_length = UTF8::quoted_ascii_length(ptr, utf8_length());
+  char* result = NEW_RESOURCE_ARRAY(char, quoted_length + 1);
+  UTF8::as_quoted_ascii(ptr, utf8_length(), result, quoted_length + 1);
+  return result;
 }
 
 jchar* Symbol::as_unicode(int& length) const {
@@ -191,6 +206,34 @@ const char* Symbol::as_klass_external_name() const {
   return str;
 }
 
+// Alternate hashing for unbalanced symbol tables.
+unsigned int Symbol::new_hash(jint seed) {
+  ResourceMark rm;
+  // Use alternate hashing algorithm on this symbol.
+  return AltHashing::murmur3_32(seed, (const jbyte*)as_C_string(), utf8_length());
+}
+
+void Symbol::increment_refcount() {
+  // Only increment the refcount if positive.  If negative either
+  // overflow has occurred or it is a permanent symbol in a read only
+  // shared archive.
+  if (_refcount >= 0) {
+    Atomic::inc(&_refcount);
+    NOT_PRODUCT(Atomic::inc(&_total_count);)
+  }
+}
+
+void Symbol::decrement_refcount() {
+  if (_refcount >= 0) {
+    Atomic::dec(&_refcount);
+#ifdef ASSERT
+    if (_refcount < 0) {
+      print();
+      assert(false, "reference count underflow for symbol");
+    }
+#endif
+  }
+}
 
 void Symbol::print_on(outputStream* st) const {
   if (this == NULL) {

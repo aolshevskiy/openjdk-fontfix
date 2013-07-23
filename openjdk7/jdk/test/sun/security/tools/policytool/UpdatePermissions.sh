@@ -22,7 +22,8 @@
 #
 
 # @test
-# @bug 4218206 7083664
+# @bug 4218206
+# @bug 8015276
 # @summary missing or invalid permission target names in policy tool
 #
 # @run applet/manual=done UpdatePermissions.html
@@ -55,7 +56,6 @@ case "$OS" in
     NULL=/dev/null
     PS=";"
     FS="/"
-    CP="cp -f"
     ;;
   Windows* )
     NULL=NUL

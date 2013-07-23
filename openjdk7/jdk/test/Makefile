@@ -1,5 +1,5 @@
 #
-# Copyright (c) 1995, 2012, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 1995, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -128,7 +128,6 @@ OS_ARCH:=$(patsubst X64,$(OS_ARCH_X64_NAME),$(OS_ARCH))
 OS_ARCH:=$(patsubst AMD64,$(OS_ARCH_X64_NAME),$(OS_ARCH))
 OS_ARCH:=$(patsubst amd64,$(OS_ARCH_X64_NAME),$(OS_ARCH))
 OS_ARCH:=$(patsubst x86_64,$(OS_ARCH_X64_NAME),$(OS_ARCH))
-OS_ARCH:=$(patsubst 86_64,$(OS_ARCH_X64_NAME),$(OS_ARCH))
 OS_ARCH:=$(patsubst 8664,$(OS_ARCH_X64_NAME),$(OS_ARCH))
 OS_ARCH:=$(patsubst EM64T,$(OS_ARCH_X64_NAME),$(OS_ARCH))
 OS_ARCH:=$(patsubst em64t,$(OS_ARCH_X64_NAME),$(OS_ARCH))
@@ -332,19 +331,19 @@ BUNDLE_UP_AND_EXIT = \
 
 ################################################################
 
-# Default make rule (runs jtreg_tests)
-all: jtreg_tests
+# Default make rule (runs default jdk tests)
+all: jdk_default
 	@$(ECHO) "Testing completed successfully"
 
 # Prep for output
-prep: clean
+prep:
 	@$(MKDIR) -p $(ABS_TEST_OUTPUT_DIR)
 	@$(MKDIR) -p `$(DIRNAME) $(ARCHIVE_BUNDLE)`
 
 # Cleanup
 clean:
-	$(RM) -r $(ABS_TEST_OUTPUT_DIR)
-	$(RM) $(ARCHIVE_BUNDLE)
+	@$(RM) -r $(ABS_TEST_OUTPUT_DIR)
+	@$(RM) $(ARCHIVE_BUNDLE)
 
 ################################################################
 
@@ -402,7 +401,7 @@ $(EXCLUDELIST): $(PROBLEM_LISTS) $(TEST_DEPENDENCIES)
           ($(ECHO) "#") ;\
         ) | $(SED) -e 's@^[\ ]*@@' \
           | $(EGREP) -v '^#' > $@.temp1
-	for tdir in $(TESTDIRS) SOLARIS_10_SH_BUG_NO_EMPTY_FORS ; do \
+	@for tdir in $(TESTDIRS) SOLARIS_10_SH_BUG_NO_EMPTY_FORS ; do \
           ( ( $(CAT) $@.temp1 | $(EGREP) "^$${tdir}" ) ; $(ECHO) "#" ) >> $@.temp2 ; \
         done
 	@$(ECHO) "# at least one line" >> $@.temp2
@@ -432,25 +431,28 @@ endef
 # ------------------------------------------------------------------
 
 # Batches of tests (somewhat arbitrary assigments to jdk_* targets)
+# NOTE: These *do not* run the same tests as make/jprt.properties
+JDK_DEFAULT_TARGETS =
 JDK_ALL_TARGETS =
 
 # Stable othervm testruns (minus items from PROBLEM_LIST)
-#   Using samevm has problems, and doesn't help performance as much as others.
+#   Using agentvm has problems, and doesn't help performance as much as others.
 JDK_ALL_TARGETS += jdk_awt
 jdk_awt: $(call TestDirs, com/sun/awt java/awt sun/awt \
          javax/imageio javax/print sun/pisces)
 	$(call RunOthervmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable othervm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_beans1
+JDK_DEFAULT_TARGETS += jdk_beans1
 jdk_beans1: $(call TestDirs, \
             java/beans/beancontext java/beans/PropertyChangeSupport \
             java/beans/Introspector java/beans/Performance \
             java/beans/VetoableChangeSupport java/beans/Statement)
-	$(call RunAgentvmBatch)
+	$(call RunOthervmBatch)
 
 # Stable othervm testruns (minus items from PROBLEM_LIST)
-#   Using samevm has serious problems with these tests
+#   Using agentvm has serious problems with these tests
 JDK_ALL_TARGETS += jdk_beans2
 jdk_beans2: $(call TestDirs, \
             java/beans/Beans java/beans/EventHandler java/beans/XMLDecoder \
@@ -469,22 +471,14 @@ jdk_beans: jdk_beans1 jdk_beans2 jdk_beans3
 
 # Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_io
+JDK_DEFAULT_TARGETS += jdk_io
 jdk_io: $(call TestDirs, java/io)
 	$(call RunAgentvmBatch)
 
-# Stable othervm testruns (minus items from PROBLEM_LIST)
-#   Using agentvm has serious problems with these tests
-ifdef OPENJDK
-jdk_jfr:
-else
-JDK_ALL_TARGETS += jdk_jfr
-jdk_jfr: $(call TestDirs, com/oracle/jfr)
-	$(call RunOthervmBatch)
-endif
-
 # Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_lang
-jdk_lang: $(call TestDirs, java/lang sun/invoke sun/misc vm)
+JDK_DEFAULT_TARGETS += jdk_lang
+jdk_lang: $(call TestDirs, java/lang sun/invoke sun/misc sun/reflect vm)
 	$(call RunAgentvmBatch)
 
 # Stable othervm testruns (minus items from PROBLEM_LIST)
@@ -499,66 +493,74 @@ JDK_ALL_TARGETS += jdk_management
 jdk_management: $(call TestDirs, com/sun/management sun/management)
 	$(call RunOthervmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_math
+JDK_DEFAULT_TARGETS += jdk_math
 jdk_math: $(call TestDirs, java/math)
 	$(call RunAgentvmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
-JDK_ALL_TARGETS += jdk_other
-jdk_other: $(call TestDirs, \
-          demo/jvmti demo/zipfs \
-          javax/naming com/sun/jndi \
-          javax/script \
-          java/sql javax/sql \
-          javax/smartcardio \
-          javax/xml/soap \
-          com/sun/xml \
-          javax/xml/ws com/sun/internal/ws \
-          com/sun/org/apache/xerces \
-          com/sun/corba \
-          com/sun/tracing \
-          sun/usagetracker) 
+# Stable agentvm testruns (TestNG)
+JDK_DEFAULT_TARGETS += jdk_time
+jdk_time: $(call TestDirs, java/time)
 	$(call RunAgentvmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
+JDK_ALL_TARGETS += jdk_other
+JDK_DEFAULT_TARGETS += jdk_other
+jdk_other: $(call TestDirs, \
+          demo/jvmti demo/zipfs sample \
+          javax/naming com/sun/jndi \
+          javax/script \
+	  java/sql javax/sql \
+          javax/smartcardio \
+          javax/xml/jaxp \
+	  javax/xml/soap \
+	  javax/xml/ws com/sun/internal/ws com/sun/org/glassfish \
+	  jdk/asm \
+	  jdk/lambda \
+	  com/sun/org/apache/xerces \
+          com/sun/corba \
+	  com/sun/tracing \
+	  sun/usagetracker)
+	$(call RunAgentvmBatch)
+
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_net
+JDK_DEFAULT_TARGETS += jdk_net
 jdk_net: $(call TestDirs, com/sun/net java/net sun/net com/oracle/net)
 	$(call RunAgentvmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 jdk_nio: $(call TestDirs, java/nio sun/nio com/oracle/nio)
 	$(call SharedLibraryPermissions,java/nio/channels)
 	$(call RunAgentvmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 jdk_sctp: $(call TestDirs, com/sun/nio/sctp)
 	$(call RunAgentvmBatch)
 
 # Stable othervm testruns (minus items from PROBLEM_LIST)
-#   Using samevm has serious problems with these tests
+#   Using agentvm has serious problems with these tests
 JDK_ALL_TARGETS += jdk_rmi
 jdk_rmi: $(call TestDirs, java/rmi sun/rmi javax/rmi/ssl)
 	$(call RunOthervmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_security1
+JDK_DEFAULT_TARGETS += jdk_security1
 jdk_security1: $(call TestDirs, java/security)
 	$(call RunAgentvmBatch)
 
-# Stable othervm testruns (minus items from PROBLEM_LIST)
-#   Using samevm has serious problems with these tests
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_security2
-jdk_security2: $(call TestDirs, javax/crypto com/sun/crypto)
+jdk_security2: $(call TestDirs, javax/crypto javax/xml/crypto com/sun/crypto)
 	$(call RunAgentvmBatch)
 
-# Stable othervm testruns (minus items from PROBLEM_LIST)
-#   Using samevm has serious problems with these tests
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_security3
-jdk_security3: $(call TestDirs, com/sun/security lib/security \
-		javax/security sun/security \
-		com/sun/org/apache/xml/internal/security \
-		com/oracle/security)
+jdk_security3: $(call TestDirs, com/sun/security lib/security javax/security \
+        sun/security com/sun/org/apache/xml/internal/security \
+        com/oracle/security)
 	$(call SharedLibraryPermissions,sun/security)
 	$(call RunAgentvmBatch)
 
@@ -566,52 +568,73 @@ jdk_security3: $(call TestDirs, com/sun/security lib/security \
 jdk_security: jdk_security1 jdk_security2 jdk_security3
 	@$(SummaryInfo)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_sound
 jdk_sound: $(call TestDirs, javax/sound)
 	$(call RunAgentvmBatch)
 
 # Stable othervm testruns (minus items from PROBLEM_LIST)
-#   Using samevm has problems, and doesn't help performance as much as others.
+#   Using agentvm has problems, and doesn't help performance as much as others.
 JDK_ALL_TARGETS += jdk_swing
 jdk_swing: $(call TestDirs, javax/swing sun/java2d \
            demo/jfc com/sun/java/swing)
 	$(call RunOthervmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_text
+JDK_DEFAULT_TARGETS += jdk_text
 jdk_text: $(call TestDirs, java/text sun/text)
 	$(call RunAgentvmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_jdi
 jdk_jdi: $(call TestDirs, com/sun/jdi)
 	$(call RunAgentvmBatch)
 
 # Stable othervm testruns (minus items from PROBLEM_LIST)
-#   Using samevm has serious problems with these tests
+#   Using agentvm has serious problems with these tests
 JDK_ALL_TARGETS += jdk_tools
-jdk_tools: $(call TestDirs, \
-		com/sun/tools sun/jvmstat sun/tools tools \
-		com/sun/tracing)
+jdk_tools: $(call TestDirs, com/sun/tools sun/jvmstat sun/tools tools)
 	$(call SharedLibraryPermissions,tools/launcher)
 	$(call RunAgentvmBatch)
 
-# Stable samevm testruns (minus items from PROBLEM_LIST)
+# Stable othervm testruns (minus items from PROBLEM_LIST)
+#   Using agentvm has serious problems with these tests
+ifdef OPENJDK
+jdk_jfr:
+else
+JDK_ALL_TARGETS += jdk_jfr
+jdk_jfr: $(call TestDirs, com/oracle/jfr)
+	$(call RunOthervmBatch)
+endif
+
+# Stable agentvm testruns (minus items from PROBLEM_LIST)
 JDK_ALL_TARGETS += jdk_util
+JDK_DEFAULT_TARGETS += jdk_util
 jdk_util: $(call TestDirs, java/util sun/util)
 	$(call RunAgentvmBatch)
 
 # ------------------------------------------------------------------
 
+# Run default tests
+# note that this *does not* have the same meaning as jprt.properties :: jprt.make.rule.default.test.targets
+jdk_default: $(JDK_DEFAULT_TARGETS)
+	@$(SummaryInfo)
+
+# Run core tests
+# please keep this in sync with jdk/make/jprt.properties :: jprt.make.rule.core.test.targets
+jdk_core: jdk_lang jdk_math jdk_util jdk_io jdk_net jdk_nio \
+        jdk_security1 jdk_security2 jdk_security3 jdk_rmi \
+        jdk_management jdk_jmx jdk_text jdk_tools jdk_jfr jdk_other
+	@$(SummaryInfo)
+
 # Run all tests
-FILTER_OUT_LIST=jdk_awt jdk_rmi jdk_swing
-JDK_ALL_STABLE_TARGETS := $(filter-out $(FILTER_OUT_LIST), $(JDK_ALL_TARGETS))
-jdk_all: $(JDK_ALL_STABLE_TARGETS)
+# note that this *does not* have the same meaning as jprt.properties :: jprt.make.rule.all.test.targets
+jdk_all: $(JDK_ALL_TARGETS)
 	@$(SummaryInfo)
 
 # These are all phony targets
-PHONY_LIST += $(JDK_ALL_TARGETS)
+PHONY_LIST += $(JDK_ALL_TARGETS) jdk_default jdk_core jdk_all
 
 # ------------------------------------------------------------------
 
@@ -634,9 +657,12 @@ JTREG_BASIC_OPTIONS += $(JTREG_IGNORE_OPTION)
 # Multiple by 4 the timeout numbers
 JTREG_TIMEOUT_OPTION =  -timeoutFactor:4
 JTREG_BASIC_OPTIONS += $(JTREG_TIMEOUT_OPTION)
-# Boost the max memory for jtreg to avoid gc thrashing
+# Set the max memory for jtreg control vm
 JTREG_MEMORY_OPTION = -J-Xmx512m
 JTREG_BASIC_OPTIONS += $(JTREG_MEMORY_OPTION)
+# Set the max memory for jtreg target test vms
+JTREG_TESTVM_MEMORY_OPTION = -vmoption:-Xmx512m
+JTREG_TEST_OPTIONS += $(JTREG_TESTVM_MEMORY_OPTION)
 
 # Make sure jtreg exists
 $(JTREG): $(JT_HOME)
@@ -683,202 +709,7 @@ PHONY_LIST += jtreg_tests shared_library_permissions
 
 ################################################################
 
-# packtest
-
-# Expect JPRT to set JPRT_PACKTEST_HOME.
-PACKTEST_HOME = /net/jprt-web.sfbay.sun.com/jprt/allproducts/packtest
-ifdef JPRT_PACKTEST_HOME
-  PACKTEST_HOME = $(JPRT_PACKTEST_HOME)
-endif
-
-packtest: prep $(PACKTEST_HOME)/ptest $(PRODUCT_HOME)
-	( $(CD) $(PACKTEST_HOME) &&            \
-	    $(PACKTEST_HOME)/ptest             \
-		 -t "$(PRODUCT_HOME)"          \
-	         $(PACKTEST_STRESS_OPTION)     \
-		 $(EXTRA_PACKTEST_OPTIONS)     \
-		 -W $(ABS_TEST_OUTPUT_DIR)     \
-                 $(JAVA_ARGS:%=-J %)           \
-                 $(JAVA_VM_ARGS:%=-J %)        \
-	 ) ; $(BUNDLE_UP_AND_EXIT)
-
-packtest_stress: PACKTEST_STRESS_OPTION=-s
-packtest_stress: packtest
-
-PHONY_LIST += packtest packtest_stress
-
-################################################################
-
-# perftest to collect statistics
-
-# Expect JPRT to set JPRT_PACKTEST_HOME.
-PERFTEST_HOME = $(TEST_ROOT)/perf
-ifdef JPRT_PERFTEST_HOME
-  PERFTEST_HOME = $(JPRT_PERFTEST_HOME)
-endif
-
-perftest: ( $(PERFTEST_HOME)/perftest          \
-                 -t $(shell $(GETMIXEDPATH) "$(PRODUCT_HOME)")               \
-                 -w $(shell $(GETMIXEDPATH) "$(ABS_TEST_OUTPUT_DIR)") \
-                 -h $(PERFTEST_HOME) \
-	 ) ; $(BUNDLE_UP_AND_EXIT)
-
-
-PHONY_LIST += perftest
-
-################################################################
-
-# vmsqe tests
-
-# Expect JPRT to set JPRT_VMSQE_HOME.
-VMSQE_HOME = $(SLASH_JAVA)/sqe/comp/vm/testbase/sqe/vm/current/build/latest/vm
-ifdef JPRT_VMSQE_HOME
-  VMSQE_HOME = $(JPRT_VMSQE_HOME)
-endif
-
-# Expect JPRT to set JPRT_RUNVMSQE_HOME.
-RUNVMSQE_HOME = /net/jprt-web.sfbay.sun.com/jprt/allproducts/runvmsqe
-ifdef JPRT_RUNVMSQE_HOME
-  RUNVMSQE_HOME = $(JPRT_RUNVMSQE_HOME)
-endif
-
-# Expect JPRT to set JPRT_TONGA3_HOME.
-TONGA3_HOME = $(SLASH_JAVA)/sqe/tools/gtee/harness/tonga
-ifdef JPRT_TONGA3_HOME
-  TONGA3_HOME = $(JPRT_TONGA3_HOME)
-endif
-
-RUNVMSQE_BIN = $(RUNVMSQE_HOME)/bin/runvmsqe
-
-vmsqe_tests: prep $(VMSQE_HOME)/vm $(TONGA3_HOME) $(RUNVMSQE_BIN) $(PRODUCT_HOME)
-	$(RM) -r $(ABS_TEST_OUTPUT_DIR)/vmsqe
-	( $(CD) $(ABS_TEST_OUTPUT_DIR) &&          \
-	    $(RUNVMSQE_BIN)                        \
-		 -jdk "$(PRODUCT_HOME)"            \
-		 -o "$(ABS_TEST_OUTPUT_DIR)/vmsqe" \
-		 -testbase "$(VMSQE_HOME)/vm"      \
-		 -tonga "$(TONGA3_HOME)"           \
-		 -tongajdk "$(ALT_BOOTDIR)"        \
-                 $(JAVA_ARGS)                      \
-                 $(JAVA_VM_ARGS)                   \
-	         $(RUNVMSQE_TEST_OPTION)           \
-		 $(EXTRA_RUNVMSQE_OPTIONS)         \
-	 ) ; $(BUNDLE_UP_AND_EXIT)
-
-vmsqe_jdwp: RUNVMSQE_TEST_OPTION=-jdwp
-vmsqe_jdwp: vmsqe_tests
-
-vmsqe_jdi: RUNVMSQE_TEST_OPTION=-jdi
-vmsqe_jdi: vmsqe_tests
-
-vmsqe_jdb: RUNVMSQE_TEST_OPTION=-jdb
-vmsqe_jdb: vmsqe_tests
-
-vmsqe_quick-jdi: RUNVMSQE_TEST_OPTION=-quick-jdi
-vmsqe_quick-jdi: vmsqe_tests
-
-vmsqe_sajdi: RUNVMSQE_TEST_OPTION=-sajdi
-vmsqe_sajdi: vmsqe_tests
-
-vmsqe_jvmti: RUNVMSQE_TEST_OPTION=-jvmti
-vmsqe_jvmti: vmsqe_tests
-
-vmsqe_hprof: RUNVMSQE_TEST_OPTION=-hprof
-vmsqe_hprof: vmsqe_tests
-
-vmsqe_monitoring: RUNVMSQE_TEST_OPTION=-monitoring
-vmsqe_monitoring: vmsqe_tests
-
-PHONY_LIST += vmsqe_jdwp vmsqe_jdi vmsqe_jdb vmsqe_quick-jdi vmsqe_sajdi \
-              vmsqe_jvmti vmsqe_hprof vmsqe_monitoring vmsqe_tests
-
-################################################################
-
-# jck tests
-
-# Default is to use jck 7 from /java/re
-JCK7_DEFAULT_HOME = $(SLASH_JAVA)/re/jck/7/promoted/latest/binaries
-
-# Expect JPRT to set JPRT_JCK7COMPILER_HOME.
-JCK7COMPILER_HOME = $(JCK7_DEFAULT_HOME)/JCK-compiler-7
-ifdef JPRT_JCK7COMPILER_HOME
-  JCK7COMPILER_HOME = $(JPRT_JCK7COMPILER_HOME)/JCK-compiler-7
-endif
-
-# Expect JPRT to set JPRT_JCK7RUNTIME_HOME.
-JCK7RUNTIME_HOME = $(JCK7_DEFAULT_HOME)/JCK-runtime-7
-ifdef JPRT_JCK7RUNTIME_HOME
-  JCK7RUNTIME_HOME = $(JPRT_JCK7RUNTIME_HOME)/JCK-runtime-7
-endif
-
-# Expect JPRT to set JPRT_JCK7DEVTOOLS_HOME.
-JCK7DEVTOOLS_HOME = $(JCK7_DEFAULT_HOME)/JCK-devtools-7
-ifdef JPRT_JCK7DEVTOOLS_HOME
-  JCK7DEVTOOLS_HOME = $(JPRT_JCK7DEVTOOLS_HOME)/JCK-devtools-7
-endif
-
-# The jtjck.jar utility to use to run the tests
-JTJCK_JAR = $(JCK_HOME)/lib/jtjck.jar
-JTJCK_JAVA_ARGS =  -XX:MaxPermSize=256m -Xmx512m
-JTJCK_OPTIONS = -headless -v
-
-# Default tests to run
-ifndef JCK_COMPILER_TESTS
-  JCK_COMPILER_TESTS =
-endif
-ifndef JCK_RUNTIME_TESTS
-  JCK_RUNTIME_TESTS  =
-endif
-ifndef JCK_DEVTOOLS_TESTS
-  JCK_DEVTOOLS_TESTS =
-endif
-
-# Generic rule used to run jck tests
-_generic_jck_tests: prep $(PRODUCT_HOME) $(EXCLUDELIST)
-	@$(EXPAND) $(EXCLUDELIST) \
-            | $(CUT) -d' ' -f1 \
-            | $(SED) -e 's@^@Excluding: @'
-	( $(CD) $(ABS_TEST_OUTPUT_DIR) &&          			   \
-	  $(PRODUCT_HOME)/bin/java $(JTJCK_JAVA_ARGS) 			   \
-	    -jar "$(JTJCK_JAR)" 					   \
-	    $(JTJCK_OPTIONS) 						   \
-            -r:$(shell $(GETMIXEDPATH) "$(ABS_TEST_OUTPUT_DIR)")/JTreport  \
-            -w:$(shell $(GETMIXEDPATH) "$(ABS_TEST_OUTPUT_DIR)")/JTwork    \
-            -jdk:$(shell $(GETMIXEDPATH) "$(PRODUCT_HOME)")                \
-	    $(TESTDIRS) 						   \
-        ) ; $(BUNDLE_UP_AND_EXIT)
-
-# JCK7 compiler tests
-jck7compiler:
-	$(MAKE) UNIQUE_DIR=$@ \
-	        JCK_HOME=$(JCK7COMPILER_HOME) \
-	        TESTDIRS="$(JCK_COMPILER_TESTS)" \
-                _generic_jck_tests
-
-# JCK7 runtime tests
-jck7runtime:
-	$(MAKE) UNIQUE_DIR=$@ \
-	        JCK_HOME=$(JCK7RUNTIME_HOME) \
-	        TESTDIRS="$(JCK_RUNTIME_TESTS)" \
-                _generic_jck_tests
-
-# JCK7 devtools tests
-jck7devtools:
-	$(MAKE) UNIQUE_DIR=$@ \
-	        JCK_HOME=$(JCK7DEVTOOLS_HOME) \
-                TESTDIRS="$(JCK_DEVTOOLS_TESTS)" \
-                _generic_jck_tests
-
-# Run all 3 sets of JCK7 tests
-jck_all: jck7runtime jck7devtools jck7compiler
-
-PHONY_LIST += jck_all _generic_jck_tests \
-	      jck7compiler jck7runtime jck7devtools
-
-################################################################
-
 # Phony targets (e.g. these are not filenames)
 .PHONY: all clean prep $(PHONY_LIST)
 
 ################################################################
-

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -56,12 +56,8 @@ TraceGeneratedNames =     \
 ifeq ($(HAS_ALT_SRC), true)
 TraceGeneratedNames +=  \
 	traceRequestables.hpp \
-    traceEventControl.hpp
-
-ifeq ($(INCLUDE_TRACE), 1)
-TraceGeneratedNames += traceProducer.cpp
-endif
-
+    traceEventControl.hpp \
+    traceProducer.cpp
 endif
 
 TraceGeneratedFiles = $(TraceGeneratedNames:%=$(TraceOutDir)/%)

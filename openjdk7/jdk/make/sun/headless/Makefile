@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2000, 2011, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -29,15 +29,8 @@ NO_ROBOT = true
 MOTIF_VERSION = none
 MOTIF_VERSION_STRING=none
 
-ifeq ($(PLATFORM), macosx)
-LIB_LOCATION = $(LIBDIR)/headless
-else
-LIB_LOCATION = $(LIBDIR)/$(LIBARCH)/headless
-endif
-
 PACKAGE = sun.awt
-LIBRARY = mawt
-LIBRARY_OUTPUT = headless
+LIBRARY = awt_headless
 PRODUCT = sun
 
 include $(BUILDDIR)/common/Defs.gmk

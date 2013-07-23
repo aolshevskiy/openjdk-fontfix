@@ -77,7 +77,6 @@ FDDLIBM_SUFFIX = a
 SCRIPT_SUFFIX =
 # CC compiler object code output directive flag value
 CC_OBJECT_OUTPUT_FLAG = -o #trailing blank required!
-CC_PROGRAM_OUTPUT_FLAG = -o #trailing blank required!
 
 # The Full Debug Symbols (FDS) default for VARIANT == OPT builds is
 # enabled with debug info files ZIP'ed to save space. For VARIANT !=

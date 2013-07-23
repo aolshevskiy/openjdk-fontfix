@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2011, Oracle and/or its affiliates. All rights reserved.
  */
 
 /* Copyright  (c) 2002 Graz University of Technology. All rights reserved.
@@ -98,7 +98,7 @@ JNIEXPORT jlong JNICALL Java_sun_security_pkcs11_wrapper_PKCS11_C_1OpenSession
     if (jNotify != NULL) {
         notifyEncapsulation = (NotifyEncapsulation *) malloc(sizeof(NotifyEncapsulation));
         if (notifyEncapsulation == NULL) {
-            JNU_ThrowOutOfMemoryError(env, 0);
+            throwOutOfMemoryError(env, 0);
             return 0L;
         }
         notifyEncapsulation->jApplicationData = (jApplication != NULL)
@@ -256,7 +256,7 @@ JNIEXPORT jobject JNICALL Java_sun_security_pkcs11_wrapper_PKCS11_C_1GetSessionI
 {
     CK_SESSION_HANDLE ckSessionHandle;
     CK_SESSION_INFO ckSessionInfo;
-    jobject jSessionInfo;
+    jobject jSessionInfo=NULL;
     CK_RV rv;
 
     CK_FUNCTION_LIST_PTR ckpFunctions = getFunctionList(env, obj);
@@ -301,7 +301,7 @@ JNIEXPORT jbyteArray JNICALL Java_sun_security_pkcs11_wrapper_PKCS11_C_1GetOpera
 
     ckpState = (CK_BYTE_PTR) malloc(ckStateLength);
     if (ckpState == NULL) {
-        JNU_ThrowOutOfMemoryError(env, 0);
+        throwOutOfMemoryError(env, 0);
         return NULL;
     }
 
@@ -435,7 +435,7 @@ void putNotifyEntry(JNIEnv *env, CK_SESSION_HANDLE hSession, NotifyEncapsulation
 
     newNode = (NotifyListNode *) malloc(sizeof(NotifyListNode));
     if (newNode == NULL) {
-        JNU_ThrowOutOfMemoryError(env, 0);
+        throwOutOfMemoryError(env, 0);
         return;
     }
     newNode->hSession = hSession;
@@ -558,9 +558,8 @@ CK_RV notifyCallback(
 )
 {
     NotifyEncapsulation *notifyEncapsulation;
-    JavaVM *jvm;
+    extern JavaVM *jvm;
     JNIEnv *env;
-    jsize actualNumberVMs;
     jint returnValue;
     jlong jSessionHandle;
     jlong jEvent;
@@ -577,8 +576,7 @@ CK_RV notifyCallback(
     notifyEncapsulation = (NotifyEncapsulation *) pApplication;
 
     /* Get the currently running Java VM */
-    returnValue = JNI_GetCreatedJavaVMs(&jvm, (jsize) 1, &actualNumberVMs);
-    if ((returnValue != 0) || (actualNumberVMs <= 0)) { return rv ; } /* there is no VM running */
+    if (jvm == NULL) { return rv ; } /* there is no VM running */
 
     /* Determine, if current thread is already attached */
     returnValue = (*jvm)->GetEnv(jvm, (void **) &env, JNI_VERSION_1_2);

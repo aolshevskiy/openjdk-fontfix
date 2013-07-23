@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 package com.sun.xml.internal.ws.api;
 
 import com.sun.xml.internal.bind.util.Which;
+import com.sun.xml.internal.ws.api.message.saaj.SAAJFactory;
 import com.sun.xml.internal.ws.encoding.soap.SOAP12Constants;
 
 import javax.xml.namespace.QName;
@@ -34,6 +35,10 @@ import javax.xml.soap.SOAPConstants;
 import javax.xml.soap.SOAPException;
 import javax.xml.soap.SOAPFactory;
 import javax.xml.ws.soap.SOAPBinding;
+
+import com.oracle.webservices.internal.api.EnvelopeStyle;
+import com.oracle.webservices.internal.api.EnvelopeStyleFeature;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -114,13 +119,17 @@ public enum SOAPVersion {
 
     /**
      * SAAJ {@link MessageFactory} for this SOAP version.
+     * @deprecated
      */
     public final MessageFactory saajMessageFactory;
 
     /**
      * SAAJ {@link SOAPFactory} for this SOAP version.
+     * @deprecated
      */
     public final SOAPFactory saajSoapFactory;
+
+    private final String saajFactoryString;
 
     /**
      * If the actor/role attribute is absent, this SOAP version assumes this value.
@@ -161,6 +170,7 @@ public enum SOAPVersion {
         this.implicitRole = implicitRole;
         this.implicitRoleSet = Collections.singleton(implicitRole);
         this.roleAttributeName = roleAttributeName;
+        this.saajFactoryString = saajFactoryString;
         try {
             saajMessageFactory = MessageFactory.newInstance(saajFactoryString);
             saajSoapFactory = SOAPFactory.newInstance(saajFactoryString);
@@ -178,6 +188,31 @@ public enum SOAPVersion {
         this.faultCodeServer = new QName(nsUri,faultCodeServerLocalName);
     }
 
+    public SOAPFactory getSOAPFactory() {
+        try {
+                return SAAJFactory.getSOAPFactory(saajFactoryString);
+        } catch (SOAPException e) {
+            throw new Error(e);
+        } catch (NoSuchMethodError e) {
+            // SAAJ 1.3 is not in the classpath
+            LinkageError x = new LinkageError("You are loading old SAAJ from "+ Which.which(MessageFactory.class));
+            x.initCause(e);
+            throw x;
+        }
+    }
+
+    public MessageFactory getMessageFactory() {
+        try {
+                return SAAJFactory.getMessageFactory(saajFactoryString);
+        } catch (SOAPException e) {
+            throw new Error(e);
+        } catch (NoSuchMethodError e) {
+            // SAAJ 1.3 is not in the classpath
+            LinkageError x = new LinkageError("You are loading old SAAJ from "+ Which.which(MessageFactory.class));
+            x.initCause(e);
+            throw x;
+        }
+    }
 
     public String toString() {
         return httpBindingId;
@@ -219,5 +254,26 @@ public enum SOAPVersion {
             return SOAP_12;
         else
             return SOAP_11;
+    }
+
+    public static SOAPVersion from(EnvelopeStyleFeature f) {
+        EnvelopeStyle.Style[] style = f.getStyles();
+        if (style.length != 1) throw new IllegalArgumentException ("The EnvelopingFeature must has exactly one Enveloping.Style");
+        return from(style[0]);
+    }
+
+    public static SOAPVersion from(EnvelopeStyle.Style style) {
+        switch (style) {
+        case SOAP11: return SOAP_11;
+        case SOAP12: return SOAP_12;
+        case XML: //ERROR??
+        default: return SOAP_11;
+        }
+    }
+
+    public EnvelopeStyleFeature toFeature() {
+        return SOAP_11.equals(this) ?
+            new EnvelopeStyleFeature(new EnvelopeStyle.Style[]{EnvelopeStyle.Style.SOAP11}) :
+            new EnvelopeStyleFeature(new EnvelopeStyle.Style[]{EnvelopeStyle.Style.SOAP12});
     }
 }

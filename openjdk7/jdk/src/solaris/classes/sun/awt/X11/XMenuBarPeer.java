@@ -401,7 +401,7 @@ public class XMenuBarPeer extends XBaseMenuWindow implements MenuBarPeer {
      * Overriden XWindow painting & printing
      *
      ************************************************/
-    public void paint(Graphics g) {
+    public void paintPeer(Graphics g) {
         resetColors();
         /* Calculate menubar dimension. */
         int width = getWidth();
@@ -519,7 +519,9 @@ public class XMenuBarPeer extends XBaseMenuWindow implements MenuBarPeer {
      */
     public void handleKeyPress(XEvent xev) {
         XKeyEvent xkey = xev.get_xkey();
-        if (log.isLoggable(PlatformLogger.FINE)) log.fine(xkey.toString());
+        if (log.isLoggable(PlatformLogger.Level.FINE)) {
+            log.fine(xkey.toString());
+        }
         if (isEventDisabled(xev)) {
             return;
         }

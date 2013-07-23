@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,7 +51,7 @@ public class MessageDispatch extends DispatchImpl<Message> {
     }
 
     public MessageDispatch(WSPortInfo portInfo, BindingImpl binding, WSEndpointReference epr) {
-            super(portInfo, Mode.MESSAGE, binding, epr);
+            super(portInfo, Mode.MESSAGE, binding, epr, true);
     }
 
     @Override

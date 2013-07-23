@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
  * @bug 6850113
  * @summary Verify the return value of digit() for some digits.
  * @compile -XDignore.symbol.file=true Bug6850113.java
+ * @run main Bug6850113
  */
 
 import sun.text.normalizer.UCharacter;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,26 +25,22 @@
 
 package com.sun.xml.internal.ws.client.sei;
 
+import com.oracle.webservices.internal.api.databinding.JavaCallInfo;
 import com.sun.xml.internal.ws.api.message.Message;
 import com.sun.xml.internal.ws.api.message.Packet;
 import com.sun.xml.internal.ws.client.RequestContext;
 import com.sun.xml.internal.ws.client.ResponseContextReceiver;
 import com.sun.xml.internal.ws.encoding.soap.DeserializationException;
-import com.sun.xml.internal.ws.fault.SOAPFaultBuilder;
 import com.sun.xml.internal.ws.message.jaxb.JAXBMessage;
-import com.sun.xml.internal.ws.model.CheckedExceptionImpl;
 import com.sun.xml.internal.ws.model.JavaMethodImpl;
-import com.sun.xml.internal.ws.model.ParameterImpl;
-import com.sun.xml.internal.ws.model.WrapperParameter;
+import com.sun.xml.internal.ws.resources.DispatchMessages;
 
 import javax.xml.bind.JAXBException;
-import javax.xml.namespace.QName;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.ws.Holder;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import javax.xml.ws.WebServiceException;
+
+import java.lang.reflect.Method;
 
 /**
  * {@link MethodHandler} that handles synchronous method invocations.
@@ -66,12 +62,15 @@ import java.util.Map;
  *
  * @author Kohsuke Kawaguchi
  */
-final class SyncMethodHandler extends SEIMethodHandler {
-    private final ResponseBuilder responseBuilder;
-
-    SyncMethodHandler(SEIStub owner, JavaMethodImpl method) {
-        super(owner, method);
-        responseBuilder = buildResponseBuilder(method, ValueSetterFactory.SYNC);
+final class SyncMethodHandler extends MethodHandler {
+    final boolean isVoid;
+    final boolean isOneway;
+    final JavaMethodImpl javaMethod;
+    SyncMethodHandler(SEIStub owner, JavaMethodImpl jm) {
+        super(owner, jm.getMethod());
+        javaMethod = jm;
+        isVoid = void.class.equals(jm.getMethod().getReturnType());
+        isOneway = jm.getMEP().isOneWay();
     }
 
     Object invoke(Object proxy, Object[] args) throws Throwable {
@@ -88,31 +87,33 @@ final class SyncMethodHandler extends SEIMethodHandler {
      *      handling, which requires a separate copy.
      */
     Object invoke(Object proxy, Object[] args, RequestContext rc, ResponseContextReceiver receiver) throws Throwable {
-        Packet req = new Packet(createRequestMessage(args));
-
-        req.soapAction = soapAction;
-        req.expectReply = !isOneWay;
-        req.getMessage().assertOneWay(isOneWay);
-        req.setWSDLOperation(this.javaMethod.getOperation().getName());
+        JavaCallInfo call = owner.databinding.createJavaCallInfo(method, args);
+        Packet req = (Packet) owner.databinding.serializeRequest(call);
         // process the message
         Packet reply = owner.doProcess(req,rc,receiver);
 
         Message msg = reply.getMessage();
-        if(msg ==null)
-            // no reply. must have been one-way
+        if(msg == null) {
+            if (!isOneway || !isVoid) {
+                throw new WebServiceException(DispatchMessages.INVALID_RESPONSE());
+            }
             return null;
+        }
 
         try {
-            if(msg.isFault()) {
-                SOAPFaultBuilder faultBuilder = SOAPFaultBuilder.create(msg);
-                throw faultBuilder.createException(checkedExceptions);
+            call = owner.databinding.deserializeResponse(reply, call);
+            if (call.getException() != null) {
+                throw call.getException();
             } else {
-                return responseBuilder.readResponse(msg,args);
+                return call.getReturnValue();
             }
         } catch (JAXBException e) {
-            throw new DeserializationException("failed.to.read.response",e);
+            throw new DeserializationException(DispatchMessages.INVALID_RESPONSE_DESERIALIZATION(), e);
         } catch (XMLStreamException e) {
-            throw new DeserializationException("failed.to.read.response",e);
+            throw new DeserializationException(DispatchMessages.INVALID_RESPONSE_DESERIALIZATION(),e);
+        } finally {
+            if (reply.transportBackChannel != null)
+                reply.transportBackChannel.close();
         }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2012, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -91,7 +91,7 @@ class Flag {
         Flag[] flags = new Flag[numFlags];
         int count = getFlags(names, flags, numFlags);
 
-        List<Flag> result = new ArrayList<Flag>();
+        List<Flag> result = new ArrayList<>();
         for (Flag f : flags) {
             if (f != null) {
                 result.add(f);
